@@ -47,12 +47,32 @@ function paginaPanel(rut) {
     </script>`);
 }
 
+// Segunda pantalla de código, para el usuario "conmfa". Existe para que el camino del
+// TOTP tenga cobertura: el sistema real (Filament con MFA) pide el código en una pantalla
+// aparte, y ese salto es justo donde se rompen las sesiones de los actores.
+// El juguete NO valida el código contra un secreto —eso lo prueba el vector del RFC 6238—;
+// solo exige que llegue un código de seis dígitos, que es lo que ejercita el flujo.
+function paginaCodigo() {
+    return marco('Código', `<h1>Verificación en dos pasos</h1>
+    <form method="POST" action="/codigo">
+      <p><input name="code" placeholder="código de 6 dígitos"></p>
+      <p><button type="submit" id="entrar">Entrar</button></p>
+    </form>`);
+}
+
 function paginaDetalle(rut) {
     const p = PERSONAS.find((x) => x.rut === rut);
     if (!p) return null;
     return marco('Detalle', `<h1>${p.nombre}</h1><p>RUT: ${p.rut}</p>
     <p>Estado: <strong id="estado">${p.estado}</strong></p>
     <button id="aprobar">Aprobar</button>`);
+}
+
+/** Lee un cuerpo `application/x-www-form-urlencoded` y lo entrega como objeto. */
+function leerCuerpo(req, seguir) {
+    let crudo = '';
+    req.on('data', (trozo) => { crudo += trozo; });
+    req.on('end', () => seguir(Object.fromEntries(new URLSearchParams(crudo))));
 }
 
 /** Levanta el sistema de juguete. `puerto: 0` toma uno libre. */
@@ -67,8 +87,25 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
 
         if (url.pathname === '/') return html(paginaLogin());
         if (url.pathname === '/login' && req.method === 'POST') {
-            res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=funcionario; Path=/' });
-            return res.end();
+            return leerCuerpo(req, (datos) => {
+                if (datos.usuario === 'conmfa') {           // este actor pasa por el 2º factor
+                    res.writeHead(302, { location: '/codigo' });
+                    return res.end();
+                }
+                res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=funcionario; Path=/' });
+                res.end();
+            });
+        }
+        if (url.pathname === '/codigo' && req.method === 'GET') return html(paginaCodigo());
+        if (url.pathname === '/codigo' && req.method === 'POST') {
+            return leerCuerpo(req, (datos) => {
+                if (!/^\d{6}$/.test(datos.code ?? '')) {
+                    res.writeHead(302, { location: '/codigo' });
+                    return res.end();
+                }
+                res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=profesional; Path=/' });
+                res.end();
+            });
         }
         if (!conSesion) {
             res.writeHead(302, { location: '/' });

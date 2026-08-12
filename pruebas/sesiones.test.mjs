@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -17,6 +17,26 @@ test('genera el TOTP de referencia del RFC 6238', () => {
     // implementación del brief sí da el 287082 exigido por el vector oficial.
     const codigo = totp('GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ', 59);
     assert.equal(codigo, '287082');
+});
+
+test('entra por la segunda pantalla cuando el sistema pide el código', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]',
+                     enviar: '#entrar', codigo: 'input[name=code]' },
+            // El usuario "conmfa" del juguete manda a una segunda pantalla.
+            actores: { profesional: { email: 'conmfa', password: 'password', totp: 'GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' } },
+        };
+        const sesiones = await prepararSesiones(config, { dirSesiones: dir });
+        const guardado = JSON.parse(readFileSync(sesiones.profesional, 'utf8'));
+        assert.ok(guardado.cookies.some((c) => c.name === 'sesion'),
+            'sin la cookie de sesión, la segunda pantalla no se superó');
+    } finally {
+        await juguete.cerrar();
+    }
 });
 
 test('deja un storageState por actor', async () => {
