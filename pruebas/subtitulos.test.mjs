@@ -25,3 +25,18 @@ test('una hora larga se formatea con las horas correctas', () => {
     const vtt = generarVtt([{ inicioSeg: 3725.5, finSeg: 3727, narrar: 'Cierre.' }]);
     assert.match(vtt, /01:02:05\.500 --> 01:02:07\.000/);
 });
+
+test('los milisegundos acarrean en vez de producir un timestamp inválido', () => {
+    // Redondear la fracción por separado da "00:00:59.1000" (cuatro dígitos), y el
+    // navegador descarta esa cue EN SILENCIO: el subtítulo desaparece sin error.
+    const vtt = generarVtt([
+        { inicioSeg: 0, finSeg: 59.9999, narrar: 'Cruza el minuto.' },
+        { inicioSeg: 3599.9996, finSeg: 3601, narrar: 'Cruza la hora.' },
+    ]);
+    assert.doesNotMatch(vtt, /\.\d{4}/, 'ningún timestamp puede tener cuatro dígitos de ms');
+    assert.match(vtt, /00:00:00\.000 --> 00:01:00\.000/);
+    assert.match(vtt, /01:00:00\.000 --> 01:00:01\.000/);
+
+    const srt = generarSrt([{ inicioSeg: 59.9999, finSeg: 60.5, narrar: 'Cruza.' }]);
+    assert.match(srt, /00:01:00,000 --> 00:01:00,500/);
+});
