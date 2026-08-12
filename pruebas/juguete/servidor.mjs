@@ -21,9 +21,13 @@ function paginaLogin() {
     </form>`);
 }
 
+// El panel filtra EN EL NAVEGADOR, con retardo, imitando a Filament/Livewire: primero
+// pinta la tabla COMPLETA y solo después aplica el filtro. Esa ventana es exactamente el
+// riesgo de privacidad que el motor debe tapar; un juguete que filtrara en el servidor de
+// forma atómica no tendría ese instante peligroso y dejaría al test sin dientes.
 function paginaPanel(rut) {
-    const filas = PERSONAS.filter((p) => !rut || p.rut === rut)
-        .map((p) => `<tr class="fila"><td>${p.rut}</td><td>${p.nombre}</td><td>${p.estado}</td>
+    const filas = PERSONAS
+        .map((p) => `<tr class="fila" data-rut="${p.rut}"><td>${p.rut}</td><td>${p.nombre}</td><td>${p.estado}</td>
         <td><a href="/detalle/${p.rut}" class="ver">Ver</a></td></tr>`).join('');
     return marco('Panel', `<h1>Solicitudes</h1>
     <form method="GET" action="/panel">
@@ -31,7 +35,16 @@ function paginaPanel(rut) {
       <button type="submit" id="buscar">Buscar</button>
     </form>
     <table><thead><tr><th>RUT</th><th>Nombre</th><th>Estado</th><th></th></tr></thead>
-    <tbody>${filas}</tbody></table>`);
+    <tbody>${filas}</tbody></table>
+    <script>
+      // 350 ms de tabla completa a la vista: la ventana que el cubridor debe tapar.
+      const buscado = new URL(location.href).searchParams.get('rut');
+      if (buscado) setTimeout(() => {
+          for (const fila of document.querySelectorAll('tr.fila')) {
+              if (fila.dataset.rut !== buscado) fila.remove();
+          }
+      }, 350);
+    </script>`);
 }
 
 function paginaDetalle(rut) {

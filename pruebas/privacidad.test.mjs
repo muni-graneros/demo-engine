@@ -5,9 +5,22 @@ import { iniciarJuguete } from './juguete/servidor.mjs';
 import { exigirEntornoDeDesarrollo, abrirFiltrado, cubrir } from '../src/privacidad.mjs';
 
 test('aborta si el entorno no es de desarrollo', () => {
-    assert.throws(() => exigirEntornoDeDesarrollo({ APP_ENV: 'production' }), /producción/i);
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo({ APP_ENV: 'local' }));
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo({ APP_ENV: 'production', DEMO_FORZAR: '1' }));
+    // Falla CERRADO: sin APP_ENV, manda el host de baseURL.
+    assert.throws(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', {}), /no es una dirección local/);
+    assert.throws(() => exigirEntornoDeDesarrollo('http://localhost:8031', { APP_ENV: 'production' }), /APP_ENV/);
+
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://localhost:8031', {}));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://127.0.0.1:9000', {}));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://192.168.1.40:8443', {}));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias-graneros.lan', {}));
+
+    // El escape explícito sigue existiendo, pero hay que pedirlo.
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', { DEMO_FORZAR: '1' }));
+});
+
+test('sin APP_ENV y contra un host público, NO graba (falla cerrado)', () => {
+    assert.throws(() => exigirEntornoDeDesarrollo('https://ejemplo.cl', { HOME: '/home/x' }),
+        /no es una dirección local/);
 });
 
 test('la tabla nunca queda visible sin filtrar: el cubridor está desde el primer frame', async () => {

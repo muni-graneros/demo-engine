@@ -16,7 +16,9 @@ test('el juguete sirve el login y protege el panel', async () => {
     }
 });
 
-test('el panel filtrado por rut deja una sola fila', async () => {
+test('el panel pinta la tabla completa; el filtro por rut es del navegador, no del servidor', async () => {
+    // El HTML crudo siempre trae las 3 filas: el filtro corre en el navegador tras 350 ms
+    // (imitando a Filament/Livewire). Ese es justo el instante que privacidad.mjs debe tapar.
     const juguete = await iniciarJuguete({ puerto: 0 });
     try {
         const r = await fetch(`${juguete.url}/panel?rut=11111111-1`, {
@@ -24,7 +26,8 @@ test('el panel filtrado por rut deja una sola fila', async () => {
         });
         const html = await r.text();
         const filas = html.match(/<tr class="fila"/g) ?? [];
-        assert.equal(filas.length, 1);
+        assert.equal(filas.length, 3);
+        assert.match(html, /data-rut="11111111-1"/);
     } finally {
         await juguete.cerrar();
     }
