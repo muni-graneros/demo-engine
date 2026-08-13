@@ -52,7 +52,11 @@ test('graba una pista por actor y devuelve pasos con reloj local y global', asyn
 
         assert.ok(existsSync(pistas.funcionario), 'no se escribió la pista del funcionario');
         assert.equal(pasos.length, 2);
-        assert.equal(pasos[0].tLocal, 0, 'el primer paso arranca en cero en su reloj local');
+        // Tolerancia, no igualdad exacta: `tLocal` es un delta de reloj de pared, y basta un
+        // hipo del planificador para que salga 1 ms aunque el código sea correcto. Medido: con
+        // igualdad estricta la suite falla ~1 de cada 5 corridas bajo carga.
+        assert.ok(pasos[0].tLocal < 50,
+            `el primer paso debe arrancar pegado al cero de su reloj local, y arrancó en ${pasos[0].tLocal} ms`);
         assert.ok(pasos[1].tGlobal > pasos[0].tGlobal, 'el reloj global avanza');
         assert.ok(pasos.every((p) => p.duracionMs > 0), 'todo paso debe traer duración');
     } finally {
