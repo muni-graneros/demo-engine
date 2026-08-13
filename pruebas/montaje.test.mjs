@@ -1,0 +1,63 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ff, duracion } from '../src/ffmpeg.mjs';
+import { montar } from '../src/montaje.mjs';
+
+/** Fabrica una pista de color sólido de N segundos, como sustituto de una grabación. */
+function pista(dir, nombre, segundos, color) {
+    const archivo = join(dir, nombre);
+    ff(['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=640x400:d=${segundos}`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', archivo]);
+    return archivo;
+}
+
+const vozMuda = { motor: 'ninguno', disponible: () => false, sintetizar: () => null };
+
+test('intercala los tramos de dos actores en orden narrativo', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = {
+        ciudadano: pista(dir, 'ciudadano.mp4', 10, 'blue'),
+        funcionario: pista(dir, 'funcionario.mp4', 8, 'red'),
+    };
+    const pasos = [
+        { escena: 'entrega',  actor: 'ciudadano',   tLocal: 0,    tGlobal: 0,     duracionMs: 4000 },
+        { escena: 'revision', actor: 'funcionario', tLocal: 0,    tGlobal: 4000,  duracionMs: 5000 },
+        { escena: 'cierre',   actor: 'ciudadano',   tLocal: 4000, tGlobal: 9000,  duracionMs: 3000 },
+    ];
+
+    const { mp4, segmentos } = await montar(
+        { pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' });
+
+    assert.ok(existsSync(mp4));
+    const total = duracion(mp4);
+    assert.ok(Math.abs(total - 12) < 1, `el total debe rondar 4+5+3=12 s, midió ${total}`);
+    assert.deepEqual(segmentos.map((s) => s.inicioSeg), [0, 4, 9]);
+});
+
+test('emite el .vtt junto al mp4', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 6, 'green') };
+    const pasos = [
+        { escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 3000, narrar: 'Primer paso.' },
+        { escena: 'b', actor: 'uno', tLocal: 3000, tGlobal: 3000, duracionMs: 3000, narrar: 'Segundo paso.' },
+    ];
+    const { vtt } = await montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' });
+
+    assert.ok(existsSync(vtt));
+    const texto = readFileSync(vtt, 'utf8');
+    assert.match(texto, /^WEBVTT/);
+    assert.match(texto, /Segundo paso\./);
+});
+
+test('un paso que se sale del largo de su pista falla en vez de producir un corte vacío', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'black') };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 10000, tGlobal: 0, duracionMs: 2000 }];
+    await assert.rejects(() => montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' }), /fuera de la pista/);
+});
