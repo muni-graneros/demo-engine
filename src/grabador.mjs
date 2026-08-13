@@ -1,3 +1,5 @@
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
 import { instalarCursor } from './camara.mjs';
@@ -18,6 +20,13 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];
     const t0Global = Date.now();
+
+    // El manual (`generarManual`) sale de docs/manual junto con `salida`: por eso la ruta
+    // que se guarda en cada paso es RELATIVA a `salida`, no absoluta. Un subdirectorio
+    // propio evita ensuciar `salida` con un PNG por paso al lado del mp4.
+    const dirCapturas = join(salida, 'capturas');
+    mkdirSync(dirCapturas, { recursive: true });
+    let indiceCaptura = 0;
 
     /**
      * Crea (o recupera) el contexto de un actor, anotando cuándo empezó su grabación.
@@ -72,6 +81,14 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                 }
                 await page.waitForTimeout(Math.max(pausaMinima, msVoz));
 
+                // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
+                // usaría cualquiera: si el guion puso el cubridor, sale tapada, que es lo
+                // correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
+                // elementos `position:fixed` —el cubridor— cubran una captura de página
+                // completa) ni por selector (saltaría el overlay de privacidad).
+                const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
+                await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
+
                 pasos.push({
                     escena: escena.id,
                     titulo: escena.titulo,
@@ -81,6 +98,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                     duracionMs: (Date.now() - t0) - inicioLocal,
                     narrar: paso.narrar,
                     wav,
+                    captura: `capturas/${nombreCaptura}`,
                 });
             }
         }
