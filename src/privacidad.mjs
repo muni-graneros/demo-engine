@@ -38,9 +38,19 @@ export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
     }
 }
 
-/** Tapa la página con un panel opaco. No bloquea a Playwright: escribe por debajo. */
-export async function cubrir(page) {
-    await page.evaluate(() => {
+/**
+ * Inyecta el div opaco en el documento actual (si no está ya puesto).
+ *
+ * Cuando esto corre como `addInitScript`, se ejecuta apenas se crea el documento nuevo:
+ * en ese instante `document.documentElement` todavía puede ser `null` (el parser HTML ni
+ * siquiera creó el `<html>` todavía). Colgar el div de un `documentElement` que no existe
+ * lanzaría en silencio (init scripts no propagan su error a Playwright) y el cubridor
+ * jamás se pondría. Por eso se espera, con un `MutationObserver` sobre `document`, a que
+ * `documentElement` exista antes de colgar el div — apenas exista, antes de que el parser
+ * siga agregando el resto del body.
+ */
+function ponerCubridor() {
+    const crear = () => {
         if (document.getElementById('__cubridor')) return;
         const el = document.createElement('div');
         el.id = '__cubridor';
@@ -49,11 +59,59 @@ export async function cubrir(page) {
             color:#94a3b8;font-family:system-ui;font-size:18px`;
         el.textContent = 'Filtrando…';
         document.documentElement.appendChild(el);
+    };
+    if (document.documentElement) { crear(); return; }
+    const obs = new MutationObserver(() => {
+        if (document.documentElement) { obs.disconnect(); crear(); }
     });
+    obs.observe(document, { childList: true });
 }
 
+/**
+ * Quita el div opaco del documento actual, si está puesto.
+ *
+ * Espera a `documentElement` con el MISMO mecanismo que `ponerCubridor`: si un `cubrir()`
+ * y un `descubrir()` quedan ambos registrados como initScript para la próxima navegación
+ * (por ejemplo, alguien llamó cubrir() y después descubrir() sobre la misma page antes de
+ * navegar), sus dos `MutationObserver` —creados en ese orden— se notifican en el MISMO
+ * orden en que se registraron: la puesta corre antes que el quite, y el resultado neto es
+ * el correcto (destapado). Si `quitarCubridor` actuara de inmediato en vez de esperar,
+ * podría no encontrar nada que quitar (el div de `ponerCubridor` recién se agregaría
+ * después) y el cubridor quedaría puesto por error.
+ */
+function quitarCubridor() {
+    const quitar = () => document.getElementById('__cubridor')?.remove();
+    if (document.documentElement) { quitar(); return; }
+    const obs = new MutationObserver(() => {
+        if (document.documentElement) { obs.disconnect(); quitar(); }
+    });
+    obs.observe(document, { childList: true });
+}
+
+/**
+ * Tapa la página con un panel opaco. No bloquea a Playwright: escribe por debajo.
+ *
+ * Sobrevive a navegaciones: además de tapar el documento actual, registra un
+ * `addInitScript` que vuelve a poner el div en CADA documento nuevo que cargue esta page,
+ * ANTES de que corra cualquier script propio de la página (Playwright lo garantiza: los
+ * init scripts corren apenas se crea el documento, antes de pintar nada). Por eso hay que
+ * llamar a `cubrir(page)` ANTES de `page.goto()`, no después: así el cubridor ya está
+ * armado cuando el documento nuevo empieza a existir, y no hay ventana sin tapar.
+ *
+ * `descubrir(page)` registra el gesto contrario de la misma forma, así que una secuencia
+ * cubrir→descubrir→cubrir dentro de la vida de la misma `page` termina, en cada navegación
+ * futura, aplicando esos gestos EN ORDEN (poner, quitar, poner…): el resultado neto es
+ * siempre el de la última llamada, porque ambas operaciones son idempotentes.
+ */
+export async function cubrir(page) {
+    await page.evaluate(ponerCubridor);
+    await page.addInitScript(ponerCubridor);
+}
+
+/** Destapa la página actual y desarma la protección para navegaciones futuras. */
 export async function descubrir(page) {
-    await page.evaluate(() => document.getElementById('__cubridor')?.remove());
+    await page.evaluate(quitarCubridor);
+    await page.addInitScript(quitarCubridor);
 }
 
 /**
@@ -65,8 +123,12 @@ export async function descubrir(page) {
  * @param {{filtro:string, valor:string, selectorFilas:string, alPintar?:Function}} opciones
  */
 export async function abrirFiltrado(page, url, { filtro, valor, selectorFilas, alPintar, esperaMs = 5000 }) {
-    await page.goto(url, { waitUntil: 'domcontentloaded' });
+    // Se cubre ANTES de navegar: el `addInitScript` que arma cubrir() queda registrado
+    // desde antes de que exista el documento nuevo, así que lo tapa desde su primer
+    // instante. Cubrir después de goto() (como estaba antes) deja una ventana entre que el
+    // documento nuevo pinta y que se le pone el cubridor encima.
     await cubrir(page);
+    await page.goto(url, { waitUntil: 'domcontentloaded' });
     if (alPintar) await alPintar();
 
     await page.fill(filtro, valor);
@@ -78,7 +140,7 @@ export async function abrirFiltrado(page, url, { filtro, valor, selectorFilas, a
         page.waitForNavigation({ waitUntil: 'domcontentloaded' }).catch(() => {}),
         page.keyboard.press('Enter'),
     ]);
-    await cubrir(page);              // una navegación se lleva el cubridor: se repone antes de mirar
+    // No hace falta reponer el cubridor a mano: sobrevive solo a la navegación (ver cubrir()).
     if (alPintar) await alPintar();
 
     // El filtro puede tardar en aplicarse (Livewire pinta la tabla completa y recién

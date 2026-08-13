@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { exigirEntornoDeDesarrollo, abrirFiltrado, cubrir } from '../src/privacidad.mjs';
+import { exigirEntornoDeDesarrollo, abrirFiltrado, cubrir, descubrir } from '../src/privacidad.mjs';
 
 test('aborta si el entorno no es de desarrollo', () => {
     // Falla CERRADO: sin APP_ENV, manda el host de baseURL.
@@ -45,6 +45,96 @@ test('la tabla nunca queda visible sin filtrar: el cubridor está desde el prime
         const destapadaConMuchasFilas = visibles.some((v) => !v.tapada && v.filas > 1);
         assert.equal(destapadaConMuchasFilas, false,
             'hubo un instante con la tabla destapada y más de una fila: eso es una fuga');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('cubrir sobrevive a una navegación: el cubridor sigue puesto tras goto()', async () => {
+    // Repro del defecto crítico #1: cubrir() inyecta el div en el documento actual, pero
+    // una navegación destruye ese DOM. Si el mecanismo es correcto, el cubridor debe
+    // reaparecer SOLO por haber llamado cubrir() una vez, sin volver a llamarlo tras goto().
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await cubrir(page);
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+
+        const estado = await page.evaluate(() => ({
+            tapada: !!document.getElementById('__cubridor'),
+            filas: document.querySelectorAll('tr.fila').length,
+        }));
+        assert.equal(estado.filas > 0, true, 'el panel debe traer filas reales para que el test tenga sentido');
+        assert.equal(estado.tapada, true,
+            'el cubridor no sobrevivió a la navegación: la tabla completa quedó a la vista');
+
+        // Y debe seguir sobreviviendo a una SEGUNDA navegación, no solo a la primera.
+        await page.goto(`${juguete.url}/detalle/11111111-1`, { waitUntil: 'domcontentloaded' });
+        const tapadaOtraVez = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(tapadaOtraVez, true, 'el cubridor debe seguir puesto tras una segunda navegación');
+
+        // descubrir() debe apagar la protección también para navegaciones FUTURAS, no solo
+        // borrar el div actual.
+        await descubrir(page);
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+        const tapadaTrasDescubrir = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(tapadaTrasDescubrir, false,
+            'descubrir() debe dejar de tapar incluso en navegaciones posteriores');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('el cubridor tapa antes de pintar aunque la navegación se demore (hidratación lenta)', async () => {
+    // Repro del defecto crítico #2: en el código viejo, `abrirFiltrado` llamaba
+    // page.goto() y RECIÉN DESPUÉS cubrir(); con una respuesta lenta (Livewire con
+    // hidratación pesada, o simplemente carga bajo presión) ese hueco alcanza para pintar
+    // la tabla completa sin protección. Se fuerza un retardo artificial de 200ms en la
+    // respuesta del panel para simular justo ese caso, y se vigila con muestreo agresivo
+    // durante toda la navegación (no solo en los puntos de control de abrirFiltrado).
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.route('**/panel*', async (route) => {
+            await new Promise((r) => setTimeout(r, 200));
+            await route.continue();
+        });
+
+        // Vigía independiente de los puntos de control de abrirFiltrado: muestrea cada 5ms
+        // durante TODA la operación, no solo en los instantes que el propio código elige
+        // mirar. Si el cubridor tuviera un hueco de temporización, esto lo atraparía.
+        const muestras = [];
+        let vigilando = true;
+        const vigilar = (async () => {
+            while (vigilando) {
+                try {
+                    muestras.push(await page.evaluate(() => ({
+                        tapada: !!document.getElementById('__cubridor'),
+                        filas: document.querySelectorAll('tr.fila').length,
+                    })));
+                } catch { /* navegación en curso: el frame se destruyó a mitad del evaluate */ }
+                await new Promise((r) => setTimeout(r, 5));
+            }
+        })();
+
+        await abrirFiltrado(page, `${juguete.url}/panel`, {
+            filtro: '#filtro', valor: '11111111-1', selectorFilas: 'tr.fila',
+        });
+        vigilando = false;
+        await vigilar;
+
+        const fuga = muestras.some((v) => !v.tapada && v.filas > 1);
+        assert.equal(fuga, false, 'con retardo artificial se vio la tabla completa sin cubridor: fuga de privacidad');
     } finally {
         await navegador.close();
         await juguete.cerrar();
