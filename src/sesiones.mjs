@@ -2,6 +2,7 @@ import { createHmac } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
 
 /** Decodifica base32 (RFC 4648) sin dependencias. */
 function base32ABuffer(secreto) {
@@ -35,6 +36,11 @@ export function totp(secreto, segundos = Math.floor(Date.now() / 1000)) {
  * @returns {Promise<Record<string,string>>} actor → ruta del storageState
  */
 export async function prepararSesiones(config, { dirSesiones }) {
+    // Antes de nada: esto loguea con credenciales reales y persiste cookies de sesión a
+    // disco. Solo `grabar()` pasaba por este guardián; una baseURL mal puesta acá loguearía
+    // contra producción y dejaría la sesión real guardada antes de que nada aborte.
+    exigirEntornoDeDesarrollo(config.baseURL);
+
     mkdirSync(dirSesiones, { recursive: true });
     const login = config.login ?? {};
     const navegador = await chromium.launch();

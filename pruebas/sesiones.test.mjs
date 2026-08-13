@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -57,6 +57,20 @@ test('deja un storageState por actor', async () => {
     } finally {
         await juguete.cerrar();
     }
+});
+
+test('pasa por el guardián de entorno antes de loguear: con host público no escribe ninguna sesión', async () => {
+    // Defecto #3: prepararSesiones navegaba, logueaba y ESCRIBÍA cookies de sesión a disco
+    // sin pasar nunca por exigirEntornoDeDesarrollo. Con una baseURL pública, ni siquiera
+    // debe llegar a abrir el navegador ni tocar el disco de sesiones.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    const config = {
+        baseURL: 'https://ejemplo.cl',
+        login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+        actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+    };
+    await assert.rejects(() => prepararSesiones(config, { dirSesiones: dir }), /no es una dirección local/);
+    assert.deepEqual(readdirSync(dir), [], 'no debe quedar ningún archivo de sesión en disco');
 });
 
 test('si el login no deja sesión, falla nombrando al actor', async () => {
