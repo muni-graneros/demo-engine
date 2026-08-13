@@ -38,6 +38,10 @@ async function centroDe(page, selector) {
 
 /** Lleva el cursor al centro del elemento, con easing, y espera a que llegue. */
 export async function moverCursorA(page, selector) {
+    // Se repone el cursor por si el paso navegó: una navegación se lleva el DOM entero, y
+    // un guion normal navega y DESPUÉS pulsa, dentro del mismo paso. Sin esto, el clic
+    // ocurre sin puntero a la vista y el video vuelve a no mostrar dónde se toca.
+    await instalarCursor(page);
     const { x, y } = await centroDe(page, selector);
     await page.evaluate(({ x, y }) => {
         const c = document.getElementById('__cursor');
@@ -62,10 +66,14 @@ export async function pulsar(page, selector, { alPintar } = {}) {
     if (alPintar) await alPintar();
     await page.waitForTimeout(180);
     await page.locator(selector).first().click();
+    // si el clic navegó, el cursor desapareció; reponerlo es idempotente
+    await instalarCursor(page);
 }
 
 /** Acerca la vista sobre un elemento, dejándolo centrado. */
 export async function acercarA(page, selector, { escala = 1.6 } = {}) {
+    // la hoja de estilos del zoom viaja con el cursor
+    await instalarCursor(page);
     const { x, y } = await centroDe(page, selector);
     await page.evaluate(({ x, y, escala }) => {
         const html = document.documentElement;

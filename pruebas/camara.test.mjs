@@ -59,6 +59,21 @@ test('pulsar deja un halo y de verdad hace clic', async () => {
     });
 });
 
+test('el cursor sigue estando tras navegar dentro del mismo paso', async () => {
+    // Caso realísimo: un guion hace page.goto(...) y luego pulsa. La navegación borra el
+    // cursor instalado antes, así que pulsar tiene que reponerlo por su cuenta.
+    await conPagina(async (page) => {
+        const url = page.url();
+        await page.goto(url);        // se lleva el DOM, y con él el cursor
+        assert.equal(await page.evaluate(() => !!document.getElementById('__cursor')), false,
+            'la navegación debería haber borrado el cursor; si no, este test no prueba nada');
+
+        await pulsar(page, '#entrar');
+        assert.ok(await page.evaluate(() => !!document.getElementById('__cursor')),
+            'tras navegar y pulsar, el cursor tiene que estar a la vista');
+    });
+});
+
 test('acercar aplica una transformación y alejar la deja limpia', async () => {
     await conPagina(async (page) => {
         await acercarA(page, '#entrar', { escala: 1.8 });
