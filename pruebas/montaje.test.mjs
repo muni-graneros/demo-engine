@@ -61,3 +61,30 @@ test('un paso que se sale del largo de su pista falla en vez de producir un cort
     await assert.rejects(() => montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
         { salida: dir, nombre: 'final.mp4' }), /fuera de la pista/);
 });
+
+test('un desborde pequeño se recorta y los tiempos siguen calzando con el video', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { largo: pista(dir, 'largo.mp4', 10, 'blue'), corto: pista(dir, 'corto.mp4', 3, 'green') };
+    // El segundo tramo empieza en 1 s y "dura" 2,1 s sobre una pista de 3 s: desborda 0,1 s,
+    // que es lo que pasa de verdad al cerrar la grabación de un actor justo tras su paso.
+    const pasos = [
+        { escena: 'a', actor: 'largo', tLocal: 0, tGlobal: 0, duracionMs: 2000, narrar: 'Primero.' },
+        { escena: 'b', actor: 'corto', tLocal: 1000, tGlobal: 2000, duracionMs: 2100, narrar: 'Segundo.' },
+    ];
+    const { mp4, segmentos } = await montar(
+        { pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' });
+
+    // Lo que prometen los subtítulos tiene que coincidir con lo que el video dura de verdad.
+    const prometido = segmentos.at(-1).finSeg;
+    assert.ok(Math.abs(prometido - duracion(mp4)) < 0.3,
+        `los subtítulos prometen ${prometido}s y el video dura ${duracion(mp4)}s: quedarían desfasados`);
+});
+
+test('un desborde grande falla, en vez de recortar media escena en silencio', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'black') };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 1000, tGlobal: 0, duracionMs: 5000 }];
+    await assert.rejects(() => montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' }), /desfasados/);
+});
