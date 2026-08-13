@@ -23,7 +23,7 @@ Requisitos:
 - **ffmpeg 7.0+** (suministrado por `ffmpeg-static`)
 - **Chromium** (descargado por Playwright)
 
-Las voces se descargan bajo demanda la primera vez y se guardan en `~/.demo-engine/`:
+Antes de grabar, instala los motores de voz que usarás (se guardan en `~/.demo-engine/`):
 
 ```bash
 # Kokoro (español fluido, recomendado)
@@ -32,6 +32,8 @@ npm exec -- demo-engine-voice kokoro es_ES
 # Piper (respaldo, más lento pero sin dependencias)
 npm exec -- demo-engine-voice piper es_ES
 ```
+
+Sin una voz instalada, el motor genera subtítulos sin locución (no falla).
 
 ## Estructura del proyecto
 
@@ -235,35 +237,94 @@ demo manual [guion]
 
 ## Privacidad: `abrirFiltrado`
 
-El motor protege datos sensibles **durante la grabación**:
+El motor protege datos sensibles **durante la grabación** tapando la pantalla desde el primer frame hasta que los datos estén filtrados. Esto es crítico porque muchas aplicaciones (Filament, Livewire, etc.) pintan **la tabla completa** y luego la filtran con JavaScript — esa ventana es la fuga que el motor debe bloquear.
+
+### Invariante de privacidad
+
+**Jamás se graba un dato sensible sin filtro.** Dos niveles de protección:
+
+1. **Verificación de host:** `exigirEntornoDeDesarrollo(config.baseURL)` falla si no es `localhost`, `127.0.0.1`, o red privada.
+2. **Pantalla tapada hasta filtrado:** `abrirFiltrado` cubre la pantalla, abre la URL, filtra por un criterio, espera a que la tabla se reduzca a una fila, y solo entonces destapa.
+
+### Ejemplo: filtrar solicitudes por RUT
 
 ```js
-import { abrirFiltrado, cubrir, descubrir, exigirEntornoDeDesarrollo } from 'demo-engine';
+import { abrirFiltrado, exigirEntornoDeDesarrollo } from 'demo-engine';
 
-// Antes de grabar, verifica que estamos en desarrollo (localhost).
-exigirEntornoDeDesarrollo(config.baseURL);  // Falla si es prod
+// En config
+export default {
+  baseURL: 'http://127.0.0.1:8000',  // Solo localhost/red privada
+  // ...
+};
 
-// Durante un paso, cubre un elemento hasta que se filtre:
+// En el guion
 {
+  actor: 'funcionario',
+  narrar: 'Buscamos al ciudadano por su RUT.',
   hacer: async (page) => {
-    await cubrir(page, '#rut-del-ciudadano');  // Pantalla cubierta
-    await page.goto('/panel');                 // Se graba todo negro
-    await descubrir(page, '#rut-del-ciudadano'); // Ahora se ve
-  }
-}
-
-// O usa abrirFiltrado para un bloque completo:
-{
-  hacer: async (page) => {
-    await abrirFiltrado(page, '#datos-sensibles', async () => {
-      await page.goto('/detalles');
-      await page.click('button');
+    // Abre /panel, cubre la pantalla, filtra por RUT, destapa solo cuando 
+    // la tabla tenga una sola fila.
+    await abrirFiltrado(page, 'http://127.0.0.1:8000/panel', {
+      filtro: '#filtro',               // Selector del input de búsqueda
+      valor: '11111111-1',             // RUT (o valor que reduce la tabla)
+      selectorFilas: 'tr.fila',        // Selector de las filas de datos
     });
+    // Ahora solo se ve una fila. Se graba normalmente.
+    await page.click('a.ver');
   }
 }
 ```
 
-Invariante: **jamás se graba un dato sensible sin filtro**. Si intentas grabar contra un servidor que no sea `localhost` o `127.0.0.1`, el motor aborta con error.
+### Si necesitas código personalizado durante el filtrado
+
+```js
+await abrirFiltrado(page, baseURL + '/panel', {
+  filtro: '#filtro',
+  valor: '12345678-5',
+  selectorFilas: 'tr.fila',
+  alPintar: async () => {
+    // Se ejecuta 3 veces: al tapar (antes de filtrar), al filtrar, y al destapar.
+    // Útil para clickear botones o esperar cambios que no ocurren en la URL.
+    await page.waitForTimeout(100);
+  },
+  esperaMs: 10000  // Timeout para que el filtro se aplique (defecto: 5000 ms)
+});
+```
+
+### Menos común: tapar/destapar manualmente
+
+Si **no** usas `abrirFiltrado` (porque la lógica es más rara), puedes hacerlo a mano:
+
+```js
+import { cubrir, descubrir } from 'demo-engine';
+
+{
+  hacer: async (page) => {
+    await cubrir(page);                // Pantalla negra desde ahora
+    await page.goto('/seccion-sensible');
+    await page.fill('input[type=search]', 'filtro-valor');
+    await page.click('button[type=submit]');
+    await page.waitForTimeout(500);    // Espera a que el JavaScript filtre
+    await descubrir(page);             // Ahora se ve
+  }
+}
+```
+
+**Importante:** `cubrir` cubre **toda la pantalla**, no un elemento suelto. Se repone si una navegación ocurre, y la altura es exactamente la del viewport (no hay overflow).
+
+### Validación en tiempo de compilación
+
+```js
+// Esto aborta ANTES de grabar:
+exigirEntornoDeDesarrollo(config.baseURL, process.env);
+// Falla si:
+// - APP_ENV es 'production', 'staging', etc.
+// - El host no es localhost ni red privada
+// Solo continúa si:
+// - Host es 127.x, 192.168.x, 10.x, ::1, *.local, *.lan, *.test
+// - O APP_ENV es 'local', 'testing', 'development'
+// - O DEMO_FORZAR=1 (pero no lo hagas en producción)
+```
 
 ## Uso programático (Node)
 
@@ -298,9 +359,52 @@ Después de grabar, en `config.salida`:
 - **`[guion].md`**: (solo con `demo curso`) índice de capítulos
 - **`[guion].pdf`**: (con `demo manual`) manual con capturas
 
+## API Completa
+
+Todas estas funciones se reexportan desde `demo-engine`:
+
+### Configuración
+- `cargarConfig(rutaProyecto: string) → Promise<config>`
+
+### Sesiones
+- `prepararSesiones(config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>`
+- `totp(secreto: string, segundos?: number) → código6Digitos`
+
+### Grabación
+- `grabar(guion, { config, sesiones, salida, voz }) → Promise<{pistas, pasos}>`
+
+### Montaje
+- `montar({ pistas, pasos, voz, video }, { salida, nombre }) → Promise<{mp4, vtt, segmentos}>`
+- `pegarCapitulos(partes, { salida, nombre, titulo, video }) → Promise<{mp4, md}>`
+  - `partes`: array de `{id, titulo, archivo}`
+
+### Salida
+- `generarManual({ guion, pasos, marca }, { salida }) → Promise<{pdf}>`
+
+### Voz
+- `crearVoz(config: {motor?, voz?, respaldo?}) → vozEngine`
+  - `.disponible() → bool`
+  - `.sintetizar(texto) → rutaWav | null`
+
+### Privacidad
+- `exigirEntornoDeDesarrollo(baseURL, env?) → void` (falla si no es dev)
+- `cubrir(page) → Promise<void>` (cubre toda la pantalla con panel opaco)
+- `descubrir(page) → Promise<void>` (destapa la pantalla)
+- `abrirFiltrado(page, url, { filtro, valor, selectorFilas, alPintar?, esperaMs? }) → Promise<void>`
+
+### Cámara (visual)
+- `instalarCursor(page) → Promise<void>` (dibuja cursor SVG, idempotente)
+- `moverCursorA(page, selector) → Promise<void>` (mueve con easing)
+- `pulsar(page, selector, { alPintar? }) → Promise<void>` (mueve, halo, clic)
+- `acercarA(page, selector, { escala? }) → Promise<void>` (zoom sobre elemento, escala defecto: 1.6)
+- `alejar(page) → Promise<void>` (vuelve al zoom 1:1)
+
+### Portadas
+- `portada(page, { titulo, subtitulo?, capitulo?, marca?, esperaMs? }) → Promise<void>`
+
 ## Invariantes
 
 1. **Offline**: sin llamadas de red en tiempo de ejecución.
-2. **Privacidad**: jamás registra datos de sistemas reales. Solo `localhost` / `127.0.0.1`.
+2. **Privacidad**: jamás registra datos de sistemas reales. Solo `localhost`, `127.0.0.1`, red privada (10.x, 192.168.x, etc.).
 3. **Subtítulos**: pista `mov_text` dentro del MP4 + sidecar `.vtt`.
 4. **Reproducibilidad**: mismo guion + misma config = mismo MP4.
