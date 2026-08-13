@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ff, duracion } from './ffmpeg.mjs';
 import { capitulosConTiempos, ffmetadata, indiceMarkdown } from './capitulos.mjs';
@@ -11,7 +11,10 @@ import { capitulosConTiempos, ffmetadata, indiceMarkdown } from './capitulos.mjs
  */
 export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video }) {
     mkdirSync(salida, { recursive: true });
+    // Se limpia de entrada: si no, cada corrida deja sus trozos y los de la anterior
+    // conviven con los nuevos.
     const temporal = join(salida, '.tmp-curso');
+    rmSync(temporal, { recursive: true, force: true });
     mkdirSync(temporal, { recursive: true });
 
     // Normalizar: los clips vienen de fuentes distintas (grabaciones y video de teléfono),

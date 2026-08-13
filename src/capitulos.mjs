@@ -8,6 +8,18 @@ export function capitulosConTiempos(capitulos, duraciones) {
     });
 }
 
+/**
+ * Escapa un valor para el formato ffmetadata.
+ *
+ * Medido contra el ffmpeg del proyecto: `;`, `#` y `=` **dentro** del valor no molestan
+ * (solo son especiales al principio de línea, y el `=` parte por el primero). Lo que sí
+ * rompe es un salto de línea: parte la metadata en dos y la segunda mitad se lee como
+ * otro campo. La barra invertida también, porque es el carácter de escape.
+ */
+function escaparMeta(valor) {
+    return String(valor).replace(/\\/g, '\\\\').replace(/\r?\n/g, ' ');
+}
+
 /** Metadata de capítulos que entiende ffmpeg (`-f ffmetadata`). */
 export function ffmetadata(capitulos) {
     const bloques = capitulos.map((c) => [
@@ -15,7 +27,7 @@ export function ffmetadata(capitulos) {
         'TIMEBASE=1/1000',
         `START=${Math.round(c.inicioSeg * 1000)}`,
         `END=${Math.round(c.finSeg * 1000)}`,
-        `title=${c.titulo}`,
+        `title=${escaparMeta(c.titulo)}`,
     ].join('\n'));
     return [';FFMETADATA1', ...bloques].join('\n') + '\n';
 }

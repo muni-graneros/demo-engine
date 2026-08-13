@@ -22,6 +22,15 @@ test('el ffmetadata usa milisegundos y una entrada por capítulo', () => {
     assert.match(texto, /START=10000\nEND=30000/);
 });
 
+test('un título con salto de línea no parte la metadata en dos', () => {
+    // Medido: `;`, `#` y `=` dentro del valor no molestan; el salto de línea sí, porque
+    // la segunda mitad se lee como otro campo y aparece un capítulo con datos inventados.
+    const texto = ffmetadata(capitulosConTiempos([{ id: 'a', titulo: 'Capítulo\nfalso=1' }], [10]));
+    const lineas = texto.split('\n').filter((l) => l.trim());
+    assert.equal(lineas.filter((l) => l.startsWith('title=')).length, 1);
+    assert.ok(!lineas.includes('falso=1'), 'el salto de línea creó una línea de metadata espuria');
+});
+
 test('el índice markdown trae las marcas de tiempo legibles', () => {
     const md = indiceMarkdown(capitulosConTiempos(CAPITULOS, [62.5, 90, 45]), 'Curso completo');
     assert.match(md, /# Curso completo/);
