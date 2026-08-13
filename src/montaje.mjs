@@ -98,8 +98,11 @@ export async function montar({ pistas, pasos, voz, video }, { salida, nombre = '
     }
 
     const n = mezclas.length;
+    // Si solo hay silencio puro (sin voz), pasar directo sin amix ni loudnorm.
     const cadena = (filtros.length ? filtros.join(';') + ';' : '') +
-        mezclas.join('') + `amix=inputs=${n}:normalize=0[m];[m]loudnorm=I=-16:TP=-1.5:LRA=11[a]`;
+        (n === 1
+            ? mezclas[0] + 'aformat=sample_rates=44100:channel_layouts=mono[a]'
+            : mezclas.join('') + `amix=inputs=${n}:normalize=0[m];[m]loudnorm=I=-16:TP=-1.5:LRA=11[a]`);
 
     const cmd = [
         ...entradas,
