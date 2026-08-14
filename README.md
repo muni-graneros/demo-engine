@@ -271,9 +271,20 @@ demo curso
 demo manual [guion]
 ```
 
-- Genera PDF a partir de un guion grabado (defecto: `curso`).
+- Genera PDF a partir de un guion grabado.
 - Incluye capturas de cada escena, subtítulos como texto.
-- Emite: `docs/manual/[guion].pdf`.
+- Emite: `docs/manual/[guion].pdf` (o `docs/manual/curso.pdf` en el caso maestro de abajo).
+
+**Sin argumento, o con el guion maestro:** `demo manual` (sin argumento) carga
+`guiones/curso.mjs` — el mismo maestro que usa `demo curso`. Como ese guion declara
+`capitulos`, no `escenas`, el motor lo detecta y genera el manual **encadenado de todos sus
+capítulos** (cada `guion:` de `capitulos` se graba y sus pasos se agregan uno tras otro; los
+capítulos con `fuente: 'video'` no aportan pasos propios, así que salen como una nota con la
+ruta del archivo en vez de capturas). Esto también aplica si le pasás explícitamente el
+nombre de un guion maestro (`demo manual curso`).
+
+**Con un guion normal** (uno que declara `escenas`, no `capitulos`): `demo manual panel`
+graba ese guion solo y genera el manual de sus escenas, como siempre.
 
 ## Privacidad: `abrirFiltrado`
 
@@ -411,7 +422,15 @@ Todas estas funciones se reexportan desde `demo-engine`:
   TODOS los actores de `config.actores` (lo que usa el comando `preparar`).
 - `prepararSesionesParaGuion(guion, config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>`
   — reutiliza los `storageState` que ya estén en disco y solo loguea a los actores que el
-  guion usa (lo que usan `grabar`/`curso`/`manual`).
+  guion usa (lo que usan `grabar`/`curso`/`manual`). Antes de reutilizar un `storageState`
+  comprueba, contra el sistema real, que la sesión SIGA sirviendo (con `sesionSigueViva`); si
+  caducó del lado del servidor, relogueá a ese actor de forma transparente en vez de dejar
+  que el fallo aparezca a mitad de la grabación siguiente.
+- `sesionSigueViva(archivo, config, login) → Promise<boolean>` — comprueba si un
+  `storageState` guardado en disco todavía sirve para entrar, navegando a `login.url` con esa
+  sesión: con `login.comprobar`, que exista ese selector; sin él, que queden cookies y que no
+  se esté en la URL de login (mismo criterio que usa `prepararSesiones` para validar un login
+  recién hecho).
 - `actoresDeGuion(guion) → string[]` — actores que un guion usa, recorriendo sus escenas y pasos.
 - `totp(secreto: string, segundos?: number) → código6Digitos`
 
