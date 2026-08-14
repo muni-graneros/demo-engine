@@ -1,13 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
-
-const VENV = process.env.DEMO_VENV ?? resolve(process.cwd(), '.venv');
-const PY = join(VENV, 'bin', 'python');
-const VOCES = process.env.DEMO_VOCES ?? resolve(process.cwd(), '.voces');
-const MODELO = join(VOCES, 'kokoro-v1.0.onnx');
-const PESOS = join(VOCES, 'voices-v1.0.bin');
+import { join } from 'node:path';
+import { resolverVenvYVoces } from './resolver.mjs';
 
 // Kokoro se invoca por un script de una línea para no arrastrar un binding de Python.
 const GUION = `
@@ -18,7 +13,11 @@ audio, sr = k.create(sys.stdin.read(), voice=sys.argv[3], speed=1.0, lang="es")
 sf.write(sys.argv[4], audio, sr)
 `;
 
-export function crear({ voz = 'ef_dora' } = {}) {
+export function crear({ voz = 'ef_dora', venv, voces } = {}) {
+    const { venv: VENV, voces: VOCES } = resolverVenvYVoces({ venv, voces });
+    const PY = join(VENV, 'bin', 'python');
+    const MODELO = join(VOCES, 'kokoro-v1.0.onnx');
+    const PESOS = join(VOCES, 'voices-v1.0.bin');
     return {
         motor: 'kokoro',
         disponible: () => existsSync(PY) && existsSync(MODELO) && existsSync(PESOS),

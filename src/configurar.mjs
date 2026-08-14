@@ -6,7 +6,7 @@ export class ErrorConfig extends Error {}
 
 const DEFECTOS = {
     video: { ancho: 1600, alto: 1000, pausaMinima: 1200 },
-    voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper' },
+    voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', venv: null, voces: null },
     marca: { color: '#1e3a8a', escudo: null },
     sembrar: null,
     limpiar: null,
@@ -50,6 +50,13 @@ export async function cargarConfig(rutaProyecto) {
     const guiones = absoluta(cruda.guiones ?? './demo/guiones');
     exigir(existsSync(guiones), `la carpeta de guiones no existe: ${guiones}`);
 
+    // voz.venv/voz.voces son opcionales: si no se declaran, el resolver del motor de voz
+    // busca en DEMO_VENV/DEMO_VOCES y después en el directorio del propio paquete. Si SÍ se
+    // declaran acá, son relativos a la raíz del proyecto (igual que `guiones`/`salida`).
+    const voz = { ...DEFECTOS.voz, ...cruda.voz };
+    if (voz.venv) voz.venv = absoluta(voz.venv);
+    if (voz.voces) voz.voces = absoluta(voz.voces);
+
     return {
         ...DEFECTOS,
         ...cruda,
@@ -58,7 +65,7 @@ export async function cargarConfig(rutaProyecto) {
         salida: absoluta(cruda.salida ?? './docs/manual'),
         marca: { ...DEFECTOS.marca, ...cruda.marca },
         video: { ...DEFECTOS.video, ...cruda.video },
-        voz: { ...DEFECTOS.voz, ...cruda.voz },
+        voz,
         actores,
     };
 }

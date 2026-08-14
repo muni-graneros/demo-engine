@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { cargarConfig, ErrorConfig } from '../src/configurar.mjs';
 
 function proyecto(config) {
@@ -27,7 +27,16 @@ test('aplica los valores por defecto', async () => {
     assert.equal(cfg.video.pausaMinima, 1200);
     assert.equal(cfg.voz.motor, 'kokoro');
     assert.equal(cfg.voz.respaldo, 'piper');
+    assert.equal(cfg.voz.venv, null);
+    assert.equal(cfg.voz.voces, null);
     assert.equal(cfg.marca.color, '#1e3a8a');
+});
+
+test('voz.venv y voz.voces relativos se resuelven contra la raíz del proyecto', async () => {
+    const dir = proyecto({ ...minima, voz: { venv: './mi-venv', voces: './mis-voces' } });
+    const cfg = await cargarConfig(dir);
+    assert.equal(cfg.voz.venv, resolve(dir, 'mi-venv'));
+    assert.equal(cfg.voz.voces, resolve(dir, 'mis-voces'));
 });
 
 test('falla si no hay actores, diciendo cuál es el problema', async () => {

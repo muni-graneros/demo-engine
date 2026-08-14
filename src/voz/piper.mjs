@@ -1,13 +1,12 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
+import { resolverVenvYVoces } from './resolver.mjs';
 
-const VENV = process.env.DEMO_VENV ?? resolve(process.cwd(), '.venv');
-const PY = join(VENV, 'bin', 'python');
-const VOCES = process.env.DEMO_VOCES ?? resolve(process.cwd(), '.voces');
-
-export function crear({ voz = 'es_ES-davefx-medium' } = {}) {
+export function crear({ voz = 'es_ES-davefx-medium', venv, voces } = {}) {
+    const { venv: VENV, voces: VOCES } = resolverVenvYVoces({ venv, voces });
+    const PY = join(VENV, 'bin', 'python');
     const modelo = join(VOCES, `${voz}.onnx`);
     return {
         motor: 'piper',
