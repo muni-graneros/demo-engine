@@ -146,11 +146,19 @@ export default {
 
   // Comandos shell (opcionales).
   sembrar: 'npm run seed',      // Antes de grabar (resetea BD, etc.)
-  limpiar: 'npm run clean'      // Después de todo
+  limpiar: 'npm run clean',     // Después de todo
+
+  // Auditoría (opcional): verifica sobre el video ya grabado, ver "Auditoría: demo auditar".
+  auditoria: {
+    ocr: 'http://127.0.0.1:8110/ocr',   // Endpoint OCR. SIN DEFECTO: hay que declararlo.
+    patron: '\\d{7,8}-[\\dkK]',          // Qué cuenta como identificador (defecto: RUT-like)
+    cada: 10,                            // Un frame cada N segundos (defecto: 10)
+    maximo: 20                           // Tope de frames por video (defecto: 20)
+  }
 };
 ```
 
-Valores por defecto: video `1600x1000`, `pausaMinima 1200ms`, voz Kokoro español con Piper de respaldo, login en URL raíz con selectores estándar.
+Valores por defecto: video `1600x1000`, `pausaMinima 1200ms`, voz Kokoro español con Piper de respaldo, login en URL raíz con selectores estándar, auditoría cada 10s hasta 20 frames (sin endpoint OCR por defecto: hay que declararlo).
 
 **Ojo con los selectores por defecto en paneles Filament (5 + Livewire 4):** los ejemplos de
 arriba (`input[name=email]`, `input[type=password]`) son genéricos y sirven para un form HTML
@@ -246,7 +254,7 @@ export default {
 
 Cada capítulo es un guion (que se graba en vivo) o un video (que se incrusta tal cual).
 
-## CLI: cuatro comandos
+## CLI: cinco comandos
 
 ### 1. Preparar sesiones
 
@@ -302,6 +310,26 @@ nombre de un guion maestro (`demo manual curso`).
 
 **Con un guion normal** (uno que declara `escenas`, no `capitulos`): `demo manual panel`
 graba ese guion solo y genera el manual de sus escenas, como siempre.
+
+### 5. Auditar un video ya grabado
+
+```bash
+demo auditar panel
+# o, contra una ruta directa:
+demo auditar docs/manual/panel.mp4
+```
+
+- Toma un guion ya grabado (busca `[guion].mp4` en `config.salida`, como `curso`/`manual`) o
+  una ruta a un `.mp4` directamente.
+- Muestrea frames del video y les pasa OCR (ver "Auditoría: `demo auditar`" más abajo).
+- Imprime, por cada frame sospechoso, el **segundo exacto** y la ruta del frame guardado en
+  `config.salida/auditoria/[guion]/`.
+- **Código de salida distinto de cero si encontró algo sospechoso** — pensado para correr en CI.
+- Sin `config.auditoria.ocr`, falla con un mensaje que dice exactamente qué falta, en vez de
+  un error de conexión críptico.
+
+**Costo:** el OCR tarda ~9,5s por frame. Por eso es un comando aparte, no algo que corra
+en cada `demo grabar` — auditar un video de varios minutos toma minutos, no segundos.
 
 ## Privacidad: `abrirFiltrado` y `abrirVerificado`
 
@@ -420,6 +448,65 @@ exigirEntornoDeDesarrollo(config.baseURL, process.env);
 // - O DEMO_FORZAR=1 (pero no lo hagas en producción)
 ```
 
+## Auditoría: `demo auditar`
+
+`abrirFiltrado`/`abrirVerificado` protegen **durante la grabación**, pero dependen de que el
+guion las llame — una auditoría real encontró que 4 de 10 guiones de un sistema en uso no lo
+hacían, y dejaban varias personas a la vista. `demo auditar` verifica **el resultado**, no la
+intención: mira el video ya grabado y busca datos a la vista, sin confiar en que el guion
+hizo lo correcto.
+
+### Cómo funciona
+
+1. Muestrea frames del MP4 con ffmpeg (el mismo binario estático que ya trae el motor), uno
+   cada `auditoria.cada` segundos, hasta `auditoria.maximo` frames.
+2. Manda cada frame al servicio OCR configurado en `auditoria.ocr`.
+3. Cuenta cuántos identificadores **distintos** matchean `auditoria.patron` en el texto que
+   devolvió el OCR. **Más de uno en el mismo frame significa que había una lista sin
+   filtrar** — la misma fuga que `abrirFiltrado` existe para evitar.
+
+No hace falta que el OCR lea bien el texto: está afinado para cédulas, no para interfaces
+web, y en la práctica **lee mal algún carácter pero mantiene el patrón intacto** (verificado
+a mano: leyó `12145678-5` donde decía `12345678-5` — un dígito mal, el patrón sigue
+matcheando). Por eso alcanza con contar coincidencias del patrón.
+
+### Configuración (`demo.config.mjs`)
+
+```js
+export default {
+  // ...
+  auditoria: {
+    ocr: 'http://127.0.0.1:8110/ocr',   // endpoint del servicio OCR, SIN VALOR POR DEFECTO
+    patron: '\\d{7,8}-[\\dkK]',          // qué cuenta como identificador (regex, sin flags)
+    cada: 10,                            // un frame cada N segundos
+    maximo: 20,                          // tope de frames por video
+  },
+};
+```
+
+**`auditoria.ocr` no tiene valor por defecto, a propósito:** es un host al que el proceso se
+conecta, y esa decisión le corresponde a quien configura el sistema, no al motor genérico —
+igual que `baseURL`. El motor tampoco sabe de RUT chilenos: `patron` es un regex de config,
+no lógica hardcodeada; el valor de arriba es solo un defecto razonable para RUT, totalmente
+reemplazable. Sin `auditoria.ocr`, `demo auditar` falla con un mensaje que dice exactamente
+qué falta (no un `ECONNREFUSED` críptico contra `null`).
+
+El servicio OCR debe aceptar `POST` con el archivo en un campo `file` (`multipart/form-data`)
+y responder `{ text: "..." }`.
+
+### Salida
+
+```
+[SOSPECHOSO] segundo 40s — 2 identificadores distintos (12345678-5, 87654321-0) — frame guardado en: docs/manual/auditoria/panel/frame-0005.png
+
+docs/manual/panel.mp4: 1 de 12 frames sospechosos.
+```
+
+Cada frame sospechoso queda **guardado en disco** (`config.salida/auditoria/[guion]/`) junto
+con el segundo exacto del video en que apareció — un aviso que no se puede inspeccionar no
+sirve de nada. El comando termina con código de salida **distinto de cero** si encontró algo,
+para poder usarlo como gate en CI.
+
 ## Uso programático (Node)
 
 Importa desde `demo-engine`:
@@ -513,6 +600,14 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `abrirVerificado(page, url, comprobar, { alPintar?, preparar?, esperaMs?, estabilidadRequerida?, mensajeError? }?) → Promise<void>`
   — genérico: usa esto para pantallas sin buscador; `abrirFiltrado` se construye encima.
 
+### Auditoría
+- `auditarVideo(video, config, { dirFrames?, ocr? }?) → Promise<{total, sospechosos}>`
+  — `config.auditoria`: `{ocr, patron, cada, maximo}`; `sospechosos`: `{segundo, archivo, identificadores}[]`
+  — `ocr` es inyectable (para pruebas); sin él usa el endpoint real de `config.auditoria.ocr`
+- `muestrearFrames(video, { cada, maximo, dirSalida }) → {segundo, archivo}[]` (usa ffmpeg, no ffprobe)
+- `contarIdentificadores(texto, patron) → string[]` (identificadores DISTINTOS que matchean el patrón)
+- `exigirAuditoriaConfigurada(auditoria) → void` (falla con mensaje claro si falta `auditoria.ocr`)
+
 ### Cámara (visual)
 - `instalarCursor(page) → Promise<void>` (dibuja cursor SVG, idempotente)
 - `moverCursorA(page, selector) → Promise<void>` (mueve con easing)
@@ -526,7 +621,12 @@ Todas estas funciones se reexportan desde `demo-engine`:
 
 ## Invariantes
 
-1. **Offline**: sin llamadas de red en tiempo de ejecución.
+1. **Offline**: sin llamadas de red en tiempo de ejecución para grabar/montar. La única
+   excepción es `demo auditar`, que por definición necesita hablar con un servicio OCR
+   externo — por eso es un comando aparte, explícito, y nunca corre como parte de `grabar`.
 2. **Privacidad**: jamás registra datos de sistemas reales. Solo `localhost`, `127.0.0.1`, red privada (10.x, 192.168.x, etc.).
 3. **Subtítulos**: pista `mov_text` dentro del MP4 + sidecar `.vtt`.
 4. **Reproducibilidad**: mismo guion + misma config = mismo MP4.
+5. **Genérico**: el motor no conoce RUT chilenos, puertos ni hosts concretos de ningún
+   sistema consumidor — eso vive en `demo.config.mjs` (`baseURL`, `auditoria.ocr`,
+   `auditoria.patron`, etc.), nunca hardcodeado.

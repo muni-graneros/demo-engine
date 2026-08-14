@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
+import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cargarConfig, ErrorConfig } from './src/configurar.mjs';
 import { prepararSesiones, prepararSesionesParaGuion } from './src/sesiones.mjs';
@@ -9,6 +10,7 @@ import { montar } from './src/montaje.mjs';
 import { pegarCapitulos } from './src/curso.mjs';
 import { generarManual } from './src/manual.mjs';
 import { crearVoz } from './src/voz/index.mjs';
+import { auditarVideo } from './src/auditoria.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -118,7 +120,36 @@ async function ejecutarOrden(config, voz) {
         return console.log(pdf);
     }
 
-    console.log('Uso: demo <preparar|grabar <guion>|curso|manual [guion]>');
+    if (orden === 'auditar') {
+        if (!argumento) {
+            console.log('Uso: demo auditar <guion|ruta-a-video.mp4>');
+            process.exitCode = 1;
+            return;
+        }
+        // Acepta tanto un guion ya grabado (busca su .mp4 en config.salida, como hacen
+        // curso/manual) como una ruta directa a un video — útil para auditar algo que no
+        // salió de este motor, o un archivo movido de lugar.
+        const rutaDirecta = isAbsolute(argumento) ? argumento : resolve(raiz, argumento);
+        const video = argumento.endsWith('.mp4') && existsSync(rutaDirecta)
+            ? rutaDirecta
+            : join(config.salida, `${argumento}.mp4`);
+        if (!existsSync(video)) {
+            throw new ErrorConfig(`no encontré el video a auditar: ${video} (¿ya corriste "demo grabar ${argumento}"?)`);
+        }
+
+        const { total, sospechosos } = await auditarVideo(video, config,
+            { dirFrames: join(config.salida, 'auditoria', basename(video, extname(video))) });
+
+        for (const s of sospechosos) {
+            console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — frame guardado en: ${s.archivo}`);
+        }
+        console.log(`\n${video}: ${sospechosos.length} de ${total} frames sospechosos.`);
+
+        if (sospechosos.length > 0) process.exitCode = 1;
+        return;
+    }
+
+    console.log('Uso: demo <preparar|grabar <guion>|curso|manual [guion]|auditar <guion|video>>');
     process.exitCode = 1;
 }
 

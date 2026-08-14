@@ -8,6 +8,10 @@ const DEFECTOS = {
     video: { ancho: 1600, alto: 1000, pausaMinima: 1200 },
     voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', venv: null, voces: null },
     marca: { color: '#1e3a8a', escudo: null },
+    // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso
+    // decide quien configura el sistema, no el motor (ver src/auditoria.mjs). `patron`,
+    // `cada` y `maximo` sí tienen un valor razonable porque no comprometen a ningún host.
+    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20 },
     sembrar: null,
     limpiar: null,
 };
@@ -71,6 +75,7 @@ export async function cargarConfig(rutaProyecto) {
         salida: absoluta(cruda.salida ?? './docs/manual'),
         marca,
         video: { ...DEFECTOS.video, ...cruda.video },
+        auditoria: { ...DEFECTOS.auditoria, ...cruda.auditoria },
         voz,
         actores,
     };

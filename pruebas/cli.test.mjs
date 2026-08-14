@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
@@ -33,7 +34,7 @@ function correrCli(cwd, args) {
     });
 }
 
-function proyectoDeJuguete(juguete) {
+function proyectoDeJuguete(juguete, extra = '') {
     const proyecto = mkdtempSync(join(tmpdir(), 'demo-cli-'));
     mkdirSync(join(proyecto, 'guiones'));
     writeFileSync(join(proyecto, 'demo.config.mjs'), `export default {
@@ -45,8 +46,26 @@ function proyectoDeJuguete(juguete) {
         salida: './salida',
         voz: { motor: 'ninguno', respaldo: 'ninguno' },
         video: { ancho: 640, alto: 480, pausaMinima: 150 },
+        ${extra}
     };`);
     return proyecto;
+}
+
+/** OCR de juguete: ignora el cuerpo (no le interesa el frame) y devuelve `texto` siempre. */
+function iniciarOcrDeJuguete(texto) {
+    const servidor = createServer((req, res) => {
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ text: texto }));
+        });
+    });
+    return new Promise((listo) => {
+        servidor.listen(0, '127.0.0.1', () => {
+            const { port } = servidor.address();
+            listo({ url: `http://127.0.0.1:${port}/ocr`, cerrar: () => new Promise((f) => servidor.close(f)) });
+        });
+    });
 }
 
 function escribirGuionPanel(proyecto, id, url) {
@@ -147,6 +166,82 @@ test('demo manual con un guion normal sigue funcionando como antes', async () =>
         assert.ok(existsSync(md));
         assert.match(readFileSync(md, 'utf8'), /Ver panel \(panel\)/);
     } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo auditar sin auditoria.ocr en la config falla con mensaje claro', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        const proyecto = proyectoDeJuguete(juguete);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        await correrCli(proyecto, ['grabar', 'panel']);
+
+        const resultado = await correrCli(proyecto, ['auditar', 'panel']);
+        assert.notEqual(resultado.status, 0);
+        assert.match(resultado.stderr, /auditoria\.ocr/, 'debe decir exactamente qué falta en la config');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo auditar sin argumento imprime el uso y sale con código != 0', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        const proyecto = proyectoDeJuguete(juguete);
+        const resultado = await correrCli(proyecto, ['auditar']);
+        assert.notEqual(resultado.status, 0);
+        assert.match(resultado.stdout, /Uso: demo auditar/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo auditar detecta un frame sospechoso, lo guarda en disco y sale con código 1', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    // Este OCR de juguete ignora el frame de verdad y siempre "lee" dos identificadores: no
+    // hace falta un video con texto real —el patrón se aplica al texto que devuelva el
+    // OCR—, así que alcanza con probar que la tubería completa (frames → OCR → conteo →
+    // decisión → reporte) queda bien conectada.
+    const ocr = await iniciarOcrDeJuguete('12345678-5 y también 87654321-0');
+    try {
+        const proyecto = proyectoDeJuguete(juguete,
+            `auditoria: { ocr: '${ocr.url}', cada: 0.1, maximo: 3 },`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const grabado = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(grabado.status, 0, `demo grabar falló: ${grabado.stderr}`);
+
+        const resultado = await correrCli(proyecto, ['auditar', 'panel']);
+
+        assert.equal(resultado.status, 1, `debía salir con código != 0 al encontrar frames sospechosos: ${resultado.stderr}`);
+        assert.match(resultado.stdout, /SOSPECHOSO/);
+        assert.match(resultado.stdout, /segundo 0s/);
+        assert.match(resultado.stdout, /sospechosos/);
+
+        const carpetaFrames = join(proyecto, 'salida', 'auditoria', 'panel');
+        assert.ok(existsSync(carpetaFrames), 'debe guardar los frames muestreados en disco');
+        const frames = readdirSync(carpetaFrames).filter((f) => f.endsWith('.png'));
+        assert.ok(frames.length > 0, 'debe haber al menos un frame guardado para inspeccionar');
+    } finally {
+        await ocr.cerrar();
+        await juguete.cerrar();
+    }
+});
+
+test('demo auditar con un solo identificador por frame sale con código 0', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const ocr = await iniciarOcrDeJuguete('única persona a la vista: 11111111-1');
+    try {
+        const proyecto = proyectoDeJuguete(juguete,
+            `auditoria: { ocr: '${ocr.url}', cada: 0.1, maximo: 3 },`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        await correrCli(proyecto, ['grabar', 'panel']);
+
+        const resultado = await correrCli(proyecto, ['auditar', 'panel']);
+        assert.equal(resultado.status, 0, `no debía fallar sin frames sospechosos: ${resultado.stderr}`);
+        assert.doesNotMatch(resultado.stdout, /SOSPECHOSO/);
+    } finally {
+        await ocr.cerrar();
         await juguete.cerrar();
     }
 });

@@ -30,6 +30,20 @@ test('aplica los valores por defecto', async () => {
     assert.equal(cfg.voz.venv, null);
     assert.equal(cfg.voz.voces, null);
     assert.equal(cfg.marca.color, '#1e3a8a');
+    // auditoria.ocr queda en null sin defecto: es un host, y el motor no puede adivinarlo
+    // (ver src/auditoria.mjs). patron/cada/maximo sí traen un valor razonable.
+    assert.equal(cfg.auditoria.ocr, null);
+    assert.equal(cfg.auditoria.patron, '\\d{7,8}-[\\dkK]');
+    assert.equal(cfg.auditoria.cada, 10);
+    assert.equal(cfg.auditoria.maximo, 20);
+});
+
+test('auditoria se fusiona con sus defectos, sin pisar lo que no se declara', async () => {
+    const dir = proyecto({ ...minima, auditoria: { ocr: 'http://127.0.0.1:8110/ocr', maximo: 5 } });
+    const cfg = await cargarConfig(dir);
+    assert.equal(cfg.auditoria.ocr, 'http://127.0.0.1:8110/ocr');
+    assert.equal(cfg.auditoria.maximo, 5);
+    assert.equal(cfg.auditoria.cada, 10, 'lo no declarado debe seguir viniendo del defecto');
 });
 
 test('voz.venv y voz.voces relativos se resuelven contra la raíz del proyecto', async () => {
