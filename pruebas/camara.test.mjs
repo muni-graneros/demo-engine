@@ -74,14 +74,47 @@ test('el cursor sigue estando tras navegar dentro del mismo paso', async () => {
     });
 });
 
-test('acercar aplica una transformación y alejar la deja limpia', async () => {
+test('acercar sube la escala del viewport visual y alejar la vuelve a 1', async () => {
     await conPagina(async (page) => {
         await acercarA(page, '#entrar', { escala: 1.8 });
-        const conZoom = await page.evaluate(() => getComputedStyle(document.documentElement).transform);
-        assert.notEqual(conZoom, 'none', 'no se aplicó el zoom');
+        const conZoom = await page.evaluate(() => window.visualViewport.scale);
+        assert.ok(Math.abs(conZoom - 1.8) < 0.05, `la escala visual no subió: ${conZoom}`);
 
         await alejar(page);
-        const sinZoom = await page.evaluate(() => getComputedStyle(document.documentElement).transform);
-        assert.ok(sinZoom === 'none' || sinZoom === 'matrix(1, 0, 0, 1, 0, 0)', `quedó ${sinZoom}`);
+        const sinZoom = await page.evaluate(() => window.visualViewport.scale);
+        assert.ok(Math.abs(sinZoom - 1) < 0.05, `la escala visual no volvió a 1: ${sinZoom}`);
+    });
+});
+
+test('acercar no desancla elementos position:fixed (barra lateral tipo panel Filament)', async () => {
+    // Regresión del defecto real: transform: scale() sobre <html> convierte la raíz en
+    // bloque contenedor de lo fijo, y una barra lateral fija se corre y cambia de tamaño.
+    // Con el zoom vía CDP el layout no se toca, así que la barra debe quedar exactamente
+    // donde estaba, en coordenadas de layout (getBoundingClientRect).
+    await conPagina(async (page) => {
+        await page.setContent(`<!doctype html><html><body style="margin:0">
+            <div id="lateral" style="position:fixed;top:0;left:0;width:200px;height:100%;background:#111"></div>
+            <div style="margin-left:220px;padding:40px">
+                <button id="objetivo" style="margin-top:300px">Aprobar</button>
+            </div>
+        </body></html>`);
+        await instalarCursor(page);
+
+        const antes = await page.evaluate(() => {
+            const r = document.getElementById('lateral').getBoundingClientRect();
+            return { x: r.x, ancho: r.width };
+        });
+
+        await acercarA(page, '#objetivo', { escala: 1.6 });
+
+        const durante = await page.evaluate(() => {
+            const r = document.getElementById('lateral').getBoundingClientRect();
+            return { x: r.x, ancho: r.width };
+        });
+
+        assert.equal(durante.x, antes.x, `la barra fija se corrió: x ${antes.x} → ${durante.x}`);
+        assert.equal(durante.ancho, antes.ancho, `la barra fija cambió de ancho: ${antes.ancho} → ${durante.ancho}`);
+
+        await alejar(page);
     });
 });

@@ -21,7 +21,6 @@ export async function instalarCursor(page) {
                 border: 3px solid #38bdf8; z-index: 2147483645; pointer-events: none;
                 animation: __pulso 600ms ease-out forwards; }
             @keyframes __pulso { from { transform: scale(1); opacity: .9 } to { transform: scale(4); opacity: 0 } }
-            html.__zoom { transition: transform 700ms cubic-bezier(.4,0,.2,1); }
         `;
         document.head.appendChild(estilo);
         const cursor = document.createElement('div');
@@ -70,25 +69,69 @@ export async function pulsar(page, selector, { alPintar } = {}) {
     await instalarCursor(page);
 }
 
-/** Acerca la vista sobre un elemento, dejándolo centrado. */
-export async function acercarA(page, selector, { escala = 1.6 } = {}) {
-    // la hoja de estilos del zoom viaja con el cursor
-    await instalarCursor(page);
-    const { x, y } = await centroDe(page, selector);
-    await page.evaluate(({ x, y, escala }) => {
-        const html = document.documentElement;
-        html.classList.add('__zoom');
-        html.style.transformOrigin = `${x}px ${y}px`;
-        html.style.transform = `scale(${escala})`;
-    }, { x, y, escala });
-    await page.waitForTimeout(750);
+// Sesión CDP cacheada por página: abrir una sesión nueva en cada llamada es caro y las
+// va acumulando. Una por página alcanza para toda la grabación.
+const SESIONES_CDP = new WeakMap();
+
+const PASOS_ZOOM = 20;
+const MS_ZOOM = 600;
+
+async function sesionDe(page) {
+    let sesion = SESIONES_CDP.get(page);
+    if (!sesion) {
+        sesion = { cdp: await page.context().newCDPSession(page), origen: null };
+        SESIONES_CDP.set(page, sesion);
+    }
+    return sesion;
 }
 
+/** Recorre la escala del viewport visual en pasos pequeños para que el zoom se vea como un
+ * acercamiento suave y no como un salto. Si se entrega `punto`, lo mantiene centrado en
+ * cada paso (recentrar solo al final se vería como un tirón). */
+async function animarEscala(page, cdp, desde, hasta, punto) {
+    for (let i = 1; i <= PASOS_ZOOM; i++) {
+        const escala = desde + (hasta - desde) * (i / PASOS_ZOOM);
+        await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: escala });
+        if (punto) {
+            await page.evaluate(({ x, y }) => {
+                const vv = window.visualViewport;
+                window.scrollTo(x - vv.width / 2, y - vv.height / 2);
+            }, punto);
+        }
+        await page.waitForTimeout(MS_ZOOM / PASOS_ZOOM);
+    }
+}
+
+/**
+ * Acerca la vista sobre un elemento, dejándolo centrado.
+ *
+ * Usa el zoom real del navegador (CDP `Emulation.setPageScaleFactor`, el mismo mecanismo
+ * del pellizco en el móvil) y NO `transform: scale()` sobre `<html>`. Ese transform convierte
+ * la raíz en bloque contenedor de todo lo `position: fixed`, así que una barra lateral o
+ * superior fija —como las de un panel Filament— se desancla del viewport en vez de quedar
+ * a la vista. El zoom vía CDP deja el layout intacto: los elementos fijos siguen fijos.
+ */
+export async function acercarA(page, selector, { escala = 1.6 } = {}) {
+    // la hoja de estilos del cursor viaja con la cámara
+    await instalarCursor(page);
+    const { x, y } = await centroDe(page, selector);
+    const sesion = await sesionDe(page);
+    // se guarda el desplazamiento original solo la primera vez: si ya estábamos con zoom
+    // (dos acercarA seguidos sin alejar), no hay que perder el punto de partida real.
+    if (!sesion.origen) {
+        sesion.origen = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
+    }
+    const escalaActual = await page.evaluate(() => window.visualViewport.scale);
+    await animarEscala(page, sesion.cdp, escalaActual, escala, { x, y });
+}
+
+/** Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento. */
 export async function alejar(page) {
-    await page.evaluate(() => {
-        const html = document.documentElement;
-        html.style.transform = '';
-        html.style.transformOrigin = '';
-    });
-    await page.waitForTimeout(750);
+    const sesion = await sesionDe(page);
+    const escalaActual = await page.evaluate(() => window.visualViewport.scale);
+    await animarEscala(page, sesion.cdp, escalaActual, 1, null);
+    if (sesion.origen) {
+        await page.evaluate(({ x, y }) => window.scrollTo(x, y), sesion.origen);
+        sesion.origen = null;
+    }
 }
