@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ff, duracion } from './ffmpeg.mjs';
 import { construirLineaDeTiempo } from './linea-tiempo.mjs';
@@ -115,6 +115,10 @@ export async function montar({ pistas, pasos, voz, video }, { salida, nombre = '
         '-movflags', '+faststart', mp4,
     ];
     ff(cmd);
+
+    // Igual que en pegarCapitulos: limpia los intermedios (trozos, .srt, lista de concat)
+    // para que la carpeta de salida solo tenga lo que el usuario quiere ver.
+    rmSync(temporal, { recursive: true, force: true });
 
     return { mp4, vtt, segmentos };
 }

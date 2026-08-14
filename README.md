@@ -18,6 +18,18 @@ Un sistema que automatiza la grabación de tutoriales de video para plataformas 
 npm install demo-engine
 ```
 
+**Importante — dónde correr ese `npm install`:** tiene que ser en el `package.json` **desde el
+que vas a invocar `demo`** y **donde vive `demo.config.mjs`** — normalmente la raíz del
+proyecto que estás grabando. NO instales el paquete en un `package.json` de una subcarpeta
+separada (por ejemplo `npm install --prefix e2e demo-engine` mientras `demo.config.mjs` y los
+guiones viven en la raíz): eso NO funciona. Node resuelve los *bare specifiers* de un módulo
+ESM (`import 'playwright'`, `import 'marked'`, etc.) buscando `node_modules` desde la ubicación
+del script hacia arriba en el árbol de directorios — no desde el directorio donde corriste
+`npm install`. Y `NODE_PATH` no ayuda acá: esa variable no aplica a la resolución de módulos
+ESM. Si `demo-engine` (y sus dependencias) quedan instalados en `e2e/node_modules` pero
+`demo.config.mjs` y los guiones están en la raíz, el CLI revienta con `ERR_MODULE_NOT_FOUND` al
+intentar cargar sus propias dependencias.
+
 Requisitos:
 - **Node ≥ 20** (ESM puro, sin TypeScript)
 - **ffmpeg 7.0+** (suministrado por `ffmpeg-static`)
@@ -67,7 +79,8 @@ export default {
     escudo: './public/logo.png' // PNG 200x200, opcional
   },
 
-  // Login automático: selectores CSS para campos y botón.
+  // Login automático: selectores CSS para campos y botón. Este bloque es el DEFECTO
+  // GLOBAL; cada actor puede pisarlo total o parcialmente con su propio `login` (ver abajo).
   login: {
     url: '/login',                       // Página de entrada
     usuario: 'input[name=email]',        // Campo correo (defecto)
@@ -86,7 +99,13 @@ export default {
     },
     ciudadano: {
       email: 'c@x.cl',
-      password: 'otro123'
+      password: 'otro123',
+      // Login propio, fusionado SOBRE el `login` global: solo hace falta pisar lo que
+      // cambia. Útil cuando el sistema tiene más de una superficie de autenticación (por
+      // ejemplo /admin/login para el panel de personal y /login para el portal del
+      // ciudadano): sin esto, el `login` global obliga a elegir una y deja a los actores
+      // de la otra sin forma de entrar.
+      login: { url: '/portal-ciudadano/login' }
     }
   },
 
@@ -115,6 +134,17 @@ export default {
 ```
 
 Valores por defecto: video `1600x1000`, `pausaMinima 1200ms`, voz Kokoro español con Piper de respaldo, login en URL raíz con selectores estándar.
+
+**Ojo con los selectores por defecto en paneles Filament (5 + Livewire 4):** los ejemplos de
+arriba (`input[name=email]`, `input[type=password]`) son genéricos y sirven para un form HTML
+cualquiera, pero un panel Filament típico NO los cumple:
+- El campo de correo no trae atributo `name`: es `id="form.email"` con `wire:model="data.email"`.
+  Selector que sí funciona: `input[id="form.email"]` (o `[wire\\:model="data.email"]`) — usar
+  un selector de atributo con el valor entre comillas evita tener que escapar el punto.
+- El campo de contraseña tampoco trae `type="password"` en el HTML que sirve el servidor: lo
+  agrega Alpine.js recién al hidratar en el navegador. Buscarlo por `input[type=password]`
+  ANTES de esa hidratación no encuentra nada. Selector que sí funciona, y que no depende de
+  cuándo hidrató Alpine: `input[wire\\:model="data.password"]`.
 
 ## Guiones: estructura
 
@@ -367,7 +397,12 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `cargarConfig(rutaProyecto: string) → Promise<config>`
 
 ### Sesiones
-- `prepararSesiones(config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>`
+- `prepararSesiones(config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>` — loguea a
+  TODOS los actores de `config.actores` (lo que usa el comando `preparar`).
+- `prepararSesionesParaGuion(guion, config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>`
+  — reutiliza los `storageState` que ya estén en disco y solo loguea a los actores que el
+  guion usa (lo que usan `grabar`/`curso`/`manual`).
+- `actoresDeGuion(guion) → string[]` — actores que un guion usa, recorriendo sus escenas y pasos.
 - `totp(secreto: string, segundos?: number) → código6Digitos`
 
 ### Grabación
@@ -401,6 +436,7 @@ Todas estas funciones se reexportan desde `demo-engine`:
 
 ### Portadas
 - `portada(page, { titulo, subtitulo?, capitulo?, marca?, esperaMs? }) → Promise<void>`
+- `cierre(page, { mensaje, marca?, esperaMs? }) → Promise<void>` (simétrico a `portada`)
 
 ## Invariantes
 

@@ -6,14 +6,21 @@
 
 const MS_MOVIMIENTO = 550;
 
-/** Dibuja el cursor y el estilo de los halos. Idempotente. */
+/** Dibuja el cursor y el estilo de los halos. Idempotente.
+ *
+ * El cursor nace OCULTO (opacity:0): sin esto, cada documento nuevo (cada navegación) lo
+ * instala visible en (0,0), y ahí se queda a la vista —saltando a la esquina superior
+ * izquierda en el video— hasta el próximo `moverCursorA`. `moverCursorA` es quien lo hace
+ * visible, justo cuando ya sabe adónde llevarlo.
+ */
 export async function instalarCursor(page) {
     await page.evaluate((ms) => {
         if (document.getElementById('__cursor')) return;
         const estilo = document.createElement('style');
         estilo.textContent = `
             #__cursor { position: fixed; top: 0; left: 0; width: 22px; height: 22px; z-index: 2147483646;
-                pointer-events: none; transition: transform ${ms}ms cubic-bezier(.4,0,.2,1);
+                pointer-events: none; opacity: 0;
+                transition: transform ${ms}ms cubic-bezier(.4,0,.2,1), opacity 120ms linear;
                 background: no-repeat center/contain url("data:image/svg+xml;utf8,\
 <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
 <path d='M5 2l14 9-6 1.5L15 20l-3 1-2-7-5 2z' fill='%23fff' stroke='%23111' stroke-width='1.5'/></svg>"); }
@@ -44,7 +51,7 @@ export async function moverCursorA(page, selector) {
     const { x, y } = await centroDe(page, selector);
     await page.evaluate(({ x, y }) => {
         const c = document.getElementById('__cursor');
-        if (c) c.style.transform = `translate(${x}px, ${y}px)`;
+        if (c) { c.style.transform = `translate(${x}px, ${y}px)`; c.style.opacity = '1'; }
     }, { x, y });
     await page.mouse.move(x, y);
     await page.waitForTimeout(MS_MOVIMIENTO + 80);

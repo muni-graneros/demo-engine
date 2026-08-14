@@ -1,5 +1,5 @@
 import { createHmac } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
@@ -42,12 +42,18 @@ export async function prepararSesiones(config, { dirSesiones }) {
     exigirEntornoDeDesarrollo(config.baseURL);
 
     mkdirSync(dirSesiones, { recursive: true });
-    const login = config.login ?? {};
+    const loginGlobal = config.login ?? {};
     const navegador = await chromium.launch();
     const sesiones = {};
 
     try {
         for (const [actor, datos] of Object.entries(config.actores)) {
+            // Cada actor puede traer su propio bloque `login`, fusionado SOBRE el global: el
+            // sistema real tiene dos superficies de autenticación (panel de personal vs.
+            // portal del ciudadano), y un único `login` en la config obligaría a elegir una
+            // y dejaría a los actores de la otra sin forma de entrar.
+            const login = { ...loginGlobal, ...(datos.login ?? {}) };
+
             const ctx = await navegador.newContext({ baseURL: config.baseURL });
             const page = await ctx.newPage();
             await page.goto(login.url ?? '/');
@@ -70,6 +76,18 @@ export async function prepararSesiones(config, { dirSesiones }) {
                 if (!entro) {
                     throw new Error(`el actor "${actor}" no logró entrar: no apareció ${login.comprobar}`);
                 }
+            } else {
+                // Sin selector de comprobación, igual verificamos algo objetivo en vez de dar
+                // por bueno cualquier resultado: que quedaron cookies de sesión, y que ya no
+                // estamos en la pantalla de login. Sin esto, un login que en realidad falló
+                // (credenciales malas, formulario que no reaccionó) pasaba en silencio y el
+                // defecto se manifestaba mucho después, como un video que empieza en el login.
+                const urlLogin = new URL(login.url ?? '/', config.baseURL).href;
+                const cookies = await ctx.cookies();
+                if (cookies.length === 0 || page.url() === urlLogin) {
+                    await ctx.close();
+                    throw new Error(`el actor "${actor}" no logró entrar: sigue sin cookies de sesión o sigue en la pantalla de login (${page.url()})`);
+                }
             }
 
             const archivo = join(dirSesiones, `${actor}.json`);
@@ -79,6 +97,58 @@ export async function prepararSesiones(config, { dirSesiones }) {
         }
     } finally {
         await navegador.close();
+    }
+
+    return sesiones;
+}
+
+/** Actores que un guion usa de verdad, recorriendo sus escenas y pasos. */
+export function actoresDeGuion(guion) {
+    const actores = new Set();
+    for (const escena of guion.escenas ?? []) {
+        for (const paso of escena.pasos ?? []) {
+            actores.add(paso.actor);
+        }
+    }
+    return [...actores];
+}
+
+/**
+ * Prepara sesiones para grabar UN guion en concreto: reutiliza los `storageState` que ya
+ * estén en disco y solo loguea a los actores que el guion usa y que todavía no tienen
+ * sesión guardada.
+ *
+ * Este es el camino que usan `grabar`/`curso`/`manual` desde el CLI. Relogear a los cuatro
+ * actores de la config (dos de ellos con MFA) para grabar un guion que usa uno solo es caro
+ * y no aporta nada; con un sistema real esa relogueada de más fue buena parte de los 45
+ * segundos que tardó una grabación de 29 segundos de video.
+ *
+ * `preparar` (el comando del CLI) sigue llamando a `prepararSesiones` directo con TODOS los
+ * actores de la config: su trabajo es justamente dejar lista la sesión de todo el mundo de
+ * una vez, por adelantado.
+ */
+export async function prepararSesionesParaGuion(guion, config, { dirSesiones }) {
+    const necesarios = actoresDeGuion(guion);
+    const sesiones = {};
+    const faltantes = [];
+
+    for (const actor of necesarios) {
+        const archivo = join(dirSesiones, `${actor}.json`);
+        if (existsSync(archivo)) {
+            sesiones[actor] = archivo;
+        } else {
+            faltantes.push(actor);
+        }
+    }
+
+    // Un actor que el guion usa pero que no está en la config: no lo preparamos acá (no hay
+    // con qué loguearlo). `grabar()` es quien falla con un mensaje claro al llegar a ese paso.
+    const porLoguear = faltantes.filter((actor) => config.actores?.[actor]);
+    if (porLoguear.length) {
+        const actoresFiltrados = Object.fromEntries(
+            porLoguear.map((actor) => [actor, config.actores[actor]]));
+        const nuevas = await prepararSesiones({ ...config, actores: actoresFiltrados }, { dirSesiones });
+        Object.assign(sesiones, nuevas);
     }
 
     return sesiones;

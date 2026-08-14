@@ -1,10 +1,10 @@
 export { cargarConfig, ErrorConfig } from './configurar.mjs';
-export { prepararSesiones, totp } from './sesiones.mjs';
+export { prepararSesiones, prepararSesionesParaGuion, actoresDeGuion, totp } from './sesiones.mjs';
 export { grabar } from './grabador.mjs';
 export { montar } from './montaje.mjs';
 export { pegarCapitulos } from './curso.mjs';
 export { generarManual } from './manual.mjs';
 export { crearVoz } from './voz/index.mjs';
-export { portada } from './rotulos.mjs';
+export { portada, cierre } from './rotulos.mjs';
 export { abrirFiltrado, cubrir, descubrir, exigirEntornoDeDesarrollo } from './privacidad.mjs';
 export { instalarCursor, moverCursorA, pulsar, acercarA, alejar } from './camara.mjs';

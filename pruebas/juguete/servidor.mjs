@@ -21,6 +21,20 @@ function paginaLogin() {
     </form>`);
 }
 
+// Segunda superficie de autenticación: el "portal" del ciudadano, con URL propia. Existe
+// para probar que cada actor puede traer su propio bloque `login` (fusionado sobre el
+// global) en vez de que un único `login` fuerce a elegir una sola superficie. Reutiliza a
+// propósito los MISMOS selectores que el login admin (mismos names/ids), para que el test
+// de fusión pueda verificar que basta con que el actor pise solo `url` y herede el resto.
+function paginaPortal() {
+    return marco('Entrar al portal', `<h1>Portal del ciudadano</h1>
+    <form method="POST" action="/portal">
+      <p><input name="usuario" placeholder="usuario"></p>
+      <p><input name="clave" type="password" placeholder="clave"></p>
+      <p><button type="submit" id="entrar">Entrar</button></p>
+    </form>`);
+}
+
 // El panel filtra EN EL NAVEGADOR, con retardo, imitando a Filament/Livewire: primero
 // pinta la tabla COMPLETA y solo después aplica el filtro. Esa ventana es exactamente el
 // riesgo de privacidad que el motor debe tapar; un juguete que filtrara en el servidor de
@@ -92,10 +106,25 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
                     res.writeHead(302, { location: '/codigo' });
                     return res.end();
                 }
+                // Credenciales inválidas: vuelve al login SIN dejar cookie, como cualquier
+                // sistema real. Existe para probar la verificación por defecto (sin
+                // `login.comprobar`) cuando el login de verdad falla.
+                if (datos.usuario === 'malacontra') {
+                    res.writeHead(302, { location: '/' });
+                    return res.end();
+                }
                 res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=funcionario; Path=/' });
                 res.end();
             });
         }
+        if (url.pathname === '/portal' && req.method === 'POST') {
+            return leerCuerpo(req, (datos) => {
+                res.writeHead(302, { location: '/portal/panel', 'set-cookie': 'sesion=portalciudadano; Path=/' });
+                res.end();
+            });
+        }
+        if (url.pathname === '/portal') return html(paginaPortal());
+        if (url.pathname === '/portal/panel') return html(marco('Portal', '<h1 id="portal-ok">Portal ciudadano</h1>'));
         if (url.pathname === '/codigo' && req.method === 'GET') return html(paginaCodigo());
         if (url.pathname === '/codigo' && req.method === 'POST') {
             return leerCuerpo(req, (datos) => {

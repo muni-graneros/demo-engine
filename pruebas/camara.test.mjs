@@ -59,6 +59,36 @@ test('pulsar deja un halo y de verdad hace clic', async () => {
     });
 });
 
+test('el cursor nace oculto y solo se muestra cuando algo lo mueve a su primer destino', async () => {
+    // Defecto real: el cursor se instalaba visible en (0,0), así que tras cada navegación
+    // (que borra el DOM y con él el cursor) aparecía un instante saltando a la esquina
+    // superior izquierda, visible durante la narración, hasta el siguiente `pulsar`.
+    await conPagina(async (page) => {
+        const opacidadInicial = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('__cursor')).opacity);
+        assert.equal(opacidadInicial, '0', 'el cursor no debe verse antes de que algo lo mueva');
+
+        await moverCursorA(page, '#entrar');
+        const opacidadTrasMover = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('__cursor')).opacity);
+        assert.equal(opacidadTrasMover, '1', 'tras moverlo a su primer destino, el cursor debe hacerse visible');
+    });
+});
+
+test('tras navegar, el cursor nace oculto otra vez (no aparece parqueado en la esquina)', async () => {
+    await conPagina(async (page) => {
+        await moverCursorA(page, '#entrar');   // ya visible en el documento viejo
+        const url = page.url();
+        await page.goto(url);                  // nueva página: se lleva el DOM y el cursor
+        await instalarCursor(page);            // como haría el motor tras cualquier navegación
+
+        const opacidad = await page.evaluate(() =>
+            getComputedStyle(document.getElementById('__cursor')).opacity);
+        assert.equal(opacidad, '0',
+            'en el documento nuevo el cursor debe nacer oculto, no visible en (0,0)');
+    });
+});
+
 test('el cursor sigue estando tras navegar dentro del mismo paso', async () => {
     // Caso realísimo: un guion hace page.goto(...) y luego pulsa. La navegación borra el
     // cursor instalado antes, así que pulsar tiene que reponerlo por su cuenta.

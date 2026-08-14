@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ff, duracion } from '../src/ffmpeg.mjs';
@@ -79,6 +79,21 @@ test('un desborde pequeño se recorta y los tiempos siguen calzando con el video
     const prometido = segmentos.at(-1).finSeg;
     assert.ok(Math.abs(prometido - duracion(mp4)) < 0.3,
         `los subtítulos prometen ${prometido}s y el video dura ${duracion(mp4)}s: quedarían desfasados`);
+});
+
+test('limpia los archivos intermedios de la carpeta de salida al terminar', async () => {
+    // Igual que ya se hizo en pegarCapitulos: la carpeta de salida debe contener solo lo
+    // que el usuario quiere ver, no los trozos y el .srt intermedios del montaje.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'green') };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 2000, narrar: 'Hola.' }];
+
+    await montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'final.mp4' });
+
+    assert.ok(!existsSync(join(dir, '.tmp')), 'la carpeta temporal ".tmp" debe limpiarse tras montar');
+    assert.deepEqual(readdirSync(dir).sort(), ['final.mp4', 'final.vtt', 'uno.mp4'].sort(),
+        'la carpeta de salida solo debe tener lo que produce el montaje, sin intermedios');
 });
 
 test('un desborde grande falla, en vez de recortar media escena en silencio', async () => {

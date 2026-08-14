@@ -21,3 +21,25 @@ export async function portada(page, { titulo, subtitulo = '', capitulo = '', mar
     }, { titulo, subtitulo, capitulo, marca });
     await page.waitForTimeout(esperaMs);
 }
+
+/**
+ * Cierre de capítulo, simétrico a `portada`: mismo criterio, se dibuja sobre `about:blank`,
+ * nunca sobre datos.
+ */
+export async function cierre(page, { mensaje, marca = {}, esperaMs = 2200 }) {
+    await page.goto('about:blank');
+    await page.evaluate(({ mensaje, marca }) => {
+        const escape = (t) => {
+            const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+            return String(t).replace(/[&<>"']/g, (c) => m[c]);
+        };
+        document.body.style.margin = '0';
+        document.body.innerHTML = `
+        <div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
+                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:system-ui;text-align:center;gap:14px">
+          <h1 style="font-size:48px;margin:0;font-weight:700">${escape(mensaje)}</h1>
+          <div style="margin-top:26px;font-size:17px;opacity:.6">${escape(marca.nombre ?? '')}</div>
+        </div>`;
+    }, { mensaje, marca });
+    await page.waitForTimeout(esperaMs);
+}

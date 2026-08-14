@@ -3,7 +3,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cargarConfig, ErrorConfig } from './src/configurar.mjs';
-import { prepararSesiones } from './src/sesiones.mjs';
+import { prepararSesiones, prepararSesionesParaGuion } from './src/sesiones.mjs';
 import { grabar } from './src/grabador.mjs';
 import { montar } from './src/montaje.mjs';
 import { pegarCapitulos } from './src/curso.mjs';
@@ -19,17 +19,23 @@ const cargarGuion = async (config, id) =>
 async function main() {
     const config = await cargarConfig(raiz);
     const voz = crearVoz(config.voz);
-    const sesiones = () => prepararSesiones(config, { dirSesiones: join(raiz, '.sesiones') });
+    const dirSesiones = join(raiz, '.sesiones');
+    // Sesiones para UN guion: reutiliza lo que ya haya en disco y solo loguea a los actores
+    // que ese guion usa (no a todos los de la config). Grabar un guion de un solo actor no
+    // debe releoguear a los otros tres, MFA incluido.
+    const sesionesDe = (guion) => prepararSesionesParaGuion(guion, config, { dirSesiones });
 
     if (orden === 'preparar') {
         if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
-        await sesiones();
+        // Acá sí, TODOS los actores de la config: el trabajo de `preparar` es dejar lista la
+        // sesión de todo el mundo de una vez, por adelantado.
+        await prepararSesiones(config, { dirSesiones });
         return console.log('Sesiones listas.');
     }
 
     if (orden === 'grabar') {
         const guion = await cargarGuion(config, argumento);
-        const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesiones(), salida: config.salida, voz });
+        const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
         const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
             { salida: config.salida, nombre: `${guion.id}.mp4` });
         return console.log(mp4);
@@ -44,7 +50,7 @@ async function main() {
                 continue;
             }
             const guion = await cargarGuion(config, cap.guion);
-            const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesiones(), salida: config.salida, voz });
+            const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
             const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
                 { salida: config.salida, nombre: `${cap.id}.mp4` });
             partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4 });
@@ -56,7 +62,7 @@ async function main() {
 
     if (orden === 'manual') {
         const guion = await cargarGuion(config, argumento ?? 'curso');
-        const { pasos } = await grabar(guion, { config, sesiones: await sesiones(), salida: config.salida, voz });
+        const { pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
         const { pdf } = await generarManual({ guion, pasos, marca: config.marca }, { salida: config.salida });
         return console.log(pdf);
     }
