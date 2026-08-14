@@ -184,7 +184,17 @@ export default {
 **Notas:**
 - `actor` debe existir en `config.actores`.
 - `narrar` es opcional; si está vacío, no se sintetiza voz.
-- `hacer` recibe un objeto Playwright `Page` listo para navegar.
+- `hacer` recibe un objeto Playwright `Page` listo para navegar, y un segundo argumento
+  `contexto` con, como mínimo, `{ config }` — así el guion puede alcanzar `config.marca`
+  (nombre, color, escudo) para pintar `portada()`/`cierre()` con la identidad del sistema en
+  vez de con el azul por defecto del paquete:
+  ```js
+  hacer: async (page, { config }) => {
+    await portada(page, { titulo: 'Bienvenida', marca: config.marca });
+  }
+  ```
+  Un guion que declara `hacer(page)` a secas sigue funcionando sin cambios: el segundo
+  argumento es adicional, no reemplaza al primero.
 - El tiempo de cada paso es `max(pausaMinima, duracionVoz)`.
 
 ## Guion maestro: `curso.mjs`

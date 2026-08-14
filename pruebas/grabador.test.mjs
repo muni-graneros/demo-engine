@@ -64,6 +64,75 @@ test('graba una pista por actor y devuelve pasos con reloj local y global', asyn
     }
 });
 
+test('hacer(page, contexto) recibe la marca de la config: un guion puede pintar su propia identidad', async () => {
+    // Defecto real: portada()/cierre() necesitan config.marca (nombre, color, escudo) para no
+    // salir con el azul por defecto del paquete, pero `hacer` solo recibía `page`. Sin un
+    // segundo argumento, ningún guion podía alcanzar la marca del sistema que está grabando.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 200 },
+            marca: { nombre: 'Sistema de Prueba', color: '#123456' },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        let marcaRecibida = null;
+        const guion = {
+            id: 'con-marca',
+            escenas: [{ id: 'a', titulo: 'Portada', pasos: [{
+                actor: 'funcionario',
+                hacer: async (page, { config }) => {
+                    marcaRecibida = config.marca;
+                    await page.goto(`${juguete.url}/panel`);
+                },
+            }] }],
+        };
+
+        await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+
+        assert.deepEqual(marcaRecibida, config.marca,
+            'hacer() debe recibir { config } como segundo argumento, con la marca del sistema');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('un guion que declara hacer(page) a secas sigue funcionando sin cambios', async () => {
+    // Compatibilidad hacia atrás: el segundo argumento es adicional, no reemplaza al primero.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 200 },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guion = {
+            id: 'sin-marca',
+            escenas: [{ id: 'a', titulo: 'Panel', pasos: [{
+                actor: 'funcionario',
+                hacer: async (page) => { await page.goto(`${juguete.url}/panel`); },
+            }] }],
+        };
+
+        const { pasos } = await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+        assert.equal(pasos.length, 1);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
 test('el paso dura al menos lo que la locución, no un tiempo fijo', async () => {
     const juguete = await iniciarJuguete({ puerto: 0 });
     const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));

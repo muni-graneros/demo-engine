@@ -63,7 +63,14 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                 // Se repone el cursor antes de actuar: en un actor reutilizado, el paso
                 // anterior pudo haber navegado y una navegación se lleva el cursor consigo.
                 await instalarCursor(page);
-                await paso.hacer(page);
+                // Segundo argumento: el contexto del guion. Como mínimo trae `config`, de
+                // donde `portada()`/`cierre()` sacan `config.marca` (nombre, color, escudo).
+                // Sin esto, un guion no tenía forma de alcanzar la identidad del sistema que
+                // está grabando y las portadas salían con el azul por defecto del paquete —
+                // visible en el video final, porque es lo primero que se ve de cada capítulo.
+                // Los guiones que declaran `hacer(page)` a secas ignoran este segundo
+                // argumento y siguen funcionando sin cambios.
+                await paso.hacer(page, { config });
                 await instalarCursor(page);   // el propio `hacer` también pudo navegar
 
                 // El paso dura lo que dure su locución (más un mínimo), en vez de un tiempo
