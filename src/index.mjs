@@ -1,5 +1,5 @@
 export { cargarConfig, ErrorConfig } from './configurar.mjs';
-export { prepararSesiones, prepararSesionesParaGuion, actoresDeGuion, totp } from './sesiones.mjs';
+export { prepararSesiones, prepararSesionesParaGuion, sesionSigueViva, actoresDeGuion, totp } from './sesiones.mjs';
 export { grabar } from './grabador.mjs';
 export { montar } from './montaje.mjs';
 export { pegarCapitulos } from './curso.mjs';

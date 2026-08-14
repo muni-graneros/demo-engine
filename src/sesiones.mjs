@@ -102,6 +102,44 @@ export async function prepararSesiones(config, { dirSesiones }) {
     return sesiones;
 }
 
+/**
+ * Comprueba si un `storageState` guardado en disco TODAVÍA sirve para entrar.
+ *
+ * Reutiliza el mismo criterio que ya usa `prepararSesiones` para validar un login recién
+ * hecho —con `login.comprobar`, que exista ese selector; sin él, que queden cookies y que no
+ * se esté en la URL de login— pero aplicado a una sesión vieja en vez de a una recién creada:
+ * se navega a `login.url` cargando ese `storageState` y se mira dónde se cae. Un sistema real
+ * (o el juguete de pruebas) manda lejos del login a quien ya tiene sesión viva; a quien no,
+ * lo deja ahí o lo rebota de vuelta.
+ *
+ * @param {string} archivo ruta al storageState guardado
+ * @param {object} config con `baseURL`
+ * @param {object} login bloque de login YA fusionado (global + del actor)
+ * @returns {Promise<boolean>}
+ */
+export async function sesionSigueViva(archivo, config, login = {}) {
+    const navegador = await chromium.launch();
+    try {
+        const ctx = await navegador.newContext({ baseURL: config.baseURL, storageState: archivo });
+        try {
+            const page = await ctx.newPage();
+            const urlLogin = new URL(login.url ?? '/', config.baseURL).href;
+            await page.goto(login.url ?? '/');
+            await page.waitForLoadState('domcontentloaded');
+
+            if (login.comprobar) {
+                return Boolean(await page.locator(login.comprobar).count());
+            }
+            const cookies = await ctx.cookies();
+            return cookies.length > 0 && page.url() !== urlLogin;
+        } finally {
+            await ctx.close();
+        }
+    } finally {
+        await navegador.close();
+    }
+}
+
 /** Actores que un guion usa de verdad, recorriendo sus escenas y pasos. */
 export function actoresDeGuion(guion) {
     const actores = new Set();
@@ -129,12 +167,18 @@ export function actoresDeGuion(guion) {
  */
 export async function prepararSesionesParaGuion(guion, config, { dirSesiones }) {
     const necesarios = actoresDeGuion(guion);
+    const loginGlobal = config.login ?? {};
     const sesiones = {};
     const faltantes = [];
 
     for (const actor of necesarios) {
         const archivo = join(dirSesiones, `${actor}.json`);
-        if (existsSync(archivo)) {
+        // No basta con que el archivo EXISTA: la sesión pudo haber caducado del lado del
+        // servidor entre una grabación y la siguiente (pasa de verdad). Reutilizarla a
+        // ciegas hace que el fallo aparezca a mitad de la grabación siguiente, confuso, en
+        // vez de acá, claro y resuelto solo con un relogueo transparente.
+        const login = { ...loginGlobal, ...(config.actores?.[actor]?.login ?? {}) };
+        if (existsSync(archivo) && await sesionSigueViva(archivo, config, login)) {
             sesiones[actor] = archivo;
         } else {
             faltantes.push(actor);

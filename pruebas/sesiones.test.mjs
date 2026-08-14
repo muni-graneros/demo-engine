@@ -180,6 +180,41 @@ test('prepararSesionesParaGuion solo prepara los actores que el guion usa, no to
     }
 });
 
+test('prepararSesionesParaGuion no reutiliza una sesión que caducó del lado del servidor: relogueá de forma transparente', async () => {
+    // Defecto real: se reutilizaba el storageState por el solo hecho de que el archivo
+    // existiera en disco, sin comprobar que la sesión siguiera sirviendo. Si caducó entre una
+    // grabación y la siguiente, el fallo aparecía a mitad de la grabación siguiente, confuso,
+    // en vez de acá, claro, y resuelto solo con un nuevo login.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+        };
+        const guion = { id: 'panel', escenas: [
+            { id: 'a', pasos: [{ actor: 'funcionario', hacer: async () => {} }] },
+        ] };
+
+        const primera = await prepararSesionesParaGuion(guion, config, { dirSesiones: dir });
+        const epocaAntes = JSON.parse(readFileSync(primera.funcionario, 'utf8'))
+            .cookies.find((c) => c.name === 'epoca').value;
+
+        await juguete.expirar();
+
+        const segunda = await prepararSesionesParaGuion(guion, config, { dirSesiones: dir });
+        const guardado = JSON.parse(readFileSync(segunda.funcionario, 'utf8'));
+        const epocaDespues = guardado.cookies.find((c) => c.name === 'epoca')?.value;
+        assert.ok(guardado.cookies.some((c) => c.name === 'sesion'),
+            'debió volver a loguear al mismo actor, dejando una sesión nueva con cookie de sesión');
+        assert.notEqual(epocaDespues, epocaAntes,
+            'la sesión guardada sigue siendo la vieja (caducada): no se relogueó de verdad');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
 test('prepararSesionesParaGuion reutiliza el storageState que ya está en disco, no vuelve a loguear', async () => {
     const juguete = await iniciarJuguete({ puerto: 0 });
     const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));

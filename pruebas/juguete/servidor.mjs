@@ -89,17 +89,51 @@ function leerCuerpo(req, seguir) {
     req.on('end', () => seguir(Object.fromEntries(new URLSearchParams(crudo))));
 }
 
+/** Lee las cookies de la cabecera como un objeto plano {nombre: valor}. */
+function leerCookies(req) {
+    return Object.fromEntries((req.headers.cookie ?? '').split(';')
+        .map((par) => par.trim()).filter(Boolean)
+        .map((par) => { const i = par.indexOf('='); return [par.slice(0, i), par.slice(i + 1)]; }));
+}
+
 /** Levanta el sistema de juguete. `puerto: 0` toma uno libre. */
 export function iniciarJuguete({ puerto = 0 } = {}) {
+    // Época de las sesiones: crece cada vez que se llama a /expirar. Una cookie de sesión
+    // solo sirve si trae la época ACTUAL, no cualquier época pasada. Existe para simular una
+    // expiración de verdad —el servidor deja de aceptar sesiones viejas, como cuando se
+    // limpia la tabla de sesiones o vence el TTL— sin tocar el valor de la cookie `sesion`
+    // (varios tests comparan ese valor de forma exacta, p. ej. `c.value === 'funcionario'`).
+    let epoca = 0;
+
     const servidor = createServer((req, res) => {
         const url = new URL(req.url, 'http://localhost');
-        const conSesion = (req.headers.cookie ?? '').includes('sesion=');
+        const cookies = leerCookies(req);
+        // Sin cookie `epoca` (storageState armado a mano en algunos tests, con solo la
+        // cookie `sesion`), se asume época 0: la sesión es tan vieja como el servidor mismo,
+        // y solo deja de servir si YA hubo al menos una expiración.
+        const epocaCookie = cookies.epoca !== undefined ? Number(cookies.epoca) : 0;
+        const conSesion = Boolean(cookies.sesion) && epocaCookie === epoca;
+        const cookiesSesion = (valor) => [`sesion=${valor}; Path=/`, `epoca=${epoca}; Path=/`];
         const html = (cuerpo) => {
             res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
             res.end(cuerpo);
         };
 
-        if (url.pathname === '/') return html(paginaLogin());
+        if (url.pathname === '/expirar' && req.method === 'POST') {
+            // Simula que el servidor revocó TODAS las sesiones vigentes (TTL, logout global,
+            // limpieza de tabla de sesiones): las cookies siguen ahí en el cliente, pero ya
+            // no sirven. Las que se emitan DESPUÉS de esto sí sirven (traen la época nueva).
+            epoca++;
+            res.writeHead(200, { 'content-type': 'text/plain' });
+            return res.end('ok');
+        }
+        if (url.pathname === '/') {
+            // Si ya hay sesión viva, un login real no vuelve a mostrar el formulario: manda
+            // al panel. Esto es lo que permite comprobar, desde afuera, si una sesión
+            // GUARDADA sigue sirviendo: visitar login.url y ver si te rebota o no.
+            if (conSesion) { res.writeHead(302, { location: '/panel' }); return res.end(); }
+            return html(paginaLogin());
+        }
         if (url.pathname === '/login' && req.method === 'POST') {
             return leerCuerpo(req, (datos) => {
                 if (datos.usuario === 'conmfa') {           // este actor pasa por el 2º factor
@@ -113,17 +147,20 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
                     res.writeHead(302, { location: '/' });
                     return res.end();
                 }
-                res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=funcionario; Path=/' });
+                res.writeHead(302, { location: '/panel', 'set-cookie': cookiesSesion('funcionario') });
                 res.end();
             });
         }
         if (url.pathname === '/portal' && req.method === 'POST') {
             return leerCuerpo(req, (datos) => {
-                res.writeHead(302, { location: '/portal/panel', 'set-cookie': 'sesion=portalciudadano; Path=/' });
+                res.writeHead(302, { location: '/portal/panel', 'set-cookie': cookiesSesion('portalciudadano') });
                 res.end();
             });
         }
-        if (url.pathname === '/portal') return html(paginaPortal());
+        if (url.pathname === '/portal') {
+            if (conSesion) { res.writeHead(302, { location: '/portal/panel' }); return res.end(); }
+            return html(paginaPortal());
+        }
         if (url.pathname === '/portal/panel') return html(marco('Portal', '<h1 id="portal-ok">Portal ciudadano</h1>'));
         if (url.pathname === '/codigo' && req.method === 'GET') return html(paginaCodigo());
         if (url.pathname === '/codigo' && req.method === 'POST') {
@@ -132,7 +169,7 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
                     res.writeHead(302, { location: '/codigo' });
                     return res.end();
                 }
-                res.writeHead(302, { location: '/panel', 'set-cookie': 'sesion=profesional; Path=/' });
+                res.writeHead(302, { location: '/panel', 'set-cookie': cookiesSesion('profesional') });
                 res.end();
             });
         }
@@ -152,8 +189,13 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
     return new Promise((listo) => {
         servidor.listen(puerto, '127.0.0.1', () => {
             const { port } = servidor.address();
+            const url = `http://127.0.0.1:${port}`;
             listo({
-                url: `http://127.0.0.1:${port}`,
+                url,
+                // Revoca todas las sesiones vigentes de este juguete: para probar que una
+                // sesión guardada en disco, que caducó del lado del servidor, se detecta y
+                // se relogueá en vez de fallar a mitad de una grabación posterior.
+                expirar: () => fetch(`${url}/expirar`, { method: 'POST' }),
                 cerrar: () => new Promise((f) => servidor.close(f)),
             });
         });
