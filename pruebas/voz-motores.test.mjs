@@ -108,3 +108,25 @@ for (const [nombre, motor, vocesFalsas] of [['piper', piper, vocesPiperFalsas], 
         assert.equal(existsSync(dirname(wav)), false, 'tras limpiar(), el directorio de la corrida ya no debe estar');
     });
 }
+
+test('una locución perdida avisa por stderr en vez de quedar muda en silencio', () => {
+    // El fallo silencioso es el patrón que ya costó un curso entero sin voz: si la síntesis
+    // no sale, tiene que notarse en el momento, no al mirar el video terminado.
+    const { venv } = venvFalso({ modo: 'fallar', mensaje: 'el motor explotó' });
+    const voces = vocesPiperFalsas();
+    const instancia = piper.crear({ voz: 'x', venv, voces });
+
+    const avisos = [];
+    const original = console.warn;
+    console.warn = (m) => avisos.push(String(m));
+    try {
+        assert.equal(instancia.sintetizar('una frase que se va a perder'), null);
+    } finally {
+        console.warn = original;
+    }
+
+    assert.equal(avisos.length, 1, 'debe avisar exactamente una vez');
+    assert.match(avisos[0], /locución perdida/);
+    assert.match(avisos[0], /el motor explotó/, 'el aviso debe traer la causa concreta');
+    assert.match(avisos[0], /una frase que se va a perder/, 'y qué texto se perdió');
+});

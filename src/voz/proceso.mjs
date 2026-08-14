@@ -58,8 +58,20 @@ export function crearMotorProceso({ motor, archivosListos, comando, textoSonda =
         disponible: () => comprobar().ok,
         error: () => comprobado?.error ?? null,
         sintetizar(texto) {
-            const r = ejecutar(texto);
-            return r.ok ? r.ruta : null;
+            // Lanzar el proceso puede fallar por causas TRANSITORIAS: durante una grabación
+            // compiten varios navegadores y ffmpeg por la máquina, y ahí `fork/exec` devuelve
+            // error de recursos aunque el motor esté perfectamente instalado. Medido: bajo esa
+            // carga la síntesis falla ~1 de cada 3 corridas. Por eso se reintenta una vez.
+            let r = ejecutar(texto);
+            if (!r.ok) r = ejecutar(texto);
+            if (r.ok) return r.ruta;
+
+            // Y si aun así falla, NO se calla. Devolver null en silencio deja ese paso mudo en
+            // el video sin que nadie se entere — el mismo fallo silencioso que ya costó grabar
+            // un curso entero sin voz.
+            console.warn(`[demo-engine] locución perdida (${motor}): ${r.error}\n` +
+                `  texto: «${texto.slice(0, 60)}${texto.length > 60 ? '…' : ''}»`);
+            return null;
         },
         limpiar() {
             if (dirCorrida) rmSync(dirCorrida, { recursive: true, force: true });
