@@ -58,6 +58,18 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
 async function main() {
     const config = await cargarConfig(raiz);
     const voz = crearVoz(config.voz);
+    try {
+        return await ejecutarOrden(config, voz);
+    } finally {
+        // Un solo directorio temporal por CORRIDA (ver src/voz/proceso.mjs): recién acá,
+        // al final de todo el proceso, es seguro borrarlo. El montaje reutiliza las rutas
+        // de los .wav que generó el grabador, así que borrarlos antes le dejaría el video
+        // sin voz a mitad de camino.
+        voz.limpiar();
+    }
+}
+
+async function ejecutarOrden(config, voz) {
     const dirSesiones = join(raiz, '.sesiones');
     // Sesiones para UN guion: reutiliza lo que ya haya en disco y solo loguea a los actores
     // que ese guion usa (no a todos los de la config). Grabar un guion de un solo actor no

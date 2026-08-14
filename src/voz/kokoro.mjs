@@ -1,8 +1,7 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolverVenvYVoces } from './resolver.mjs';
+import { crearMotorProceso } from './proceso.mjs';
 
 // Kokoro se invoca por un script de una línea para no arrastrar un binding de Python.
 const GUION = `
@@ -18,14 +17,14 @@ export function crear({ voz = 'ef_dora', venv, voces } = {}) {
     const PY = join(VENV, 'bin', 'python');
     const MODELO = join(VOCES, 'kokoro-v1.0.onnx');
     const PESOS = join(VOCES, 'voices-v1.0.bin');
-    return {
+    return crearMotorProceso({
         motor: 'kokoro',
-        disponible: () => existsSync(PY) && existsSync(MODELO) && existsSync(PESOS),
-        sintetizar(texto) {
-            const destino = join(mkdtempSync(join(tmpdir(), 'voz-')), 'locucion.wav');
-            const r = spawnSync(PY, ['-c', GUION, MODELO, PESOS, voz, destino],
-                { input: texto, encoding: 'utf8' });
-            return r.status === 0 && existsSync(destino) ? destino : null;
+        archivosListos: () => {
+            if (!existsSync(PY)) return `no se encontró el intérprete de Python en ${PY}`;
+            if (!existsSync(MODELO)) return `no se encontró el modelo Kokoro en ${MODELO}`;
+            if (!existsSync(PESOS)) return `no se encontraron los pesos de voces Kokoro en ${PESOS}`;
+            return null;
         },
-    };
+        comando: (destino) => ({ PY, args: ['-c', GUION, MODELO, PESOS, voz, destino] }),
+    });
 }
