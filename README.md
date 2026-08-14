@@ -35,17 +35,32 @@ Requisitos:
 - **ffmpeg 7.0+** (suministrado por `ffmpeg-static`)
 - **Chromium** (descargado por Playwright)
 
-Antes de grabar, instala los motores de voz que usarás (se guardan en `~/.demo-engine/`):
+Antes de grabar, instala los motores de voz (Kokoro + Piper de respaldo, ambos en español) con:
 
 ```bash
-# Kokoro (español fluido, recomendado)
-npm exec -- demo-engine-voice kokoro es_ES
-
-# Piper (respaldo, más lento pero sin dependencias)
-npm exec -- demo-engine-voice piper es_ES
+bash node_modules/demo-engine/herramientas/instalar-voces.sh
 ```
 
-Sin una voz instalada, el motor genera subtítulos sin locución (no falla).
+Esto crea un venv de Python (`.venv`) y descarga los modelos (`.voces`) **en el directorio
+donde corras el script** — normalmente eso es la raíz del paquete `demo-engine` dentro de
+`node_modules` (por ejemplo si lo corrés como parte de un `postinstall`), y así es como lo
+encuentra por defecto el paso 3 de abajo.
+
+**Dónde busca los modelos el motor de voz, en orden:**
+1. lo que declares en `demo.config.mjs` (`voz.venv` / `voz.voces`, ver más abajo)
+2. las variables de entorno `DEMO_VENV` / `DEMO_VOCES`
+3. el directorio del propio paquete `demo-engine` (donde los deja el instalador de arriba)
+4. el cwd del proceso, como último recurso
+
+Si instalaste los modelos en otra carpeta (por ejemplo, una compartida entre varios
+sistemas), apuntá `DEMO_VENV`/`DEMO_VOCES` ahí, o declará `voz.venv`/`voz.voces` en la
+config.
+
+Sin una voz instalada, el motor genera subtítulos sin locución (no falla) — pero si la
+config pide voz explícitamente (`voz.motor` distinto de `'ninguno'`) y no encuentra ningún
+motor disponible, **avisa por stderr** qué buscó, dónde, y cómo instalarlo. La degradación a
+"solo subtítulos" es intencional; que pase desapercibida no lo es — así fue como un curso
+entero salió mudo sin que nadie lo notara hasta después de publicarlo.
 
 ## Estructura del proyecto
 
@@ -124,7 +139,9 @@ export default {
   voz: {
     motor: 'kokoro',            // Motor principal: 'kokoro' | 'piper' (defecto: kokoro)
     voz: 'es_ES',               // Código de idioma/voz (defecto: es_ES)
-    respaldo: 'piper'           // Si motor no está disponible (defecto: piper)
+    respaldo: 'piper',          // Si motor no está disponible (defecto: piper)
+    venv: null,                 // Carpeta del venv de Python, opcional (ver "Instalación")
+    voces: null                 // Carpeta de los modelos .onnx, opcional (ver "Instalación")
   },
 
   // Comandos shell (opcionales).
@@ -410,6 +427,13 @@ Después de grabar, en `config.salida`:
 - **`[guion].md`**: (solo con `demo curso`) índice de capítulos
 - **`[guion].pdf`**: (con `demo manual`) manual con capturas
 
+`demo curso` (o `pegarCapitulos` a mano) además combina los `.vtt` de cada capítulo en un
+único `curso.vtt`, desplazando los tiempos de cada uno por el inicio real de su capítulo, y
+lo adjunta al `curso.mp4` como pista `mov_text` en español — igual que hace `montar()` con
+cada capítulo individual. Un capítulo sin `.vtt` propio (por ejemplo un video pregrabado con
+`fuente: 'video'`) simplemente no aporta entradas; si NINGÚN capítulo trae subtítulos,
+`curso.vtt` no se genera y `pegarCapitulos` devuelve `vtt: null`.
+
 ## API Completa
 
 Todas estas funciones se reexportan desde `demo-engine`:
@@ -439,16 +463,21 @@ Todas estas funciones se reexportan desde `demo-engine`:
 
 ### Montaje
 - `montar({ pistas, pasos, voz, video }, { salida, nombre }) → Promise<{mp4, vtt, segmentos}>`
-- `pegarCapitulos(partes, { salida, nombre, titulo, video }) → Promise<{mp4, md}>`
+- `pegarCapitulos(partes, { salida, nombre, titulo, video }) → Promise<{mp4, md, capitulos, vtt}>`
   - `partes`: array de `{id, titulo, archivo}`
+  - `vtt`: ruta al `.vtt` combinado del curso, o `null` si ningún capítulo traía subtítulos
 
 ### Salida
 - `generarManual({ guion, pasos, marca }, { salida }) → Promise<{pdf}>`
 
 ### Voz
-- `crearVoz(config: {motor?, voz?, respaldo?}) → vozEngine`
+- `crearVoz(config: {motor?, voz?, respaldo?, venv?, voces?}) → vozEngine`
   - `.disponible() → bool`
   - `.sintetizar(texto) → rutaWav | null`
+  - `venv`/`voces` son opcionales; sin ellos, resuelve por `DEMO_VENV`/`DEMO_VOCES` y después
+    por el directorio del propio paquete (ver "Instalación" para el orden completo)
+  - si `motor !== 'ninguno'` y no encuentra ningún motor disponible, escribe un aviso por
+    `stderr` (no lanza excepción: sigue degradando a subtítulos-sin-locución)
 
 ### Privacidad
 - `exigirEntornoDeDesarrollo(baseURL, env?) → void` (falla si no es dev)
