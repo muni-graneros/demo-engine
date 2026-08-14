@@ -36,19 +36,34 @@ export async function instalarCursor(page) {
     }, MS_MOVIMIENTO);
 }
 
-async function centroDe(page, selector) {
-    const caja = await page.locator(selector).first().boundingBox();
-    if (!caja) throw new Error(`no se pudo ubicar "${selector}" para mover el cursor`);
+/** El elemento a mirar: `dentro`, si viene, ACOTADO a `selector` (no un selector suelto de
+ * página: dos filas de tabla pueden repetir la misma clase en su celda de acciones, y sin
+ * acotar se apuntaría siempre a la primera de todo el documento). */
+function localizadorDe(page, selector, dentro) {
+    const base = page.locator(selector);
+    return dentro ? base.locator(dentro).first() : base.first();
+}
+
+async function centroDe(page, selector, dentro) {
+    const caja = await localizadorDe(page, selector, dentro).boundingBox();
+    if (!caja) {
+        const objetivo = dentro ? `"${dentro}" dentro de "${selector}"` : `"${selector}"`;
+        throw new Error(`no se pudo ubicar ${objetivo} para mover el cursor`);
+    }
     return { x: caja.x + caja.width / 2, y: caja.y + caja.height / 2 };
 }
 
-/** Lleva el cursor al centro del elemento, con easing, y espera a que llegue. */
-export async function moverCursorA(page, selector) {
+/** Lleva el cursor al centro del elemento, con easing, y espera a que llegue.
+ *
+ * `dentro`, opcional: en vez del centro geométrico de `selector` (que en un contenedor
+ * ancho —una fila de tabla— puede caer sobre una celda vacía, lejos de cualquier control),
+ * apunta al centro del elemento interior que de verdad importa mostrar. */
+export async function moverCursorA(page, selector, dentro) {
     // Se repone el cursor por si el paso navegó: una navegación se lleva el DOM entero, y
     // un guion normal navega y DESPUÉS pulsa, dentro del mismo paso. Sin esto, el clic
     // ocurre sin puntero a la vista y el video vuelve a no mostrar dónde se toca.
     await instalarCursor(page);
-    const { x, y } = await centroDe(page, selector);
+    const { x, y } = await centroDe(page, selector, dentro);
     await page.evaluate(({ x, y }) => {
         const c = document.getElementById('__cursor');
         if (c) { c.style.transform = `translate(${x}px, ${y}px)`; c.style.opacity = '1'; }
@@ -57,10 +72,14 @@ export async function moverCursorA(page, selector) {
     await page.waitForTimeout(MS_MOVIMIENTO + 80);
 }
 
-/** Mueve el cursor, dibuja el halo y hace el clic real. */
-export async function pulsar(page, selector, { alPintar } = {}) {
-    await moverCursorA(page, selector);
-    const { x, y } = await centroDe(page, selector);
+/** Mueve el cursor, dibuja el halo y hace el clic real.
+ *
+ * `dentro`, opcional: el cursor apunta y el clic ocurre sobre ESE elemento interior (acotado
+ * a `selector`), en vez del centro geométrico de `selector`. Sin `dentro`, se comporta
+ * exactamente igual que siempre. */
+export async function pulsar(page, selector, { alPintar, dentro } = {}) {
+    await moverCursorA(page, selector, dentro);
+    const { x, y } = await centroDe(page, selector, dentro);
     await page.evaluate(({ x, y }) => {
         const halo = document.createElement('div');
         halo.className = '__halo';
@@ -71,7 +90,7 @@ export async function pulsar(page, selector, { alPintar } = {}) {
     }, { x, y });
     if (alPintar) await alPintar();
     await page.waitForTimeout(180);
-    await page.locator(selector).first().click();
+    await localizadorDe(page, selector, dentro).click();
     // si el clic navegó, el cursor desapareció; reponerlo es idempotente
     await instalarCursor(page);
 }

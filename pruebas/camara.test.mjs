@@ -104,6 +104,54 @@ test('el cursor sigue estando tras navegar dentro del mismo paso', async () => {
     });
 });
 
+test('pulsar con "dentro" apunta al elemento interior, no al centro geométrico del contenedor ancho', async () => {
+    // Caso real: una fila de tabla ancha cuyo centro geométrico cae en una celda vacía,
+    // lejos del control que se quiere mostrar (p. ej. un enlace "Ver" al extremo derecho).
+    await conPagina(async (page) => {
+        await page.setContent(`<!doctype html><html><body style="margin:0">
+            <table style="width:900px;border-collapse:collapse">
+              <tr id="fila">
+                <td style="width:700px">Ana Demo</td>
+                <td><a href="#" id="ver">Ver</a></td>
+              </tr>
+            </table>
+        </body></html>`);
+        await instalarCursor(page);
+        await page.evaluate(() => {
+            document.getElementById('ver').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.title = 'pulsado-dentro';
+            });
+        });
+
+        await pulsar(page, '#fila', { dentro: '#ver' });
+
+        assert.equal(await page.title(), 'pulsado-dentro',
+            'el clic debía caer sobre el elemento interior, no en el centro geométrico de la fila');
+
+        const { cursor, enlace } = await page.evaluate(() => {
+            const c = document.getElementById('__cursor').getBoundingClientRect();
+            const a = document.getElementById('ver').getBoundingClientRect();
+            return { cursor: { x: c.left, y: c.top }, enlace: { x: a.x + a.width / 2, y: a.y + a.height / 2 } };
+        });
+        assert.ok(Math.abs(cursor.x - enlace.x) < 6, `el cursor no quedó sobre el enlace interior: ${cursor.x} vs ${enlace.x}`);
+        assert.ok(Math.abs(cursor.y - enlace.y) < 6, `el cursor no quedó sobre el enlace interior: ${cursor.y} vs ${enlace.y}`);
+    });
+});
+
+test('pulsar sin "dentro" se sigue comportando exactamente igual que hoy', async () => {
+    await conPagina(async (page) => {
+        await page.evaluate(() => {
+            document.getElementById('entrar').addEventListener('click', (e) => {
+                e.preventDefault();
+                document.title = 'pulsado-sin-dentro';
+            });
+        });
+        await pulsar(page, '#entrar');
+        assert.equal(await page.title(), 'pulsado-sin-dentro');
+    });
+});
+
 test('acercar sube la escala del viewport visual y alejar la vuelve a 1', async () => {
     await conPagina(async (page) => {
         await acercarA(page, '#entrar', { escala: 1.8 });
