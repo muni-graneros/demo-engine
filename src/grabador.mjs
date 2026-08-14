@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
 import { instalarCursor } from './camara.mjs';
+import { iniciarGrabacion } from './pantalla.mjs';
 import { duracion } from './ffmpeg.mjs';
 
 /**
@@ -15,7 +16,7 @@ import { duracion } from './ffmpeg.mjs';
 export async function grabar(guion, { config, sesiones, salida, voz }) {
     exigirEntornoDeDesarrollo(config.baseURL);
 
-    const { ancho, alto, pausaMinima } = config.video;
+    const { ancho, alto, pausaMinima, calidad, fps } = config.video;
     const navegador = await chromium.launch();
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];
@@ -34,6 +35,10 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
      * El cursor se instala AQUÍ, antes de fijar `t0`: si se instalara después de capturar
      * el reloj, el viaje de ida y vuelta al navegador sumaría unos milisegundos y el
      * primer paso de la pista ya no arrancaría exactamente en cero.
+     *
+     * La grabación de pantalla es propia (`src/pantalla.mjs`, por CDP), no `recordVideo` de
+     * Playwright: ese solo deja elegir tamaño, con el bitrate fijo adentro y demasiado bajo
+     * para que el texto de un panel se lea nítido.
      */
     async function actorDe(nombre) {
         if (contextos.has(nombre)) return contextos.get(nombre);
@@ -43,11 +48,12 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
             storageState: sesiones[nombre],
             viewport: { width: ancho, height: alto },
             locale: 'es-CL',
-            recordVideo: { dir: salida, size: { width: ancho, height: alto } },
         });
         const page = await ctx.newPage();
         await instalarCursor(page);
-        const datos = { ctx, page, t0: Date.now() };
+        const archivoPista = join(salida, `pista-${nombre}.mp4`);
+        const grabacion = await iniciarGrabacion(page, { ancho, alto, salida: archivoPista, calidad, fps });
+        const datos = { ctx, page, t0: Date.now(), grabacion };
         contextos.set(nombre, datos);
         return datos;
     }
@@ -123,19 +129,20 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         }
 
         const pistas = {};
-        for (const [nombre, { ctx, page }] of contextos) {
-            const video = page.video();
-            await ctx.close();                       // el .webm recién queda escrito al cerrar
-            pistas[nombre] = await video.path();
+        for (const [nombre, { ctx, grabacion }] of contextos) {
+            // Detener el screencast ANTES de cerrar el contexto: la sesión CDP muere con la
+            // página, así que si se cierra primero se pierde el ack del último frame en vuelo.
+            pistas[nombre] = await grabacion.detener();
+            await ctx.close();
         }
         return { pistas, pasos };
     } catch (error) {
         // Si se llegó hasta acá con un error, algún paso reventó antes de cerrar los
-        // contextos en el camino feliz de arriba: hay que cerrarlos ACÁ para que el .webm de
-        // cada actor quede bien escrito hasta el último frame grabado, en vez de quedar a
-        // medio escribir (o de depender de que `navegador.close()`, en el `finally`, los
-        // cierre de forma implícita).
-        for (const [, { ctx }] of contextos) {
+        // contextos en el camino feliz de arriba: hay que cerrarlos ACÁ para que la pista de
+        // cada actor quede bien encodeada hasta el último frame grabado, en vez de quedar
+        // faltante (o de depender de que `navegador.close()`, en el `finally`, las descarte).
+        for (const [, { ctx, grabacion }] of contextos) {
+            await grabacion.detener().catch(() => {});
             await ctx.close().catch(() => {});
         }
         throw error;

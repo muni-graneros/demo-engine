@@ -5,7 +5,11 @@ import { pathToFileURL } from 'node:url';
 export class ErrorConfig extends Error {}
 
 const DEFECTOS = {
-    video: { ancho: 1600, alto: 1000, pausaMinima: 1200 },
+    // `calidad` es la calidad JPEG (0-100) del screencast interno; a mayor calidad, texto
+    // más nítido y archivo más pesado. `fps` es el ritmo constante al que se reconstruye el
+    // video (ver src/pantalla.mjs) — no tiene por qué coincidir con el fps real del
+    // screencast, que es variable.
+    video: { ancho: 1600, alto: 1000, pausaMinima: 1200, calidad: 90, fps: 25 },
     voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', venv: null, voces: null },
     marca: { color: '#1e3a8a', escudo: null },
     // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso

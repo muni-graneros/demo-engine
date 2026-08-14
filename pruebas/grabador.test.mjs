@@ -160,8 +160,8 @@ test('el paso dura al menos lo que la locución, no un tiempo fijo', async () =>
 
 test('si un paso revienta, el error dice qué escena y qué paso fallaron, y la pista grabada hasta ahí queda bien cerrada', async () => {
     // Defecto real: un guion largo perdía TODA la grabación por un selector que cambió al
-    // final, y el mensaje de error no decía dónde. Acá se verifica el diagnóstico Y que el
-    // .webm grabado hasta el fallo no quede a medio escribir (ffprobe debe poder leerlo).
+    // final, y el mensaje de error no decía dónde. Acá se verifica el diagnóstico Y que la
+    // pista grabada hasta el fallo no quede a medio escribir (ffprobe debe poder leerla).
     const juguete = await iniciarJuguete({ puerto: 0 });
     const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
     const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
@@ -198,10 +198,10 @@ test('si un paso revienta, el error dice qué escena y qué paso fallaron, y la 
             },
         );
 
-        const webms = readdirSync(salida).filter((f) => f.endsWith('.webm'));
-        assert.equal(webms.length, 1, 'la pista del primer paso, que sí corrió, debe haber quedado grabada');
-        const seg = duracion(join(salida, webms[0]));
-        assert.ok(seg > 0, `el .webm debe quedar bien cerrado y legible por ffprobe (duración: ${seg}s)`);
+        const pistas = readdirSync(salida).filter((f) => f.startsWith('pista-') && f.endsWith('.mp4'));
+        assert.equal(pistas.length, 1, 'la pista del primer paso, que sí corrió, debe haber quedado grabada');
+        const seg = duracion(join(salida, pistas[0]));
+        assert.ok(seg > 0, `la pista debe quedar bien cerrada y legible por ffprobe (duración: ${seg}s)`);
     } finally {
         await juguete.cerrar();
     }
