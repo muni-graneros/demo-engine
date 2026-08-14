@@ -54,59 +54,71 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
 
     try {
         for (const escena of guion.escenas) {
-            for (const paso of escena.pasos) {
-                const { page, t0 } = await actorDe(paso.actor);
+            for (const [indice, paso] of escena.pasos.entries()) {
+                try {
+                    const { page, t0 } = await actorDe(paso.actor);
 
-                const inicioLocal = Date.now() - t0;
-                const inicioGlobal = Date.now() - t0Global;
+                    const inicioLocal = Date.now() - t0;
+                    const inicioGlobal = Date.now() - t0Global;
 
-                // Se repone el cursor antes de actuar: en un actor reutilizado, el paso
-                // anterior pudo haber navegado y una navegación se lleva el cursor consigo.
-                await instalarCursor(page);
-                // Segundo argumento: el contexto del guion. Como mínimo trae `config`, de
-                // donde `portada()`/`cierre()` sacan `config.marca` (nombre, color, escudo).
-                // Sin esto, un guion no tenía forma de alcanzar la identidad del sistema que
-                // está grabando y las portadas salían con el azul por defecto del paquete —
-                // visible en el video final, porque es lo primero que se ve de cada capítulo.
-                // Los guiones que declaran `hacer(page)` a secas ignoran este segundo
-                // argumento y siguen funcionando sin cambios.
-                await paso.hacer(page, { config });
-                await instalarCursor(page);   // el propio `hacer` también pudo navegar
+                    // Se repone el cursor antes de actuar: en un actor reutilizado, el paso
+                    // anterior pudo haber navegado y una navegación se lleva el cursor consigo.
+                    await instalarCursor(page);
+                    // Segundo argumento: el contexto del guion. Como mínimo trae `config`, de
+                    // donde `portada()`/`cierre()` sacan `config.marca` (nombre, color, escudo).
+                    // Sin esto, un guion no tenía forma de alcanzar la identidad del sistema que
+                    // está grabando y las portadas salían con el azul por defecto del paquete —
+                    // visible en el video final, porque es lo primero que se ve de cada capítulo.
+                    // Los guiones que declaran `hacer(page)` a secas ignoran este segundo
+                    // argumento y siguen funcionando sin cambios.
+                    await paso.hacer(page, { config });
+                    await instalarCursor(page);   // el propio `hacer` también pudo navegar
 
-                // El paso dura lo que dure su locución (más un mínimo), en vez de un tiempo
-                // fijo: con espera fija la voz sigue sonando sobre la pantalla siguiente.
-                //
-                // La locución se sintetiza UNA sola vez: aquí se genera el .wav, se mide, y
-                // la ruta viaja en el paso para que el montaje lo reutilice. Sintetizarla de
-                // nuevo al montar duplicaría el trabajo más caro del pipeline en una máquina
-                // sin GPU.
-                let wav = null;
-                let msVoz = 0;
-                if (paso.narrar && voz.disponible()) {
-                    wav = voz.sintetizar(paso.narrar);
-                    if (wav) msVoz = Math.round(duracion(wav) * 1000);
+                    // El paso dura lo que dure su locución (más un mínimo), en vez de un tiempo
+                    // fijo: con espera fija la voz sigue sonando sobre la pantalla siguiente.
+                    //
+                    // La locución se sintetiza UNA sola vez: aquí se genera el .wav, se mide, y
+                    // la ruta viaja en el paso para que el montaje lo reutilice. Sintetizarla de
+                    // nuevo al montar duplicaría el trabajo más caro del pipeline en una máquina
+                    // sin GPU.
+                    let wav = null;
+                    let msVoz = 0;
+                    if (paso.narrar && voz.disponible()) {
+                        wav = voz.sintetizar(paso.narrar);
+                        if (wav) msVoz = Math.round(duracion(wav) * 1000);
+                    }
+                    await page.waitForTimeout(Math.max(pausaMinima, msVoz));
+
+                    // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
+                    // usaría cualquiera: si el guion puso el cubridor, sale tapada, que es lo
+                    // correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
+                    // elementos `position:fixed` —el cubridor— cubran una captura de página
+                    // completa) ni por selector (saltaría el overlay de privacidad).
+                    const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
+                    await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
+
+                    pasos.push({
+                        escena: escena.id,
+                        titulo: escena.titulo,
+                        actor: paso.actor,
+                        tLocal: inicioLocal,
+                        tGlobal: inicioGlobal,
+                        duracionMs: (Date.now() - t0) - inicioLocal,
+                        narrar: paso.narrar,
+                        wav,
+                        captura: `capturas/${nombreCaptura}`,
+                    });
+                } catch (error) {
+                    // Se identifica CON PRECISIÓN qué paso y qué escena fallaron: en un guion
+                    // largo, "algo reventó" obliga a releer todo el guion para ubicar el punto;
+                    // esto lo dice directo. `{ cause }` conserva el error original completo
+                    // (stack incluido) para quien necesite más detalle que el mensaje.
+                    throw new Error(
+                        `guion "${guion.id}", escena "${escena.id}" ("${escena.titulo}"), paso ${indice + 1} ` +
+                        `(actor "${paso.actor}"): ${error.message}`,
+                        { cause: error },
+                    );
                 }
-                await page.waitForTimeout(Math.max(pausaMinima, msVoz));
-
-                // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
-                // usaría cualquiera: si el guion puso el cubridor, sale tapada, que es lo
-                // correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
-                // elementos `position:fixed` —el cubridor— cubran una captura de página
-                // completa) ni por selector (saltaría el overlay de privacidad).
-                const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
-                await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
-
-                pasos.push({
-                    escena: escena.id,
-                    titulo: escena.titulo,
-                    actor: paso.actor,
-                    tLocal: inicioLocal,
-                    tGlobal: inicioGlobal,
-                    duracionMs: (Date.now() - t0) - inicioLocal,
-                    narrar: paso.narrar,
-                    wav,
-                    captura: `capturas/${nombreCaptura}`,
-                });
             }
         }
 
@@ -117,6 +129,16 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
             pistas[nombre] = await video.path();
         }
         return { pistas, pasos };
+    } catch (error) {
+        // Si se llegó hasta acá con un error, algún paso reventó antes de cerrar los
+        // contextos en el camino feliz de arriba: hay que cerrarlos ACÁ para que el .webm de
+        // cada actor quede bien escrito hasta el último frame grabado, en vez de quedar a
+        // medio escribir (o de depender de que `navegador.close()`, en el `finally`, los
+        // cierre de forma implícita).
+        for (const [, { ctx }] of contextos) {
+            await ctx.close().catch(() => {});
+        }
+        throw error;
     } finally {
         await navegador.close();
     }

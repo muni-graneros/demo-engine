@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { grabar } from '../src/grabador.mjs';
 
-import { ff } from '../src/ffmpeg.mjs';
+import { ff, duracion } from '../src/ffmpeg.mjs';
 
 // Voz de mentira que devuelve un .wav REAL de la duración pedida: así el grabador ejercita
 // el mismo camino que en producción (sintetizar → medir → esperar), sin depender de que
@@ -153,6 +153,55 @@ test('el paso dura al menos lo que la locución, no un tiempo fijo', async () =>
         assert.ok(pasos[0].duracionMs >= 4000,
             `el paso duró ${pasos[0].duracionMs} ms y la locución 4000: la voz se cortaría`);
         assert.ok(pasos[0].wav, 'el paso debe llevar la ruta del wav para que el montaje lo reutilice');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('si un paso revienta, el error dice qué escena y qué paso fallaron, y la pista grabada hasta ahí queda bien cerrada', async () => {
+    // Defecto real: un guion largo perdía TODA la grabación por un selector que cambió al
+    // final, y el mensaje de error no decía dónde. Acá se verifica el diagnóstico Y que el
+    // .webm grabado hasta el fallo no quede a medio escribir (ffprobe debe poder leerlo).
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 300 },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guion = {
+            id: 'con-fallo',
+            escenas: [
+                { id: 'panel', titulo: 'El funcionario abre el panel', pasos: [
+                    { actor: 'funcionario', hacer: async (page) => { await page.goto(`${juguete.url}/panel`); } },
+                ] },
+                { id: 'detalle', titulo: 'Y entra al detalle', pasos: [
+                    { actor: 'funcionario', hacer: async () => { throw new Error('el selector "#ya-no-existe" cambió'); } },
+                ] },
+            ],
+        };
+
+        await assert.rejects(
+            () => grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) }),
+            (error) => {
+                assert.match(error.message, /detalle/, 'el error debe identificar la escena que falló');
+                assert.match(error.message, /paso 1/, 'el error debe identificar qué paso falló');
+                assert.match(error.message, /funcionario/, 'el error debe identificar el actor del paso');
+                assert.match(error.message, /el selector "#ya-no-existe" cambió/, 'el error original no debe perderse');
+                return true;
+            },
+        );
+
+        const webms = readdirSync(salida).filter((f) => f.endsWith('.webm'));
+        assert.equal(webms.length, 1, 'la pista del primer paso, que sí corrió, debe haber quedado grabada');
+        const seg = duracion(join(salida, webms[0]));
+        assert.ok(seg > 0, `el .webm debe quedar bien cerrado y legible por ffprobe (duración: ${seg}s)`);
     } finally {
         await juguete.cerrar();
     }
