@@ -57,13 +57,19 @@ export async function cargarConfig(rutaProyecto) {
     if (voz.venv) voz.venv = absoluta(voz.venv);
     if (voz.voces) voz.voces = absoluta(voz.voces);
 
+    // marca.escudo, igual que guiones/salida/voz.venv/voz.voces, es relativo a la RAÍZ DEL
+    // PROYECTO, no al cwd del proceso: sin esto, `demo.config.mjs` con `escudo: './public/x.png'`
+    // solo encontraba el archivo si el CLI se invocaba justo desde esa carpeta.
+    const marca = { ...DEFECTOS.marca, ...cruda.marca };
+    if (marca.escudo) marca.escudo = absoluta(marca.escudo);
+
     return {
         ...DEFECTOS,
         ...cruda,
         raiz: rutaProyecto,
         guiones,
         salida: absoluta(cruda.salida ?? './docs/manual'),
-        marca: { ...DEFECTOS.marca, ...cruda.marca },
+        marca,
         video: { ...DEFECTOS.video, ...cruda.video },
         voz,
         actores,

@@ -39,6 +39,20 @@ test('voz.venv y voz.voces relativos se resuelven contra la raíz del proyecto',
     assert.equal(cfg.voz.voces, resolve(dir, 'mis-voces'));
 });
 
+test('marca.escudo relativo se resuelve contra la raíz del proyecto, no contra el cwd del proceso', async () => {
+    // Sin esto, `portada()` recibe una ruta relativa que solo existe si el CLI se invocó
+    // justo desde la raíz del proyecto: bastaba con correr `demo` desde otra carpeta para
+    // que "el archivo existe" diera falso y el escudo desapareciera en silencio.
+    const dir = proyecto({ ...minima, marca: { nombre: 'Sistema', escudo: './public/escudo.png' } });
+    const cfg = await cargarConfig(dir);
+    assert.equal(cfg.marca.escudo, resolve(dir, 'public/escudo.png'));
+});
+
+test('marca.escudo ausente queda en null, como hoy', async () => {
+    const cfg = await cargarConfig(proyecto(minima));
+    assert.equal(cfg.marca.escudo, null);
+});
+
 test('falla si no hay actores, diciendo cuál es el problema', async () => {
     const dir = proyecto({ ...minima, actores: {} });
     await assert.rejects(() => cargarConfig(dir), (e) => {
