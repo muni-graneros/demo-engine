@@ -2,7 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { exigirEntornoDeDesarrollo, abrirFiltrado, cubrir, descubrir } from '../src/privacidad.mjs';
+import { exigirEntornoDeDesarrollo, abrirFiltrado, abrirVerificado, cubrir, descubrir } from '../src/privacidad.mjs';
+
+/** Solo los "Turno Demo N" están permitidos en la cola de atención de juguete. */
+const esPermitido = (nombre) => /^Turno Demo \d+$/.test(nombre);
 
 test('aborta si el entorno no es de desarrollo', () => {
     // Falla CERRADO: sin APP_ENV, manda el host de baseURL.
@@ -152,6 +155,122 @@ test('si el filtro no reduce a una fila, falla en vez de grabar', async () => {
         await assert.rejects(() => abrirFiltrado(page, `${juguete.url}/panel`, {
             filtro: '#filtro', valor: '', selectorFilas: 'tr.fila',
         }), /no redujo/);
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+// `abrirVerificado` protege pantallas SIN buscador (una cola de atención, por ejemplo):
+// no hay nada que filtrar, así que el juez es un predicado sobre lo que quedó pintado.
+
+test('abrirVerificado: destapa cuando el predicado ya se cumple desde el primer instante', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        const visibles = [];
+        const mirar = async () => visibles.push(await page.evaluate(() => ({
+            tapada: !!document.getElementById('__cubridor'),
+            nombres: [...document.querySelectorAll('.mt-item-nom')].map((n) => n.textContent),
+        })));
+
+        await abrirVerificado(page, `${juguete.url}/mi-turno?variante=ok`, async () => {
+            const nombres = await page.locator('.mt-item-nom').allTextContents();
+            return nombres.length > 0 && nombres.every(esPermitido);
+        }, { alPintar: mirar });
+
+        const final = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(final, false, 'terminó de tapar la pantalla pese a que el predicado se cumplía');
+        assert.ok(visibles.some((v) => !v.tapada && v.nombres.length > 0),
+            'la pantalla nunca llegó a destaparse con datos a la vista');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('abrirVerificado: si el predicado nunca se cumple, no destapa NUNCA y lanza (falla cerrado)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        // Vigía independiente, igual que en el test de hidratación lenta de abrirFiltrado:
+        // muestrea todo el tiempo, no solo en los puntos de control del propio código.
+        const muestras = [];
+        let vigilando = true;
+        const vigilar = (async () => {
+            while (vigilando) {
+                try {
+                    muestras.push(await page.evaluate(() => ({
+                        tapada: !!document.getElementById('__cubridor'),
+                        nombres: [...document.querySelectorAll('.mt-item-nom')].map((n) => n.textContent),
+                    })));
+                } catch { /* navegación en curso */ }
+                await new Promise((r) => setTimeout(r, 20));
+            }
+        })();
+
+        await assert.rejects(() => abrirVerificado(page, `${juguete.url}/mi-turno?variante=malo`, async () => {
+            const nombres = await page.locator('.mt-item-nom').allTextContents();
+            return nombres.length > 0 && nombres.every(esPermitido);
+        }, { esperaMs: 1000 }), /no se cumplió de forma estable/);
+
+        vigilando = false;
+        await vigilar;
+
+        const fuga = muestras.some((v) => !v.tapada && v.nombres.some((n) => !esPermitido(n)));
+        assert.equal(fuga, false, 'se vio un nombre no permitido sin el cubridor puesto: fuga de privacidad');
+
+        const siguioTapada = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(siguioTapada, true, 'tras fallar, la pantalla debe quedar tapada');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('abrirVerificado: espera a que el predicado se estabilice antes de destapar (asentamiento tardío)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        const muestras = [];
+        let vigilando = true;
+        const vigilar = (async () => {
+            while (vigilando) {
+                try {
+                    muestras.push(await page.evaluate(() => ({
+                        tapada: !!document.getElementById('__cubridor'),
+                        nombres: [...document.querySelectorAll('.mt-item-nom')].map((n) => n.textContent),
+                    })));
+                } catch { /* navegación en curso */ }
+                await new Promise((r) => setTimeout(r, 5));
+            }
+        })();
+
+        await abrirVerificado(page, `${juguete.url}/mi-turno?variante=tarde`, async () => {
+            const nombres = await page.locator('.mt-item-nom').allTextContents();
+            return nombres.length > 0 && nombres.every(esPermitido);
+        });
+
+        vigilando = false;
+        await vigilar;
+
+        const fuga = muestras.some((v) => !v.tapada && v.nombres.some((n) => !esPermitido(n)));
+        assert.equal(fuga, false, 'se vio el nombre no permitido antes de que se reemplazara: fuga de privacidad');
+
+        const final = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(final, false, 'una vez asentado en un estado permitido, debe terminar destapada');
     } finally {
         await navegador.close();
         await juguete.cerrar();

@@ -303,16 +303,42 @@ nombre de un guion maestro (`demo manual curso`).
 **Con un guion normal** (uno que declara `escenas`, no `capitulos`): `demo manual panel`
 graba ese guion solo y genera el manual de sus escenas, como siempre.
 
-## Privacidad: `abrirFiltrado`
+## Privacidad: `abrirFiltrado` y `abrirVerificado`
 
-El motor protege datos sensibles **durante la grabación** tapando la pantalla desde el primer frame hasta que los datos estén filtrados. Esto es crítico porque muchas aplicaciones (Filament, Livewire, etc.) pintan **la tabla completa** y luego la filtran con JavaScript — esa ventana es la fuga que el motor debe bloquear.
+El motor protege datos sensibles **durante la grabación** tapando la pantalla desde el primer frame hasta que los datos están a salvo de mostrarse de más. Esto es crítico porque muchas aplicaciones (Filament, Livewire, etc.) pintan **la tabla completa** y luego la filtran con JavaScript — esa ventana es la fuga que el motor debe bloquear.
 
 ### Invariante de privacidad
 
-**Jamás se graba un dato sensible sin filtro.** Dos niveles de protección:
+**Jamás se graba un dato sensible sin protección.** Dos niveles:
 
 1. **Verificación de host:** `exigirEntornoDeDesarrollo(config.baseURL)` falla si no es `localhost`, `127.0.0.1`, o red privada.
-2. **Pantalla tapada hasta filtrado:** `abrirFiltrado` cubre la pantalla, abre la URL, filtra por un criterio, espera a que la tabla se reduzca a una fila, y solo entonces destapa.
+2. **Pantalla tapada hasta que se cumple una condición:** `abrirFiltrado`/`abrirVerificado` cubren la pantalla, abren la URL, esperan a que una condición se cumpla **de forma estable**, y solo entonces destapan. Si la condición no se cumple, **la pantalla se queda tapada y la función lanza** — nunca se graba "por las dudas".
+
+### Cuál usar: `abrirFiltrado` vs `abrirVerificado`
+
+`abrirVerificado(page, url, comprobar, opciones?)` es la función genérica: `comprobar` es un
+predicado de solo lectura sobre el DOM ya pintado, y `abrirVerificado` lo llama en un bucle
+hasta que da verdadero varias veces seguidas (o se acaba el tiempo, y ahí lanza). No asume
+nada sobre la pantalla — ni que hay un buscador, ni qué significa "estar filtrado" — así que
+sirve para **cualquier** pantalla con datos de varias personas.
+
+`abrirFiltrado` es el caso más común de eso: pantallas **con un buscador** que reduce una
+tabla a una sola fila. Está construido sobre `abrirVerificado` (le pasa `preparar` para
+escribir el filtro y apretar enter, y `comprobar` para contar las filas).
+
+Usa `abrirFiltrado` cuando la pantalla tiene un campo de búsqueda. Usa `abrirVerificado`
+cuando no hay nada que escribir. **Ejemplo:** una cola de atención del día lista a quien sea
+que esté citado ahora — sin buscador, porque no tiene sentido "filtrar" una cola. Ahí
+`abrirFiltrado` no aplica: el predicado tiene que juzgar directamente lo que quedó pintado.
+
+```js
+import { abrirVerificado } from 'demo-engine';
+
+await abrirVerificado(page, baseURL + '/admin/mi-turno', async () => {
+  const nombres = await page.locator('.mt-item-nom').allTextContents();
+  return nombres.every(esPermitido);   // TODOS deben estar permitidos
+});
+```
 
 ### Ejemplo: filtrar solicitudes por RUT
 
@@ -484,6 +510,8 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `cubrir(page) → Promise<void>` (cubre toda la pantalla con panel opaco)
 - `descubrir(page) → Promise<void>` (destapa la pantalla)
 - `abrirFiltrado(page, url, { filtro, valor, selectorFilas, alPintar?, esperaMs? }) → Promise<void>`
+- `abrirVerificado(page, url, comprobar, { alPintar?, preparar?, esperaMs?, estabilidadRequerida?, mensajeError? }?) → Promise<void>`
+  — genérico: usa esto para pantallas sin buscador; `abrirFiltrado` se construye encima.
 
 ### Cámara (visual)
 - `instalarCursor(page) → Promise<void>` (dibuja cursor SVG, idempotente)

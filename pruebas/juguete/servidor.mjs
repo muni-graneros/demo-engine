@@ -74,6 +74,30 @@ function paginaCodigo() {
     </form>`);
 }
 
+// Pantalla SIN buscador: una cola de atención del día, que lista a quien sea que esté
+// citado ahora, sin forma de acotarla escribiendo nada. Existe para probar `abrirVerificado`
+// (a diferencia de `paginaPanel`, que sí tiene filtro).
+//
+// `variante` decide qué hay pintado:
+// - 'ok': solo nombres permitidos, desde el primer instante.
+// - 'malo': incluye un nombre NO permitido, que nunca desaparece (para el camino que falla).
+// - 'tarde': arranca con un nombre NO permitido y, tras 300ms, un script lo reemplaza por
+//   uno permitido — imita una pantalla que tarda en asentarse (misma idea que el retardo
+//   de `paginaPanel`, pero acá el asentamiento lo decide el propio predicado, no un filtro).
+function paginaMiTurno(variante) {
+    const permitidos = ['Turno Demo 1', 'Turno Demo 2'];
+    const nombres = variante === 'ok' ? permitidos : [...permitidos, 'Persona Real Confidencial'];
+    const filas = nombres.map((n) => `<li class="mt-item-nom">${n}</li>`).join('');
+    const script = variante === 'tarde' ? `<script>
+      setTimeout(() => {
+        for (const li of document.querySelectorAll('.mt-item-nom')) {
+          if (li.textContent === 'Persona Real Confidencial') li.textContent = 'Turno Demo 3';
+        }
+      }, 300);
+    </script>` : '';
+    return marco('Mi turno', `<h1>Cola de atención de hoy</h1><ul>${filas}</ul>${script}`);
+}
+
 function paginaDetalle(rut) {
     const p = PERSONAS.find((x) => x.rut === rut);
     if (!p) return null;
@@ -178,6 +202,7 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
             return res.end();
         }
         if (url.pathname === '/panel') return html(paginaPanel(url.searchParams.get('rut')));
+        if (url.pathname === '/mi-turno') return html(paginaMiTurno(url.searchParams.get('variante') ?? 'ok'));
         if (url.pathname.startsWith('/detalle/')) {
             const pagina = paginaDetalle(url.pathname.split('/')[2]);
             if (pagina) return html(pagina);
