@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { generarVtt, generarSrt } from '../src/subtitulos.mjs';
+import { generarVtt, generarSrt, parseVtt } from '../src/subtitulos.mjs';
 
 const SEGMENTOS = [
     { inicioSeg: 0, finSeg: 4.5, narrar: 'El ciudadano envía su solicitud.' },
@@ -39,4 +39,23 @@ test('los milisegundos acarrean en vez de producir un timestamp inválido', () =
 
     const srt = generarSrt([{ inicioSeg: 59.9999, finSeg: 60.5, narrar: 'Cruza.' }]);
     assert.match(srt, /00:01:00,000 --> 00:01:00,500/);
+});
+
+test('parseVtt recupera las cues con sus tiempos y su texto', () => {
+    const cues = parseVtt(generarVtt(SEGMENTOS));
+    assert.equal(cues.length, 2, 'el segmento sin narración no genera cue');
+    assert.deepEqual(cues[0], { inicioSeg: 0, finSeg: 4.5, narrar: 'El ciudadano envía su solicitud.' });
+    assert.deepEqual(cues[1], { inicioSeg: 4.5, finSeg: 9, narrar: 'El funcionario la revisa.' });
+});
+
+test('parseVtt ignora la cabecera y los bloques sin marca de tiempo (NOTE, etc.)', () => {
+    const cues = parseVtt('WEBVTT\n\nNOTE algo que no es una cue\n\n00:00:01.000 --> 00:00:02.000\nHola.\n');
+    assert.equal(cues.length, 1);
+    assert.equal(cues[0].narrar, 'Hola.');
+});
+
+test('parseVtt entiende horas de más de un dígito de reloj (curso largo)', () => {
+    const cues = parseVtt('WEBVTT\n\n01:02:05.500 --> 01:02:07.000\nCierre.\n');
+    assert.equal(cues[0].inicioSeg, 3725.5);
+    assert.equal(cues[0].finSeg, 3727);
 });

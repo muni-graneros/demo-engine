@@ -34,3 +34,35 @@ export function generarSrt(segmentos) {
         .map((s, i) => `${i + 1}\n${reloj(s.inicioSeg, ',')} --> ${reloj(s.finSeg, ',')}\n${s.narrar.trim()}`)
         .join('\n\n') + '\n';
 }
+
+const RE_TIMESTAMP = /(\d{2}):(\d{2}):(\d{2})[.,](\d{3})/;
+
+function segundos(marca) {
+    const m = marca.match(RE_TIMESTAMP);
+    if (!m) return null;
+    const [, h, min, s, ms] = m;
+    return Number(h) * 3600 + Number(min) * 60 + Number(s) + Number(ms) / 1000;
+}
+
+/**
+ * Lee un WebVTT ya escrito y devuelve sus cues en el mismo formato que consumen
+ * `generarVtt`/`generarSrt` ({inicioSeg, finSeg, narrar}). Sirve para recombinar los
+ * subtítulos de varios capítulos en uno solo (ver `pegarCapitulos`): cada capítulo ya
+ * escribió su `.vtt` al lado del clip, y hay que releerlo para desplazarlo por su offset.
+ */
+export function parseVtt(texto) {
+    const bloques = texto.replace(/\r\n/g, '\n').split(/\n\n+/);
+    const cues = [];
+    for (const bloque of bloques) {
+        const lineas = bloque.split('\n');
+        const idxTiempo = lineas.findIndex((l) => l.includes('-->'));
+        if (idxTiempo === -1) continue; // cabecera WEBVTT, NOTE, identificador de cue, etc.
+        const [crudoInicio, crudoFin] = lineas[idxTiempo].split('-->');
+        const inicioSeg = segundos(crudoInicio.trim());
+        const finSeg = segundos((crudoFin ?? '').trim().split(/\s+/)[0] ?? '');
+        if (inicioSeg == null || finSeg == null) continue;
+        const narrar = lineas.slice(idxTiempo + 1).join('\n').trim();
+        if (narrar) cues.push({ inicioSeg, finSeg, narrar });
+    }
+    return cues;
+}
