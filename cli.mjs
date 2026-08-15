@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, rmSync } from 'node:fs';
 import { basename, extname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { cargarConfig, ErrorConfig } from './src/configurar.mjs';
@@ -10,7 +10,7 @@ import { montar } from './src/montaje.mjs';
 import { pegarCapitulos } from './src/curso.mjs';
 import { generarManual } from './src/manual.mjs';
 import { crearVoz } from './src/voz/index.mjs';
-import { auditarVideo } from './src/auditoria.mjs';
+import { auditarVideo, auditarCapturas } from './src/auditoria.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -71,6 +71,18 @@ async function main() {
     }
 }
 
+/**
+ * Limpia `capturas/` ANTES de empezar una corrida nueva (grabar/curso/manual), igual que ya
+ * se hace con `.tmp`/`.tmp-curso`. Sin esto, una captura sin filtrar que dejó un guion
+ * descuidado sobrevive indefinidamente en un directorio que termina incrustado en el manual
+ * publicado. Se limpia UNA VEZ por corrida —no dentro de `grabar()`—, porque `demo manual`
+ * sin argumento llama a `grabar()` una vez POR CAPÍTULO del guion maestro: limpiar ahí
+ * borraría las capturas del capítulo anterior antes de que el manual combinado las use.
+ */
+function limpiarCapturas(config) {
+    rmSync(join(config.salida, 'capturas'), { recursive: true, force: true });
+}
+
 async function ejecutarOrden(config, voz) {
     const dirSesiones = join(raiz, '.sesiones');
     // Sesiones para UN guion: reutiliza lo que ya haya en disco y solo loguea a los actores
@@ -87,6 +99,7 @@ async function ejecutarOrden(config, voz) {
     }
 
     if (orden === 'grabar') {
+        limpiarCapturas(config);
         const guion = await cargarGuion(config, argumento);
         const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
         const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
@@ -95,6 +108,7 @@ async function ejecutarOrden(config, voz) {
     }
 
     if (orden === 'curso') {
+        limpiarCapturas(config);
         const maestro = await cargarGuion(config, 'curso');
         const partes = [];
         for (const cap of maestro.capitulos) {
@@ -114,6 +128,7 @@ async function ejecutarOrden(config, voz) {
     }
 
     if (orden === 'manual') {
+        limpiarCapturas(config);
         const guion = await cargarGuion(config, argumento ?? 'curso');
         const { id, titulo, pasos } = await pasosParaManual(config, guion, sesionesDe, voz);
         const { pdf } = await generarManual({ guion: { id, titulo }, pasos, marca: config.marca }, { salida: config.salida });
@@ -140,12 +155,22 @@ async function ejecutarOrden(config, voz) {
         const { total, sospechosos } = await auditarVideo(video, config,
             { dirFrames: join(config.salida, 'auditoria', basename(video, extname(video))) });
 
+        // El manual (demo manual) incrusta las MISMAS capturas que deja grabar() en
+        // capturas/ dentro de config.salida: sin esto, demo auditar solo miraba el .mp4 y
+        // esas imágenes quedaban completamente fuera del portero automático.
+        const { total: totalCapturas, sospechosos: sospechososCapturas } =
+            await auditarCapturas(join(config.salida, 'capturas'), config);
+
         for (const s of sospechosos) {
             console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — frame guardado en: ${s.archivo}`);
         }
+        for (const s of sospechososCapturas) {
+            console.log(`[SOSPECHOSO CAPTURA] ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — imagen: ${s.archivo}`);
+        }
         console.log(`\n${video}: ${sospechosos.length} de ${total} frames sospechosos.`);
+        console.log(`${join(config.salida, 'capturas')}: ${sospechososCapturas.length} de ${totalCapturas} capturas sospechosas.`);
 
-        if (sospechosos.length > 0) process.exitCode = 1;
+        if (sospechosos.length > 0 || sospechososCapturas.length > 0) process.exitCode = 1;
         return;
     }
 

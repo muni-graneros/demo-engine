@@ -453,17 +453,32 @@ exigirEntornoDeDesarrollo(config.baseURL, process.env);
 `abrirFiltrado`/`abrirVerificado` protegen **durante la grabación**, pero dependen de que el
 guion las llame — una auditoría real encontró que 4 de 10 guiones de un sistema en uso no lo
 hacían, y dejaban varias personas a la vista. `demo auditar` verifica **el resultado**, no la
-intención: mira el video ya grabado y busca datos a la vista, sin confiar en que el guion
+intención: mira lo que quedó en disco y busca datos a la vista, sin confiar en que el guion
 hizo lo correcto.
+
+Audita **dos cosas**, con el mismo criterio: el `.mp4` grabado Y las capturas que `demo
+manual` incrusta en el `.md`/`.html`/`.pdf` (`capturas/*.png` dentro de `config.salida`). El
+manual es un canal de fuga tan real como el video —una captura sin filtrar queda publicada
+en el PDF igual que un frame sin filtrar queda en el MP4— y antes de esto quedaba
+completamente fuera del portero automático: un guion descuidado (sin `abrirFiltrado`) podía
+dejar una captura con varias personas a la vista incrustada en un manual publicado sin que
+nada la detectara.
 
 ### Cómo funciona
 
+**Video:**
 1. Muestrea frames del MP4 con ffmpeg (el mismo binario estático que ya trae el motor), uno
    cada `auditoria.cada` segundos, hasta `auditoria.maximo` frames.
 2. Manda cada frame al servicio OCR configurado en `auditoria.ocr`.
 3. Cuenta cuántos identificadores **distintos** matchean `auditoria.patron` en el texto que
    devolvió el OCR. **Más de uno en el mismo frame significa que había una lista sin
    filtrar** — la misma fuga que `abrirFiltrado` existe para evitar.
+
+**Capturas del manual:** mismo paso 2 y 3 de arriba, pero SIN muestreo — a diferencia del
+video (una corriente continua de la que conviene recortar solo cada tantos segundos), cada
+paso del guion ya deja UNA sola captura, así que se audita cada PNG que haya en
+`capturas/`. Si una captura resulta sospechosa, no hace falta guardar una copia aparte: la
+imagen ya vive en disco (es la misma que embebe el manual), así que es su propia evidencia.
 
 No hace falta que el OCR lea bien el texto: está afinado para cédulas, no para interfaces
 web, y en la práctica **lee mal algún carácter pero mantiene el patrón intacto** (verificado
@@ -498,14 +513,25 @@ y responder `{ text: "..." }`.
 
 ```
 [SOSPECHOSO] segundo 40s — 2 identificadores distintos (12345678-5, 87654321-0) — frame guardado en: docs/manual/auditoria/panel/frame-0005.png
+[SOSPECHOSO CAPTURA] 2 identificadores distintos (12345678-5, 87654321-0) — imagen: docs/manual/capturas/panel-3.png
 
 docs/manual/panel.mp4: 1 de 12 frames sospechosos.
+docs/manual/capturas: 1 de 4 capturas sospechosas.
 ```
 
-Cada frame sospechoso queda **guardado en disco** (`config.salida/auditoria/[guion]/`) junto
-con el segundo exacto del video en que apareció — un aviso que no se puede inspeccionar no
-sirve de nada. El comando termina con código de salida **distinto de cero** si encontró algo,
-para poder usarlo como gate en CI.
+Cada frame sospechoso del video queda **guardado en disco** (`config.salida/auditoria/[guion]/`)
+junto con el segundo exacto en que apareció; cada captura sospechosa YA vive en disco (es la
+misma imagen que embebe el manual) — un aviso que no se puede inspeccionar no sirve de nada.
+El comando termina con código de salida **distinto de cero** si encontró algo en cualquiera de
+los dos (video o capturas), para poder usarlo como gate en CI.
+
+### Capturas: se limpian al empezar cada corrida
+
+`demo grabar`/`demo curso`/`demo manual` limpian `capturas/` (dentro de `config.salida`) ANTES
+de grabar nada, igual que ya se hace con los directorios temporales del montaje (`.tmp`,
+`.tmp-curso`). Sin esto, una captura sin filtrar que dejó una corrida vieja sobrevive
+indefinidamente en un directorio que termina incrustado en el manual publicado — nadie la
+vuelve a mirar una vez que el video de esa corrida ya está aprobado.
 
 ## Uso programático (Node)
 
@@ -604,6 +630,10 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `auditarVideo(video, config, { dirFrames?, ocr? }?) → Promise<{total, sospechosos}>`
   — `config.auditoria`: `{ocr, patron, cada, maximo}`; `sospechosos`: `{segundo, archivo, identificadores}[]`
   — `ocr` es inyectable (para pruebas); sin él usa el endpoint real de `config.auditoria.ocr`
+- `auditarCapturas(dirCapturas, config, { ocr? }?) → Promise<{total, sospechosos}>`
+  — audita las capturas del manual (`config.salida/capturas`), mismo criterio que `auditarVideo`
+    pero sin muestreo (una imagen por paso, se auditan todas); `sospechosos`: `{archivo, identificadores}[]`
+  — sin la carpeta de capturas en disco, devuelve `{total: 0, sospechosos: []}` sin fallar
 - `muestrearFrames(video, { cada, maximo, dirSalida }) → {segundo, archivo}[]` (usa ffmpeg, no ffprobe)
 - `contarIdentificadores(texto, patron) → string[]` (identificadores DISTINTOS que matchean el patrón)
 - `exigirAuditoriaConfigurada(auditoria) → void` (falla con mensaje claro si falta `auditoria.ocr`)

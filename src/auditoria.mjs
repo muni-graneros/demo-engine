@@ -13,7 +13,7 @@
  * el tipo de decisión que tiene que tomar quien configura el sistema, no el motor.
  */
 
-import { readdirSync, readFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
 import { ff } from './ffmpeg.mjs';
 import { ErrorConfig } from './configurar.mjs';
@@ -141,4 +141,46 @@ export async function auditarVideo(video, config, { dirFrames, ocr } = {}) {
         }
     }
     return { total: frames.length, sospechosos };
+}
+
+/**
+ * Audita las capturas que `grabar()` deja para el manual (una por paso, en `capturas/`
+ * dentro de `config.salida` — ver `src/grabador.mjs`). `generarManual` (`src/manual.mjs`)
+ * las incrusta en el `.md`/`.html`/`.pdf`, pero hasta acá `demo auditar` solo miraba el
+ * `.mp4`: un guion descuidado (que se saltea `abrirFiltrado`) podía dejar una captura sin
+ * filtrar publicada en el manual sin que el portero automático la tocara nunca.
+ *
+ * Mismo criterio que `auditarVideo` (contar identificadores DISTINTOS con el mismo servicio
+ * OCR), pero SIN muestreo: a diferencia de un video, acá no hay una corriente continua de la
+ * que recortar cada `cada` segundos — cada paso ya deja UNA sola imagen — así que se audita
+ * cada captura. Tampoco hace falta copiar evidencia a ningún lado: la captura sospechosa YA
+ * vive en disco (es la misma que embebe el manual), así que `archivo` apunta directo a ella.
+ *
+ * @param {string} dirCapturas carpeta con los PNG (`config.salida/capturas`)
+ * @param {{auditoria?: object}} config trae `config.auditoria` (ver DEFECTOS arriba)
+ * @param {{ocr?: (archivo:string) => Promise<{text:string}>}} [opciones]
+ *   `ocr` es inyectable para pruebas; sin él usa el endpoint real de `auditoria.ocr`.
+ * @returns {Promise<{total:number, sospechosos:{archivo:string, identificadores:string[]}[]}>}
+ */
+export async function auditarCapturas(dirCapturas, config, { ocr } = {}) {
+    const auditoria = conDefectos(config?.auditoria);
+    exigirAuditoriaConfigurada(auditoria);
+
+    // Sin carpeta de capturas (por ejemplo, auditando un .mp4 que no salió de este motor):
+    // no hay nada que auditar acá, y no es un error — el video se audita igual por su lado.
+    const nombres = existsSync(dirCapturas)
+        ? readdirSync(dirCapturas).filter((nombre) => nombre.endsWith('.png')).sort()
+        : [];
+    const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo));
+
+    const sospechosos = [];
+    for (const nombre of nombres) {
+        const archivo = join(dirCapturas, nombre);
+        const { text } = await leerFrame(archivo);
+        const identificadores = contarIdentificadores(text, auditoria.patron);
+        if (identificadores.length > 1) {
+            sospechosos.push({ archivo, identificadores });
+        }
+    }
+    return { total: nombres.length, sospechosos };
 }

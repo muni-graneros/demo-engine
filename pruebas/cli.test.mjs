@@ -148,6 +148,14 @@ test('demo manual sin argumento detecta el guion maestro y encadena el manual de
         assert.match(texto, /Ver panel \(cap1\)/, 'debe traer las escenas del capítulo 1');
         assert.match(texto, /Ver panel \(cap2\)/, 'debe traer las escenas del capítulo 2');
         assert.ok(existsSync(join(proyecto, 'salida', 'curso.pdf')));
+
+        // La limpieza de capturas/ (ver limpiarCapturas en cli.mjs) corre UNA vez al empezar
+        // la corrida, no dentro de cada grabar(): un guion maestro llama a grabar() una vez
+        // POR CAPÍTULO, y si limpiara en cada llamada, grabar cap2 dejaría vacía la carpeta
+        // de capturas justo antes de arrancar, en vez de solo pisar lo de la corrida anterior.
+        const dirCapturas = join(proyecto, 'salida', 'capturas');
+        const capturas = readdirSync(dirCapturas).filter((f) => f.endsWith('.png'));
+        assert.ok(capturas.length > 0, 'deben sobrevivir capturas de la corrida del guion maestro');
     } finally {
         await juguete.cerrar();
     }
@@ -224,6 +232,59 @@ test('demo auditar detecta un frame sospechoso, lo guarda en disco y sale con c�
         assert.ok(frames.length > 0, 'debe haber al menos un frame guardado para inspeccionar');
     } finally {
         await ocr.cerrar();
+        await juguete.cerrar();
+    }
+});
+
+test('demo auditar también revisa las capturas del manual, no solo el .mp4', async () => {
+    // Defecto crítico del cierre de rama: grabador.mjs deja una captura por paso en
+    // capturas/ (para el manual), pero demo auditar solo miraba el video. Un guion
+    // descuidado (sin abrirFiltrado) podía dejar una captura sin filtrar publicada en el
+    // PDF sin que el portero automático la tocara nunca.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const ocr = await iniciarOcrDeJuguete('12345678-5 y también 87654321-0');
+    try {
+        const proyecto = proyectoDeJuguete(juguete,
+            `auditoria: { ocr: '${ocr.url}', cada: 0.1, maximo: 3 },`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const grabado = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(grabado.status, 0, `demo grabar falló: ${grabado.stderr}`);
+
+        const dirCapturas = join(proyecto, 'salida', 'capturas');
+        assert.ok(existsSync(dirCapturas), 'demo grabar debe dejar capturas para el manual');
+        const capturas = readdirSync(dirCapturas).filter((f) => f.endsWith('.png'));
+        assert.ok(capturas.length > 0);
+
+        const resultado = await correrCli(proyecto, ['auditar', 'panel']);
+
+        assert.equal(resultado.status, 1, `debía salir con código != 0: ${resultado.stderr}`);
+        assert.match(resultado.stdout, /CAPTURA/, 'debe reportar también capturas sospechosas, no solo frames de video');
+        assert.match(resultado.stdout, /capturas sospechosas/);
+    } finally {
+        await ocr.cerrar();
+        await juguete.cerrar();
+    }
+});
+
+test('demo grabar limpia capturas/ de una corrida anterior antes de grabar de nuevo', async () => {
+    // Sin esto, una captura sin filtrar que quedó de una grabación vieja sobrevive
+    // indefinidamente en un directorio que termina incrustado en el PDF publicado —a
+    // diferencia de .tmp/.tmp-curso, que sí se limpian.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        const proyecto = proyectoDeJuguete(juguete);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+
+        await correrCli(proyecto, ['grabar', 'panel']);
+        const dirCapturas = join(proyecto, 'salida', 'capturas');
+        assert.ok(existsSync(dirCapturas));
+        writeFileSync(join(dirCapturas, 'vieja-sin-filtrar.png'), 'contenido-viejo');
+
+        await correrCli(proyecto, ['grabar', 'panel']);
+
+        assert.ok(!existsSync(join(dirCapturas, 'vieja-sin-filtrar.png')),
+            'una captura de una corrida anterior no debe sobrevivir a la siguiente grabación');
+    } finally {
         await juguete.cerrar();
     }
 });

@@ -1,12 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ff } from '../src/ffmpeg.mjs';
 import { ErrorConfig } from '../src/configurar.mjs';
 import {
     auditarVideo,
+    auditarCapturas,
     contarIdentificadores,
     exigirAuditoriaConfigurada,
     muestrearFrames,
@@ -127,6 +128,75 @@ test('auditarVideo sin auditoria.ocr configurado falla claro, sin siquiera inten
     const { video } = videoDePrueba(1);
     await assert.rejects(
         () => auditarVideo(video, {}, { ocr: async () => ({ text: '' }) }),
+        (e) => {
+            assert.ok(e instanceof ErrorConfig);
+            assert.match(e.message, /auditoria\.ocr/);
+            return true;
+        },
+    );
+});
+
+// auditarCapturas: mismo criterio que auditarVideo (contar identificadores DISTINTOS por
+// imagen con el mismo OCR), pero sobre las capturas que `grabar()` deja para el manual
+// (docs/manual/capturas/*.png) — `demo auditar` solo miraba el .mp4 y estas quedaban
+// completamente fuera del portero automático.
+
+function dirCapturasDePrueba(nombres) {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-audit-capturas-'));
+    for (const nombre of nombres) writeFileSync(join(dir, nombre), 'contenido-de-mentira');
+    return dir;
+}
+
+test('una captura con dos identificadores distintos queda marcada como sospechosa', async () => {
+    const dir = dirCapturasDePrueba(['panel-0.png', 'panel-1.png']);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+
+    let llamada = 0;
+    const ocrFalso = async () => {
+        llamada++;
+        return llamada === 1
+            ? { text: 'fila 1: 12345678-5   fila 2: 87654321-0' }
+            : { text: 'fila 1: 11111111-1' };
+    };
+
+    const resultado = await auditarCapturas(dir, config, { ocr: ocrFalso });
+
+    assert.equal(resultado.total, 2);
+    assert.equal(resultado.sospechosos.length, 1, 'debe marcar exactamente la captura con dos identificadores');
+    assert.equal(resultado.sospechosos[0].identificadores.length, 2);
+    assert.ok(existsSync(resultado.sospechosos[0].archivo), 'la captura sospechosa ya vive en disco: es su propia evidencia');
+});
+
+test('con un solo identificador por captura, no hay sospechosos', async () => {
+    const dir = dirCapturasDePrueba(['panel-0.png']);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+    const ocrFalso = async () => ({ text: 'única persona a la vista: 11111111-1' });
+
+    const resultado = await auditarCapturas(dir, config, { ocr: ocrFalso });
+
+    assert.equal(resultado.sospechosos.length, 0);
+    assert.equal(resultado.total, 1);
+});
+
+test('auditarCapturas ignora archivos que no son PNG en la carpeta', async () => {
+    const dir = dirCapturasDePrueba(['panel-0.png', 'notas.txt']);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+    const ocrFalso = async () => ({ text: 'sin identificadores acá' });
+
+    const resultado = await auditarCapturas(dir, config, { ocr: ocrFalso });
+
+    assert.equal(resultado.total, 1, 'solo debe procesar el .png, no el .txt');
+});
+
+test('auditarCapturas sin carpeta de capturas no revienta: total 0, sin sospechosos', async () => {
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+    const resultado = await auditarCapturas('/no/existe/jamas', config, { ocr: async () => ({ text: '' }) });
+    assert.deepEqual(resultado, { total: 0, sospechosos: [] });
+});
+
+test('auditarCapturas sin auditoria.ocr configurado falla claro, sin siquiera intentar leer la carpeta', async () => {
+    await assert.rejects(
+        () => auditarCapturas('/lo/que/sea', {}, { ocr: async () => ({ text: '' }) }),
         (e) => {
             assert.ok(e instanceof ErrorConfig);
             assert.match(e.message, /auditoria\.ocr/);
