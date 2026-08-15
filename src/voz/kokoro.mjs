@@ -12,7 +12,10 @@ audio, sr = k.create(sys.stdin.read(), voice=sys.argv[3], speed=1.0, lang="es")
 sf.write(sys.argv[4], audio, sr)
 `;
 
-export function crear({ voz = 'ef_dora', venv, voces } = {}) {
+// `ejecutarProceso` se reenvía tal cual a crearMotorProceso: por defecto es undefined (usa el
+// spawnSync real), y las pruebas lo inyectan para ejercitar el ciclo de vida sin lanzar un
+// proceso real (ver proceso.mjs).
+export function crear({ voz = 'ef_dora', venv, voces, ejecutarProceso } = {}) {
     const { venv: VENV, voces: VOCES } = resolverVenvYVoces({ venv, voces });
     const PY = join(VENV, 'bin', 'python');
     const MODELO = join(VOCES, 'kokoro-v1.0.onnx');
@@ -26,5 +29,6 @@ export function crear({ voz = 'ef_dora', venv, voces } = {}) {
             return null;
         },
         comando: (destino) => ({ PY, args: ['-c', GUION, MODELO, PESOS, voz, destino] }),
+        ...(ejecutarProceso ? { ejecutarProceso } : {}),
     });
 }

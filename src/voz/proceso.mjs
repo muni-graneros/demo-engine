@@ -21,8 +21,21 @@ import { join } from 'node:path';
  * 3. Cuando la síntesis fallaba, el aviso corriente ("no disponible") no decía por qué.
  *    Acá `error()` guarda el mensaje concreto (stderr del proceso, o la causa de que ni se
  *    intentó) para que el aviso por stderr en `voz/index.mjs` lo pueda mostrar.
+ *
+ * `ejecutarProceso` es inyectable (por defecto invoca `spawnSync` de verdad) exactamente
+ * para que las pruebas de cacheo/reintento/agrupación/limpieza de este módulo puedan
+ * ejercitar la lógica de acá SIN lanzar un proceso real: bajo carga (varias corridas de la
+ * suite en paralelo), `fork/exec` de un proceso real falla transitoriamente por contención
+ * de recursos del propio sistema operativo — un fallo genuino, pero ajeno a lo que estas
+ * pruebas quieren verificar. `comando(destino)` sigue armando los argumentos reales (piper y
+ * kokoro), así que la inyección no tapa un bug de plomería de argumentos: eso lo cubren, por
+ * separado, un puñado de pruebas de extremo a extremo con un proceso real (ver
+ * voz-motores.test.mjs).
  */
-export function crearMotorProceso({ motor, archivosListos, comando, textoSonda = 'Prueba de disponibilidad del motor de voz.' }) {
+export function crearMotorProceso({
+    motor, archivosListos, comando, textoSonda = 'Prueba de disponibilidad del motor de voz.',
+    ejecutarProceso = (PY, args, opciones) => spawnSync(PY, args, opciones),
+}) {
     let dirCorrida = null;
     let contador = 0;
     let comprobado = null;
@@ -31,7 +44,7 @@ export function crearMotorProceso({ motor, archivosListos, comando, textoSonda =
         if (!dirCorrida) dirCorrida = mkdtempSync(join(tmpdir(), 'voz-'));
         const destino = join(dirCorrida, `locucion-${contador++}.wav`);
         const { PY, args } = comando(destino);
-        const r = spawnSync(PY, args, { input: texto, encoding: 'utf8' });
+        const r = ejecutarProceso(PY, args, { input: texto, encoding: 'utf8' });
         if (r.error) {
             // `r.error` no es necesariamente "el proceso no arrancó": bajo carga, el hijo
             // puede cerrar su stdin antes de que Node termine de escribirle el texto (visto
