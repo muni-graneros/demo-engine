@@ -124,6 +124,57 @@ test('con un solo identificador por frame, no hay sospechosos', async () => {
     assert.equal(resultado.total, 2);
 });
 
+// Bug real medido a mano: con el `cada` por defecto (10s), un video más corto que eso no
+// entrega NINGÚN frame al filtro fps=1/cada de ffmpeg (el primer punto de muestreo cae
+// después de que el video ya terminó) — el portero "aprueba" sin haber mirado nada.
+
+test('muestrearFrames con un video más corto que "cada" igual examina al menos un frame', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-audit-corto-'));
+    const video = join(dir, 'clip.mp4');
+    // 2 segundos de contenido real, muy por debajo del "cada" por defecto (10s).
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=black:s=320x240:d=2', '-c:v', 'libx264', video]);
+
+    const frames = muestrearFrames(video, { cada: 10, maximo: 20, dirSalida: join(dir, 'frames') });
+
+    assert.ok(frames.length >= 1,
+        'un video con contenido nunca debe quedar con 0 frames examinados solo porque es más corto que "cada"');
+    assert.equal(frames[0].segundo, 0);
+    assert.ok(existsSync(frames[0].archivo));
+});
+
+test('auditarVideo con la config por defecto sobre un video corto SÍ examina frames (no "0 de 0")', async () => {
+    // Sin `cada` en la config: usa el DEFECTO (10s) — exactamente el caso medido a mano.
+    const { dir, video } = videoDePrueba(2);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+    const ocrFalso = async () => ({ text: 'única persona a la vista: 11111111-1' });
+
+    const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames'), ocr: ocrFalso });
+
+    assert.ok(resultado.total >= 1,
+        'un video con contenido real no puede quedar auditado como "0 de 0": eso es aprobar sin mirar');
+});
+
+test('auditarVideo sobre un video SIN contenido (duración no detectable) no se puede dar por aprobado', async () => {
+    // Ni siquiera un video de verdad: un archivo cualquiera con extensión .mp4. duracion()
+    // no logra leer un "Duration:" del stderr de ffmpeg y devuelve 0 — el caso de "sin
+    // contenido" que pide el requisito, distinto de "corto pero con contenido".
+    const dir = mkdtempSync(join(tmpdir(), 'demo-audit-vacio-'));
+    const video = join(dir, 'no-es-un-video.mp4');
+    writeFileSync(video, 'esto no es un video');
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+
+    await assert.rejects(
+        () => auditarVideo(video, config, { dirFrames: join(dir, 'frames'), ocr: async () => ({ text: '' }) }),
+        (e) => {
+            // Nunca debe devolver un resultado "limpio" (0 sospechosos) sin más: eso es
+            // indistinguible de una auditoría real que sí miró y no encontró nada.
+            assert.match(e.message, /ningún frame|ning[uú]n frame/i);
+            return true;
+        },
+        'un video sin contenido examinable no puede resolver como si estuviera auditado y limpio',
+    );
+});
+
 test('auditarVideo sin auditoria.ocr configurado falla claro, sin siquiera intentar muestrear', async () => {
     const { video } = videoDePrueba(1);
     await assert.rejects(

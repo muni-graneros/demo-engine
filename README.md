@@ -468,11 +468,20 @@ nada la detectara.
 
 **Video:**
 1. Muestrea frames del MP4 con ffmpeg (el mismo binario estático que ya trae el motor), uno
-   cada `auditoria.cada` segundos, hasta `auditoria.maximo` frames.
+   cada `auditoria.cada` segundos, hasta `auditoria.maximo` frames — pero **siempre al menos
+   uno** si el video tiene contenido: con un video más corto que `auditoria.cada` (un guion de
+   una sola escena, por ejemplo), el paso efectivo se recorta a la duración real para que el
+   primer frame (segundo 0) nunca se pierda. Sin esto, `fps=1/cada` de ffmpeg no entregaba
+   ningún frame y el comando "aprobaba" sin haber mirado nada.
 2. Manda cada frame al servicio OCR configurado en `auditoria.ocr`.
 3. Cuenta cuántos identificadores **distintos** matchean `auditoria.patron` en el texto que
    devolvió el OCR. **Más de uno en el mismo frame significa que había una lista sin
    filtrar** — la misma fuga que `abrirFiltrado` existe para evitar.
+
+Si el video no tiene contenido examinable (duración cero, corrupto), no hay frames que
+muestrear. Eso **nunca** se reporta como "0 de 0 sospechosos": `demo auditar` corta con un
+mensaje explícito y código de salida distinto de cero — un resultado "0 de 0" sería
+indistinguible de una auditoría real que sí miró y no encontró nada.
 
 **Capturas del manual:** mismo paso 2 y 3 de arriba, pero SIN muestreo — a diferencia del
 video (una corriente continua de la que conviene recortar solo cada tantos segundos), cada

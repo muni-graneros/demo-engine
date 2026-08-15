@@ -236,6 +236,33 @@ test('demo auditar detecta un frame sospechoso, lo guarda en disco y sale con c�
     }
 });
 
+test('demo auditar con la config por defecto (sin "cada") SÍ examina un video corto real', async () => {
+    // El bug medido a mano: un guion de una sola escena graba un video de un par de
+    // segundos. Con el "cada" por defecto (10s), fps=1/10 no entrega NINGÚN frame a un
+    // video tan corto, y el comando informaba "0 de 0 frames sospechosos" con código 0 —
+    // aprobado sin haber mirado nada. Acá, a propósito, NO se pasa auditoria.cada: se deja
+    // que aplique el defecto, que es exactamente el caso real.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const ocr = await iniciarOcrDeJuguete('12345678-5 y también 87654321-0');
+    try {
+        const proyecto = proyectoDeJuguete(juguete, `auditoria: { ocr: '${ocr.url}' },`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const grabado = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(grabado.status, 0, `demo grabar falló: ${grabado.stderr}`);
+
+        const resultado = await correrCli(proyecto, ['auditar', 'panel']);
+
+        assert.equal(resultado.status, 1,
+            `un video corto con contenido sospechoso debe fallar la auditoría, no aprobar en el vacío: ${resultado.stderr}`);
+        assert.doesNotMatch(resultado.stdout, /: 0 de 0 frames/,
+            'un video con contenido nunca debe reportarse como "0 de 0": eso es indistinguible de nunca haber mirado');
+        assert.match(resultado.stdout, /SOSPECHOSO/);
+    } finally {
+        await ocr.cerrar();
+        await juguete.cerrar();
+    }
+});
+
 test('demo auditar también revisa las capturas del manual, no solo el .mp4', async () => {
     // Defecto crítico del cierre de rama: grabador.mjs deja una captura por paso en
     // capturas/ (para el manual), pero demo auditar solo miraba el video. Un guion

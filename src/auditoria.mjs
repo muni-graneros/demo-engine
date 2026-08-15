@@ -15,7 +15,7 @@
 
 import { existsSync, readdirSync, readFileSync, mkdirSync } from 'node:fs';
 import { basename, dirname, extname, join } from 'node:path';
-import { ff } from './ffmpeg.mjs';
+import { ff, duracion } from './ffmpeg.mjs';
 import { ErrorConfig } from './configurar.mjs';
 
 const DEFECTOS = {
@@ -48,10 +48,22 @@ export function exigirAuditoriaConfigurada(auditoria) {
 /**
  * Extrae un frame cada `cada` segundos (hasta `maximo` frames) y los deja en `dirSalida`.
  *
- * No depende de ffprobe (el binario estático de `ffmpeg-static` no lo trae, ver ffmpeg.mjs):
- * el filtro `fps=1/cada` de ffmpeg ya entrega los frames espaciados exactamente así, y el
- * segundo de cada uno es determinístico a partir de su posición (0, cada, 2·cada, …) — no
- * hace falta preguntarle nada al archivo para saberlo.
+ * El filtro `fps=1/cada` de ffmpeg agenda su primer punto de muestreo en el segundo `cada`
+ * exacto — no en 0. Con un video MÁS CORTO que `cada` (un guion de una sola escena, por
+ * ejemplo: unos pocos segundos contra el `cada` por defecto de 10s) ese punto cae después de
+ * que el video ya terminó, y ffmpeg no entrega NINGÚN frame. Eso es "0 de 0 sospechosos" con
+ * código de salida 0: el portero aprobando sin haber mirado un solo frame.
+ *
+ * Por eso el paso efectivo nunca es mayor que la duración real del video: así el primer
+ * punto de muestreo (t=0) siempre cae dentro del video, y se examina al menos un frame
+ * mientras haya contenido. Esto sí depende de preguntarle al archivo su duración (ver
+ * `duracion()` en ffmpeg.mjs, que tampoco depende de ffprobe) — ya no alcanza con calcular
+ * el segundo de cada frame a partir de su posición sin mirar el archivo.
+ *
+ * Si la duración no se puede determinar (video sin contenido, corrupto, o vacío) no se
+ * intenta nada con ffmpeg — dividir por una duración de 0 no tiene un frame válido que dar—
+ * y se devuelve sin frames. `auditarVideo` es quien decide qué hacer con "cero frames": acá
+ * solo se reporta el hecho.
  *
  * @param {string} video ruta al MP4 ya grabado
  * @param {{cada:number, maximo:number, dirSalida:string}} opciones
@@ -59,12 +71,17 @@ export function exigirAuditoriaConfigurada(auditoria) {
  */
 export function muestrearFrames(video, { cada, maximo, dirSalida }) {
     mkdirSync(dirSalida, { recursive: true });
-    ff(['-y', '-i', video, '-vf', `fps=1/${cada}`, '-frames:v', String(maximo), join(dirSalida, 'frame-%04d.png')]);
+
+    const total = duracion(video);
+    if (total <= 0) return [];
+
+    const efectivo = Math.min(cada, total);
+    ff(['-y', '-i', video, '-vf', `fps=1/${efectivo}`, '-frames:v', String(maximo), join(dirSalida, 'frame-%04d.png')]);
 
     const archivos = readdirSync(dirSalida)
         .filter((nombre) => /^frame-\d+\.png$/.test(nombre))
         .sort();
-    return archivos.map((nombre, indice) => ({ segundo: indice * cada, archivo: join(dirSalida, nombre) }));
+    return archivos.map((nombre, indice) => ({ segundo: indice * efectivo, archivo: join(dirSalida, nombre) }));
 }
 
 /**
@@ -130,6 +147,21 @@ export async function auditarVideo(video, config, { dirFrames, ocr } = {}) {
 
     const carpeta = dirFrames ?? join(dirname(video), 'auditoria', basename(video, extname(video)));
     const frames = muestrearFrames(video, { cada: auditoria.cada, maximo: auditoria.maximo, dirSalida: carpeta });
+
+    // Cero frames nunca es sinónimo de "aprobado". Con el paso efectivo de muestrearFrames,
+    // solo se llega acá con 0 frames si el video no tiene contenido examinable (duración
+    // cero, corrupto). Devolver { total: 0, sospechosos: [] } sería indistinguible de una
+    // auditoría real que sí miró y no encontró nada — exactamente la garantía falsa que este
+    // comando existe para evitar. Se corta acá, con un mensaje inequívoco, y SIN salir con
+    // código 0 (ver cli.mjs: cualquier excepción que no sea ErrorConfig también sale != 0).
+    if (frames.length === 0) {
+        throw new ErrorConfig(
+            `auditoria: no se examinó ningún frame de ${video} — el video no tiene contenido ` +
+            'examinable (duración cero o no detectable por ffmpeg). No se puede dar por ' +
+            'aprobado sin haber mirado un solo frame.',
+        );
+    }
+
     const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo));
 
     const sospechosos = [];
