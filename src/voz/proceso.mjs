@@ -32,7 +32,15 @@ export function crearMotorProceso({ motor, archivosListos, comando, textoSonda =
         const destino = join(dirCorrida, `locucion-${contador++}.wav`);
         const { PY, args } = comando(destino);
         const r = spawnSync(PY, args, { input: texto, encoding: 'utf8' });
-        if (r.error) return { ok: false, error: r.error.message };
+        if (r.error) {
+            // `r.error` no es necesariamente "el proceso no arrancó": bajo carga, el hijo
+            // puede cerrar su stdin antes de que Node termine de escribirle el texto (visto
+            // de verdad como EPIPE), y en ese caso el proceso SÍ corrió y dejó un stderr real
+            // con la causa concreta. Descartarlo y reportar solo el mensaje genérico de Node
+            // socava el propio motivo de este aviso: perder la causa real del fallo.
+            const detalle = (r.stderr || '').trim();
+            return { ok: false, error: detalle ? `${r.error.message}: ${detalle}` : r.error.message };
+        }
         if (r.status !== 0) {
             const detalle = (r.stderr || '').trim();
             return { ok: false, error: detalle || `${motor} terminó con código de salida ${r.status}` };
@@ -45,11 +53,25 @@ export function crearMotorProceso({ motor, archivosListos, comando, textoSonda =
         if (comprobado) return comprobado;
         const faltante = archivosListos();
         if (faltante) {
-            comprobado = { ok: false, error: faltante };
+            // Esto SÍ es "no está instalado": faltan archivos en disco, ni se intentó correr
+            // nada. Se distingue de un fallo al arrancar (ver más abajo) porque el remedio es
+            // distinto: acá corresponde instalar; abajo, no.
+            comprobado = { ok: false, error: faltante, motivo: 'no-instalado' };
             return comprobado;
         }
-        const r = ejecutar(textoSonda);
-        comprobado = r.ok ? { ok: true, error: null } : { ok: false, error: r.error };
+
+        // La sonda corre UNA SOLA VEZ y el resultado se cachea PARA SIEMPRE (ver arriba):
+        // justo por eso no puede tener menos resistencia a fallos transitorios que
+        // sintetizar(), que sí reintenta. Sin este reintento, un solo fork/exec fallido por
+        // contención de recursos —el mismo escenario que motivó el reintento en sintetizar()—
+        // manda el motor entero al respaldo (o lo apaga del todo) para el resto de la corrida,
+        // sin que el motor esté roto de verdad.
+        let r = ejecutar(textoSonda);
+        if (!r.ok) r = ejecutar(textoSonda);
+        // Esto es "está instalado pero falló al arrancar": los archivos existían, se intentó
+        // correr de verdad y no funcionó. Confundirlo con "no instalado" manda a alguien a
+        // reinstalar algo que no estaba roto.
+        comprobado = r.ok ? { ok: true, error: null, motivo: null } : { ok: false, error: r.error, motivo: 'fallo-arranque' };
         return comprobado;
     }
 
@@ -57,6 +79,8 @@ export function crearMotorProceso({ motor, archivosListos, comando, textoSonda =
         motor,
         disponible: () => comprobar().ok,
         error: () => comprobado?.error ?? null,
+        /** 'no-instalado' | 'fallo-arranque' | null (disponible, o aún no comprobado). */
+        motivo: () => comprobado?.motivo ?? null,
         sintetizar(texto) {
             // Lanzar el proceso puede fallar por causas TRANSITORIAS: durante una grabación
             // compiten varios navegadores y ffmpeg por la máquina, y ahí `fork/exec` devuelve

@@ -74,6 +74,79 @@ test('si el motor principal existe pero la síntesis de prueba falla, el aviso t
     assert.match(texto, /biblioteca nativa ausente/);
 });
 
+/**
+ * Venv compartido por piper y kokoro donde solo kokoro "funciona": kokoro se invoca con
+ * `-c` como primer argumento (ver src/voz/kokoro.mjs), piper con `-m` (ver
+ * src/voz/piper.mjs). El script distingue por eso, no por contenido de los modelos, porque
+ * ambos motores comparten el mismo venv/voces en `crearVoz` (un solo par de rutas para
+ * motor+respaldo).
+ */
+function venvMixto({ mensajeFallaPiper = 'piper explotó al arrancar' } = {}) {
+    const venv = mkdtempSync(join(tmpdir(), 'voz-venv-mixto-'));
+    mkdirSync(join(venv, 'bin'), { recursive: true });
+    const py = join(venv, 'bin', 'python');
+    writeFileSync(py, `#!/usr/bin/env bash
+destino="\${@: -1}"
+if [ "$1" = "-c" ]; then
+  printf 'RIFFfake' > "$destino"
+  exit 0
+fi
+echo "${mensajeFallaPiper}" >&2
+exit 1
+`);
+    chmodSync(py, 0o755);
+
+    const voces = mkdtempSync(join(tmpdir(), 'voz-voces-mixto-'));
+    writeFileSync(join(voces, 'x.onnx'), '');               // piper: archivo presente, pero falla al ARRANCAR
+    writeFileSync(join(voces, 'kokoro-v1.0.onnx'), '');
+    writeFileSync(join(voces, 'voices-v1.0.bin'), '');
+
+    return { venv, voces };
+}
+
+test('si el motor principal cae al respaldo por un fallo de sonda, se avisa por stderr (no degrada en silencio)', () => {
+    // Defecto real: crearVoz solo avisaba si NINGÚN motor respondía. Si el principal fallaba
+    // (por ejemplo, la sonda de Kokoro cayendo por un fallo transitorio) y el respaldo SÍ
+    // funcionaba, el curso entero se grababa con Piper sin que nadie se enterara del cambio.
+    const { venv, voces } = venvMixto();
+    const texto = capturarStderr(() => {
+        const voz = crearVoz({ motor: 'piper', voz: 'x', respaldo: 'kokoro', venv, voces });
+        assert.equal(voz.motor, 'kokoro', 'debió caer al respaldo');
+        assert.equal(voz.disponible(), true);
+    });
+    assert.match(texto, /AVISO/);
+    assert.match(texto, /piper/);
+    assert.match(texto, /kokoro/);
+    assert.match(texto, /piper explotó al arrancar/,
+        'el aviso de la caída a respaldo debe traer el motivo concreto del fallo del principal');
+});
+
+test('el diagnóstico distingue "no instalado" de "falló al arrancar": no manda a reinstalar algo que no está roto', () => {
+    // Defecto conexo: si ambos motores fallan la sonda en la misma ventana (o uno no está
+    // instalado y el otro sí pero falla al arrancar), el aviso final tiene que decir CUÁL es
+    // cuál. Confundirlos manda a alguien a reinstalar un motor que en realidad está bien
+    // instalado y solo tropezó al arrancar.
+    const venv = mkdtempSync(join(tmpdir(), 'voz-venv-ambos-'));
+    mkdirSync(join(venv, 'bin'), { recursive: true });
+    const py = join(venv, 'bin', 'python');
+    writeFileSync(py, `#!/usr/bin/env bash\necho "kokoro no pudo arrancar" >&2\nexit 1\n`);
+    chmodSync(py, 0o755);
+
+    const voces = mkdtempSync(join(tmpdir(), 'voz-voces-ambos-'));
+    // Solo deja los archivos de Kokoro: Piper queda sin modelo, "no instalado" de verdad.
+    writeFileSync(join(voces, 'kokoro-v1.0.onnx'), '');
+    writeFileSync(join(voces, 'voices-v1.0.bin'), '');
+
+    const texto = capturarStderr(() => {
+        const voz = crearVoz({ motor: 'piper', respaldo: 'kokoro', voz: 'x', venv, voces });
+        assert.equal(voz.disponible(), false);
+    });
+
+    assert.match(texto, /piper.*no está instalado/i, 'a piper (sin modelo en disco) le corresponde "no instalado"');
+    assert.match(texto, /kokoro.*falló al arrancar/i, 'a kokoro (con modelo, pero la sonda falló) le corresponde "falló al arrancar"');
+    assert.match(texto, /kokoro no pudo arrancar/, 'debe traer el motivo real');
+});
+
 test('sintetiza un wav audible con la duración esperable para la frase', { skip: !process.env.DEMO_CON_VOZ }, () => {
     const voz = crearVoz({ motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper' });
     assert.ok(voz.disponible(), 'corre con DEMO_CON_VOZ=1 solo si instalaste las voces');

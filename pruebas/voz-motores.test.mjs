@@ -40,6 +40,34 @@ function invocaciones(contador) {
     return readFileSync(contador, 'utf8').split('\n').filter(Boolean).length;
 }
 
+/**
+ * Como venvFalso, pero falla la PRIMERA invocación y tiene éxito desde la segunda en
+ * adelante: simula el fallo TRANSITORIO de fork/exec por contención de recursos (medido:
+ * bajo carga real, ~1 de cada 3 corridas) que sintetizar() ya resiste reintentando una vez.
+ */
+function venvTransitorio({ mensaje = 'recurso no disponible transitoriamente' } = {}) {
+    const venv = mkdtempSync(join(tmpdir(), 'voz-venv-'));
+    mkdirSync(join(venv, 'bin'), { recursive: true });
+    const contador = join(venv, 'contador.txt');
+    writeFileSync(contador, '');
+    const marca = join(venv, 'ya-fallo-una-vez');
+    const script = `#!/usr/bin/env bash
+echo x >> "${contador}"
+destino="\${@: -1}"
+if [ ! -f "${marca}" ]; then
+  touch "${marca}"
+  echo "${mensaje}" >&2
+  exit 1
+fi
+printf 'RIFFfake' > "$destino"
+exit 0
+`;
+    const py = join(venv, 'bin', 'python');
+    writeFileSync(py, script);
+    chmodSync(py, 0o755);
+    return { venv, contador };
+}
+
 function vocesPiperFalsas() {
     const voces = mkdtempSync(join(tmpdir(), 'voz-voces-'));
     writeFileSync(join(voces, 'x.onnx'), '');
@@ -65,6 +93,25 @@ for (const [nombre, motor, vocesFalsas] of [['piper', piper, vocesPiperFalsas], 
 
         assert.equal(invocaciones(contador), 1,
             'la sonda de disponibilidad debe correr una sola vez, no en cada llamada a disponible()');
+    });
+
+    test(`${nombre}: la sonda de disponible() resiste un fallo transitorio, igual que sintetizar()`, () => {
+        // Defecto real: el arreglo 26cec37 reintentó sintetizar() pero no comprobar(), que es
+        // la sonda que decide disponible() Y CACHEA EL RESULTADO PARA SIEMPRE. Un solo fallo
+        // transitorio de la sonda —el mismo tipo de fallo que sintetizar() ya resiste— caía
+        // al respaldo (o apagaba la voz) para el resto de la corrida sin que el motor
+        // estuviera roto de verdad.
+        const { venv, contador } = venvTransitorio();
+        const voces = vocesFalsas();
+        const instancia = motor.crear({ voz: 'x', venv, voces });
+
+        assert.equal(instancia.disponible(), true,
+            'un solo fallo transitorio en la sonda no debe degradar el motor entero');
+        assert.equal(invocaciones(contador), 2,
+            'debe haber reintentado la sonda una vez, igual que sintetizar()');
+        assert.equal(instancia.disponible(), true);
+        assert.equal(invocaciones(contador), 2,
+            'una vez cacheado el resultado, disponible() no debe volver a invocar nada');
     });
 
     test(`${nombre}: si la síntesis de prueba falla, el error concreto queda disponible (no un "no disponible" genérico)`, () => {
