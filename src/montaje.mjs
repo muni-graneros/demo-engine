@@ -87,7 +87,13 @@ export async function montar({ pistas, pasos, voz, video }, { salida, nombre = '
             if (!seg.narrar) continue;
             // El grabador ya sintetizó esta locución y dejó su ruta en el segmento: se
             // reutiliza. Sintetizar de nuevo duplicaría el paso más caro del pipeline.
-            const wav = seg.wav ?? voz.sintetizar(seg.narrar);
+            //
+            // `undefined` (nunca se intentó, típico de llamar a montar() sin pasar por
+            // grabar()) y `null` (grabar() SÍ lo intentó y la perdió, y ya avisó por
+            // stderr — ver src/voz/proceso.mjs) no son lo mismo: solo el primer caso
+            // amerita intentarlo acá. Reintentar un `null` solo produce un SEGUNDO aviso
+            // por la MISMA pérdida, sin decir que es la misma.
+            const wav = seg.wav !== undefined ? seg.wav : voz.sintetizar(seg.narrar);
             if (!wav) continue;
             entradas.push('-i', wav);
             const ms = Math.round(seg.inicioSeg * 1000);

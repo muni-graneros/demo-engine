@@ -96,6 +96,64 @@ test('limpia los archivos intermedios de la carpeta de salida al terminar', asyn
         'la carpeta de salida solo debe tener lo que produce el montaje, sin intermedios');
 });
 
+test('reutiliza el wav que ya trae el segmento, sin sintetizarlo de nuevo en el montaje', async () => {
+    // Defecto real (raíz del defecto #4 del brief): construirLineaDeTiempo no propagaba
+    // paso.wav a los segmentos, así que seg.wav SIEMPRE llegaba undefined a montar() —
+    // grabar() dejaba el .wav ya sintetizado en el paso, pero montar() lo ignoraba y volvía
+    // a sintetizar TODAS las locuciones, no solo las perdidas. Esto duplicaba el paso más
+    // caro del pipeline en cada corrida.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'green') };
+    const wavListo = join(dir, 'ya-sintetizado.wav');
+    // Un tono, no silencio: loudnorm no puede normalizar silencio puro a un loudness
+    // objetivo (exige una ganancia infinita) y el encoder AAC revienta con NaN — un
+    // artefacto de fixture, no del código bajo prueba. Con señal real esto no pasa.
+    ff(['-y', '-f', 'lavfi', '-t', '1', '-i', 'sine=frequency=440:sample_rate=22050', wavListo]);
+
+    let llamadas = 0;
+    const voz = { motor: 'contadora', disponible: () => true, sintetizar: () => { llamadas++; return null; } };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 2000, narrar: 'Hola.', wav: wavListo }];
+
+    await montar({ pistas, pasos, voz, video: { ancho: 640, alto: 400 } }, { salida: dir, nombre: 'final.mp4' });
+
+    assert.equal(llamadas, 0, 'no debe sintetizar de nuevo: el grabador ya dejó el wav listo en el paso');
+});
+
+test('no reintenta una locución que grabar() ya dio por perdida (wav: null)', async () => {
+    // Defecto #4 del brief: grabar() ya intenta sintetizar cada narración y, si falla,
+    // guarda wav: null Y avisa por stderr (ver src/voz/proceso.mjs). montar() no debe
+    // reintentarla: reintentar acá solo produce un SEGUNDO aviso por la MISMA pérdida, sin
+    // indicar que es el mismo fallo.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'green') };
+
+    let llamadas = 0;
+    const voz = { motor: 'contadora', disponible: () => true, sintetizar: () => { llamadas++; return null; } };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 2000, narrar: 'Se perdió.', wav: null }];
+
+    await montar({ pistas, pasos, voz, video: { ancho: 640, alto: 400 } }, { salida: dir, nombre: 'final.mp4' });
+
+    assert.equal(llamadas, 0, 'no debe reintentar una narración que grabar() ya dio por perdida');
+});
+
+test('si el paso no trae wav en absoluto (uso directo de montar() sin pasar por grabar()), sí sintetiza', async () => {
+    // Compatibilidad: alguien puede llamar a montar() con pasos armados a mano, sin haber
+    // pasado por grabar() nunca. Ahí wav es `undefined` (nunca se intentó), no `null`
+    // (se intentó y se perdió), y montar() sigue siendo el único que puede sintetizar.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 3, 'green') };
+    const wavReal = join(dir, 'sintetizado-en-montaje.wav');
+    ff(['-y', '-f', 'lavfi', '-t', '1', '-i', 'sine=frequency=440:sample_rate=22050', wavReal]);
+
+    let llamadas = 0;
+    const voz = { motor: 'contadora', disponible: () => true, sintetizar: () => { llamadas++; return wavReal; } };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 2000, narrar: 'Nunca se intentó.' }];
+
+    await montar({ pistas, pasos, voz, video: { ancho: 640, alto: 400 } }, { salida: dir, nombre: 'final.mp4' });
+
+    assert.equal(llamadas, 1, 'sin wav previo (undefined) debe sintetizar: nadie lo había intentado todavía');
+});
+
 test('un desborde grande falla, en vez de recortar media escena en silencio', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
     const pistas = { uno: pista(dir, 'uno.mp4', 3, 'black') };
