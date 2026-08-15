@@ -65,14 +65,29 @@ function avisarCaidaARespaldo({ motor, usado, errores }) {
  * Si el principal falla pero el respaldo SÍ responde, también se avisa (ver
  * `avisarCaidaARespaldo`): que la corrida siga con voz no significa que el cambio de motor
  * deba pasar en silencio.
+ *
+ * `voz` y `vozRespaldo` son campos SEPARADOS a propósito: Kokoro nombra sus voces por
+ * identificador (`ef_dora`, `em_alex`) y Piper por archivo de modelo (`es_ES-davefx-medium`,
+ * que busca en `<voces>/<voz>.onnx`). Reenviar el mismo nombre a los dos motores rompe el
+ * respaldo en cuanto sus nomenclaturas no coinciden: quedaba declarado pero nunca disponible.
+ * Si no se declara `vozRespaldo`, el respaldo usa SU PROPIO valor por defecto (no el del
+ * motor principal) — es lo que un consumidor espera al escribir solo `voz` para el motor
+ * principal.
  */
-export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', venv, voces } = {}) {
-    const candidatos = [motor, respaldo].filter(Boolean);
+export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', vozRespaldo, venv, voces } = {}) {
+    // `?? undefined` normaliza el `null` que trae `cargarConfig()` cuando el consumidor no
+    // declaró `vozRespaldo`: los `crear()` de cada motor solo aplican su valor por defecto
+    // cuando el parámetro es `undefined`, no cuando es `null`.
+    const candidatos = [
+        { nombre: motor, voz },
+        { nombre: respaldo, voz: vozRespaldo ?? undefined },
+    ].filter((c) => c.nombre);
     const errores = [];
-    for (const [indice, nombre] of candidatos.entries()) {
+    for (const [indice, candidato] of candidatos.entries()) {
+        const { nombre, voz: vozCandidato } = candidato;
         const modulo = MOTORES[nombre];
         if (!modulo) continue;
-        const instancia = modulo.crear({ voz, venv, voces });
+        const instancia = modulo.crear({ voz: vozCandidato, venv, voces });
         if (instancia.disponible()) {
             if (indice > 0) avisarCaidaARespaldo({ motor, usado: nombre, errores });
             return instancia;

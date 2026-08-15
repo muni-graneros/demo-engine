@@ -136,10 +136,17 @@ export default {
   },
 
   // Voz: síntesis de audio.
+  //
+  // OJO: cada motor nombra sus voces a su manera, y no son intercambiables. Kokoro usa
+  // nombres propios ('ef_dora' femenina, 'em_alex' y 'em_santa' masculinas); Piper usa el
+  // nombre del archivo del modelo ('es_ES-davefx-medium' busca es_ES-davefx-medium.onnx).
+  // Por eso el respaldo tiene su propio campo: pasarle al respaldo la voz del motor
+  // principal lo dejaría sin poder cargar nada.
   voz: {
     motor: 'kokoro',            // Motor principal: 'kokoro' | 'piper' (defecto: kokoro)
-    voz: 'es_ES',               // Código de idioma/voz (defecto: es_ES)
-    respaldo: 'piper',          // Si motor no está disponible (defecto: piper)
+    voz: 'ef_dora',             // Voz del motor principal (defecto: ef_dora, de Kokoro)
+    respaldo: 'piper',          // Si el principal no está disponible (defecto: piper)
+    vozRespaldo: null,          // Voz del respaldo; si es null, el respaldo usa la suya
     venv: null,                 // Carpeta del venv de Python, opcional (ver "Instalación")
     voces: null                 // Carpeta de los modelos .onnx, opcional (ver "Instalación")
   },

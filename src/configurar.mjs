@@ -10,7 +10,10 @@ const DEFECTOS = {
     // video (ver src/pantalla.mjs) — no tiene por qué coincidir con el fps real del
     // screencast, que es variable.
     video: { ancho: 1600, alto: 1000, pausaMinima: 1200, calidad: 90, fps: 25 },
-    voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', venv: null, voces: null },
+    // `voz` y `vozRespaldo` son campos separados porque Kokoro y Piper nombran sus voces
+    // distinto (ver el comentario de `crearVoz` en src/voz/index.mjs). Si `vozRespaldo`
+    // queda en null, el respaldo usa su propio valor por defecto, no el del motor principal.
+    voz: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', vozRespaldo: null, venv: null, voces: null },
     marca: { color: '#1e3a8a', escudo: null },
     // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso
     // decide quien configura el sistema, no el motor (ver src/auditoria.mjs). `patron`,

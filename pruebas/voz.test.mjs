@@ -147,6 +147,70 @@ test('el diagnóstico distingue "no instalado" de "falló al arrancar": no manda
     assert.match(texto, /kokoro no pudo arrancar/, 'debe traer el motivo real');
 });
 
+test('cae al respaldo con la voz del motor principal: el respaldo debe quedar disponible, no "ninguno"', () => {
+    // Defecto real medido en los sistemas: { motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper' }
+    // reenviaba 'ef_dora' (nombre de voz de Kokoro) al respaldo Piper, que la busca como
+    // archivo .voces/ef_dora.onnx y nunca la encuentra. El respaldo quedaba declarado pero
+    // nunca podía funcionar: si Kokoro fallaba, la voz caía en silencio a "ninguno".
+    const venv = mkdtempSync(join(tmpdir(), 'voz-venv-vozrespaldo-'));
+    mkdirSync(join(venv, 'bin'), { recursive: true });
+    const py = join(venv, 'bin', 'python');
+    // kokoro (invocado con -c) siempre falla; piper (invocado con -m) siempre "funciona".
+    writeFileSync(py, `#!/usr/bin/env bash
+destino="\${@: -1}"
+if [ "$1" = "-c" ]; then
+  echo "kokoro no pudo arrancar" >&2
+  exit 1
+fi
+printf 'RIFFfake' > "$destino"
+exit 0
+`);
+    chmodSync(py, 0o755);
+
+    const voces = mkdtempSync(join(tmpdir(), 'voz-voces-vozrespaldo-'));
+    writeFileSync(join(voces, 'kokoro-v1.0.onnx'), '');
+    writeFileSync(join(voces, 'voices-v1.0.bin'), '');
+    // Solo está el modelo POR DEFECTO de Piper: nunca 'ef_dora.onnx' (nombre de voz Kokoro).
+    writeFileSync(join(voces, 'es_ES-davefx-medium.onnx'), '');
+
+    const texto = capturarStderr(() => {
+        const voz = crearVoz({ motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper', venv, voces });
+        assert.equal(voz.motor, 'piper', 'debió caer al respaldo');
+        assert.equal(voz.disponible(), true, 'el respaldo debe quedar disponible, no "ninguno"');
+    });
+    assert.match(texto, /AVISO/);
+});
+
+test('vozRespaldo declarado explícitamente elige el modelo Piper correspondiente', () => {
+    const venv = mkdtempSync(join(tmpdir(), 'voz-venv-vozrespaldo2-'));
+    mkdirSync(join(venv, 'bin'), { recursive: true });
+    const py = join(venv, 'bin', 'python');
+    writeFileSync(py, `#!/usr/bin/env bash
+destino="\${@: -1}"
+if [ "$1" = "-c" ]; then
+  echo "kokoro no pudo arrancar" >&2
+  exit 1
+fi
+printf 'RIFFfake' > "$destino"
+exit 0
+`);
+    chmodSync(py, 0o755);
+
+    const voces = mkdtempSync(join(tmpdir(), 'voz-voces-vozrespaldo2-'));
+    writeFileSync(join(voces, 'kokoro-v1.0.onnx'), '');
+    writeFileSync(join(voces, 'voices-v1.0.bin'), '');
+    // Solo está el modelo explícito, NO el de defecto: si vozRespaldo no se usara, fallaría.
+    writeFileSync(join(voces, 'es_ES-carlfm-x-low.onnx'), '');
+
+    const voz = crearVoz({
+        motor: 'kokoro', voz: 'ef_dora',
+        respaldo: 'piper', vozRespaldo: 'es_ES-carlfm-x-low',
+        venv, voces,
+    });
+    assert.equal(voz.motor, 'piper');
+    assert.equal(voz.disponible(), true);
+});
+
 test('sintetiza un wav audible con la duración esperable para la frase', { skip: !process.env.DEMO_CON_VOZ }, () => {
     const voz = crearVoz({ motor: 'kokoro', voz: 'ef_dora', respaldo: 'piper' });
     assert.ok(voz.disponible(), 'corre con DEMO_CON_VOZ=1 solo si instalaste las voces');
