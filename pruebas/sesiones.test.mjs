@@ -5,7 +5,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { prepararSesiones, prepararSesionesParaGuion, actoresDeGuion, totp } from '../src/sesiones.mjs';
+import { prepararSesiones, prepararSesionesParaGuion, sesionSigueViva, actoresDeGuion, totp } from '../src/sesiones.mjs';
 
 test('genera el TOTP de referencia del RFC 6238', () => {
     // Secreto oficial del RFC 6238 (Apéndice B): "12345678901234567890" (20 bytes ASCII)
@@ -71,6 +71,21 @@ test('pasa por el guardián de entorno antes de loguear: con host público no es
     };
     await assert.rejects(() => prepararSesiones(config, { dirSesiones: dir }), /no es una dirección local/);
     assert.deepEqual(readdirSync(dir), [], 'no debe quedar ningún archivo de sesión en disco');
+});
+
+test('sesionSigueViva pasa por el guardián de entorno antes de abrir el navegador', async () => {
+    // Defecto real: sesionSigueViva navegaba a config.baseURL con un storageState guardado
+    // para comprobar si la sesión seguía viva, y NUNCA llamaba a exigirEntornoDeDesarrollo —
+    // a diferencia de prepararSesiones (commit 6d4dfec), que se agregó ANTES y sí quedó
+    // cubierta. Con una baseURL pública, esto abría un navegador real y navegaba hacia ese
+    // host con cookies de sesión reales, sin pasar jamás por el guardián. Se prueba con un
+    // archivo que ni siquiera existe: si el guardián corre antes de tocar el navegador o el
+    // disco, el rechazo tiene que llegar igual, sin importar si el storageState es válido.
+    const config = { baseURL: 'https://ejemplo.cl' };
+    await assert.rejects(
+        () => sesionSigueViva('/no/existe-jamas.json', config, {}),
+        /no es una dirección local/,
+    );
 });
 
 test('si el login no deja sesión, falla nombrando al actor', async () => {

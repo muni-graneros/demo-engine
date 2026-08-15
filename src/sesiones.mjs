@@ -118,6 +118,12 @@ export async function prepararSesiones(config, { dirSesiones }) {
  * @returns {Promise<boolean>}
  */
 export async function sesionSigueViva(archivo, config, login = {}) {
+    // Mismo guardián que prepararSesiones (commit 6d4dfec): esto navega con cookies de
+    // sesión reales contra config.baseURL. Esta función se agregó DESPUÉS de aquel arreglo y
+    // quedó fuera — sin esto, una baseURL mal puesta abría un navegador real y navegaba hacia
+    // ese host antes de que nada abortara.
+    exigirEntornoDeDesarrollo(config.baseURL);
+
     const navegador = await chromium.launch();
     try {
         const ctx = await navegador.newContext({ baseURL: config.baseURL, storageState: archivo });
