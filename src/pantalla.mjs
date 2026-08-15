@@ -44,18 +44,16 @@ const DURACION_MINIMA_SEG = 1 / 60;   // piso para que ffmpeg nunca vea una dura
 export async function iniciarGrabacion(page, { ancho, alto, salida, calidad = CALIDAD_DEFECTO, fps = FPS_DEFECTO }) {
     const cdp = await page.context().newCDPSession(page);
     const dirFrames = mkdtempSync(join(tmpdir(), 'demo-frames-'));
-    const frames = [];        // { archivo, t } — t en ms desde el primer frame recibido
+    const frames = [];        // { archivo, t } — t en ms desde que arrancó la grabación (t0)
     const pendientes = new Set();   // promesas de frames en proceso (escritura + ack), para drenar en detener()
     let indice = 0;
-    let t0 = null;
     let detenido = false;
 
     async function procesar({ data, sessionId }) {
-        const ahora = Date.now();
-        if (t0 === null) t0 = ahora;
+        const t = Date.now() - t0;
         const archivo = join(dirFrames, `f-${String(indice++).padStart(6, '0')}.jpg`);
         writeFileSync(archivo, Buffer.from(data, 'base64'));
-        frames.push({ archivo, t: ahora - t0 });
+        frames.push({ archivo, t });
         // El ack es obligatorio: sin él, CDP deja de mandar frames nuevos después del primero.
         await cdp.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
     }
@@ -67,6 +65,11 @@ export async function iniciarGrabacion(page, { ancho, alto, salida, calidad = CA
         promesa.finally(() => pendientes.delete(promesa));
     });
 
+    // El reloj arranca ACÁ, no con el primer frame: bajo carga, ese primer frame puede tardar
+    // cientos de ms en llegar (ver docstring del módulo), y si t0 se fijara recién ahí, todo
+    // ese tramo inicial quedaría fuera de la cuenta — el video saldría más corto que el tiempo
+    // real cubierto y desalinearía voz/subtítulos, que se ajustan por segundos transcurridos.
+    const t0 = Date.now();
     await cdp.send('Page.startScreencast', {
         format: 'jpeg',
         quality: calidad,
@@ -78,7 +81,7 @@ export async function iniciarGrabacion(page, { ancho, alto, salida, calidad = CA
     return {
         async detener() {
             detenido = true;
-            const finT = t0 === null ? 0 : Date.now() - t0;
+            const finT = Date.now() - t0;
             await cdp.send('Page.stopScreencast').catch(() => {});
             // Drena los frames que ya estaban en vuelo (escritos antes de `detenido`, pero
             // con el ack todavía pendiente) antes de armar la línea de tiempo final.
@@ -99,6 +102,12 @@ export async function iniciarGrabacion(page, { ancho, alto, salida, calidad = CA
  * que se pidió detener la grabación). El demuxer `concat` de ffmpeg, con esas duraciones
  * explícitas, entiende el ritmo real; forzar `-r fps` a la salida es lo que convierte eso
  * en fps constante, repitiendo frames en los tramos quietos.
+ *
+ * El PRIMER frame es un caso especial: `frames[0].t` no es 0 sino el tiempo que tardó en
+ * llegar el primer aviso de CDP desde que arrancó la grabación (t0). Ese tramo inicial ya
+ * pasó en pantalla —tal como se veía al llegar el frame, porque nada cambió antes—, así que
+ * se sostiene el primer frame desde el instante cero en vez de arrancar recién en `frames[0].t`.
+ * De lo contrario ese tramo desaparecería del video (más corto que lo realmente grabado).
  */
 function construirVideo(frames, { dirFrames, salida, ancho, alto, fps, finT }) {
     if (frames.length === 0) {
@@ -114,8 +123,9 @@ function construirVideo(frames, { dirFrames, salida, ancho, alto, fps, finT }) {
     const linea = [];
     for (let i = 0; i < frames.length; i++) {
         const actual = frames[i];
+        const inicioT = i === 0 ? 0 : actual.t;   // el primer frame se sostiene desde t=0
         const siguienteT = i + 1 < frames.length ? frames[i + 1].t : finT;
-        const duracionSeg = Math.max((siguienteT - actual.t) / 1000, DURACION_MINIMA_SEG);
+        const duracionSeg = Math.max((siguienteT - inicioT) / 1000, DURACION_MINIMA_SEG);
         linea.push(`file '${actual.archivo}'`);
         linea.push(`duration ${duracionSeg.toFixed(3)}`);
     }

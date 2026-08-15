@@ -72,6 +72,53 @@ test('la calidad es configurable: más calidad pesa más para el mismo contenido
     });
 });
 
+// Ocupa el hilo a propósito, en forma SÍNCRONA, durante `ms`. Node es de un solo hilo: mientras
+// esto corre, no se puede procesar ningún mensaje de E/S en danza, incluido el evento CDP del
+// primer frame del screencast. Es una forma real (no simulada) y determinística de reproducir
+// la demora bajo carga sin depender de correr la suite dos veces en paralelo ni mockear Date.now
+// globalmente — lo segundo se probó y no sirve: Playwright también llama a Date.now() para su
+// propio protocolo CDP, así que una secuencia mockeada global se contamina con esas llamadas y
+// deja de ser predecible (confirmado instrumentando pantalla.mjs: aparecían llamadas de más entre
+// el t0 y el frame, y entre el frame y el finT, ajenas al código de este módulo).
+function bloquearHilo(ms) {
+    const fin = Date.now() + ms;
+    while (Date.now() < fin) { /* nada: es a propósito */ }
+}
+
+test('el reloj arranca con la grabación, no con el primer frame: uno tardío igual queda cubierto', async () => {
+    // Reproduce el defecto sin la intermitencia de "correr la suite dos veces en paralelo":
+    // se bloquea el hilo 300ms justo después de arrancar la grabación, así que el primer frame
+    // de CDP —que sin esto llega casi al instante— no se puede procesar hasta que el bloqueo
+    // termina. Es, literalmente, la misma causa que bajo carga real: el hilo ocupado retrasa
+    // cuándo se atiende el evento del primer frame.
+    await conPagina(async (page) => {
+        const salida = join(mkdtempSync(join(tmpdir(), 'demo-pantalla-')), 'tardio.mp4');
+        const antes = Date.now();
+        const grabacion = await iniciarGrabacion(page, { ancho: 800, alto: 600, salida });
+        bloquearHilo(300);              // el primer frame queda represado durante este tramo
+        await page.waitForTimeout(200); // deja que llegue el frame (ya tarde) y algo de grabación más
+        // El "transcurrido" se mide ACÁ, antes de llamar a detener() — no después. detener()
+        // hace, recién adentro, dos cosas que no son parte de lo que este test mide: encodear
+        // con ffmpeg (que bajo carga paralela puede tardar bastante) y drenar frames en vuelo.
+        // Medir después de eso infla `transcurrido` con tiempo de encode que el video —cuya
+        // duración depende de `finT`, capturado al ENTRAR a detener(), no al salir— nunca
+        // prometió cubrir. Confirmado corriendo esto bajo carga real (dos `npm test` en
+        // paralelo): sin este ajuste, el propio test salía intermitente por esta razón, no por
+        // el defecto que se quiere cazar.
+        const antesDeDetener = Date.now();
+        const archivo = await grabacion.detener();
+        const transcurrido = (antesDeDetener - antes) / 1000;
+
+        const seg = duracion(archivo);
+        // Con el reloj bien puesto, el video cubre casi todo el tiempo real transcurrido desde
+        // que arrancó la grabación (~0.5s). Si el reloj arrancara con el primer frame (el
+        // defecto), el video saldría corto en, justamente, los 300ms que duró el bloqueo.
+        assert.ok(seg > transcurrido * 0.8,
+            `el video duró ${seg}s pero la grabación cubrió ${transcurrido.toFixed(2)}s: ` +
+            'el tramo antes del primer frame se perdió');
+    });
+});
+
 test('detener() sin que haya llegado ningún frame igual deja una pista legible', async () => {
     // Caso límite: un paso revienta antes del primer repintado del screencast. El grabador
     // debe poder cerrar la pista igual, no reventar ni dejar el archivo a medio escribir.
