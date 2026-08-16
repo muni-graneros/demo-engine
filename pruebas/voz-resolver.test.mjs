@@ -1,25 +1,41 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { resolverVenvYVoces, RUTA_PAQUETE } from '../src/voz/resolver.mjs';
 
 test('sin overrides, encuentra los modelos en el directorio del PAQUETE aunque el cwd sea otro', () => {
-    // Este repo ES el paquete, y ya trae .venv/.voces instalados en su raíz (ver
-    // herramientas/instalar-voces.sh). El bug real era resolver contra process.cwd(), que
-    // en un sistema consumidor NO es la raíz de demo-engine.
+    // Este repo ES el paquete: en una máquina de desarrollo ya trae .venv/.voces instalados
+    // en su raíz (ver herramientas/instalar-voces.sh) y esos ~670 MB no se instalan en CI a
+    // propósito (ver pruebas/voz.test.mjs). Si no existen, se deja acá un fixture mínimo
+    // —justo lo que resolverUno() mira con existsSync()— para que la prueba no dependa de
+    // instalación real; si ya existían (desarrollo local), se dejan intactos y no se tocan.
+    // El bug real que esto prueba era resolver contra process.cwd(), que en un sistema
+    // consumidor NO es la raíz de demo-engine.
+    const venvPaquete = resolve(RUTA_PAQUETE, '.venv');
+    const vocesPaquete = resolve(RUTA_PAQUETE, '.voces');
+    const creoVenv = !existsSync(venvPaquete);
+    const creoVoces = !existsSync(vocesPaquete);
+    if (creoVenv) {
+        mkdirSync(join(venvPaquete, 'bin'), { recursive: true });
+        writeFileSync(join(venvPaquete, 'bin', 'python'), '#!/bin/sh\n', { mode: 0o755 });
+    }
+    if (creoVoces) mkdirSync(vocesPaquete, { recursive: true });
+
     const cwdOriginal = process.cwd();
     const otro = mkdtempSync(join(tmpdir(), 'demo-otro-cwd-'));
     process.chdir(otro);
     try {
         const { venv, voces } = resolverVenvYVoces({});
-        assert.equal(venv, resolve(RUTA_PAQUETE, '.venv'));
-        assert.equal(voces, resolve(RUTA_PAQUETE, '.voces'));
+        assert.equal(venv, venvPaquete);
+        assert.equal(voces, vocesPaquete);
         assert.ok(existsSync(join(venv, 'bin', 'python')), 'debe resolver al venv del paquete, no al cwd');
         assert.ok(!venv.startsWith(otro), 'no puede haber resuelto contra el cwd del consumidor');
     } finally {
         process.chdir(cwdOriginal);
+        if (creoVenv) rmSync(venvPaquete, { recursive: true, force: true });
+        if (creoVoces) rmSync(vocesPaquete, { recursive: true, force: true });
     }
 });
 
