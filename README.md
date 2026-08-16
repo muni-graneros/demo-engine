@@ -158,7 +158,7 @@ export default {
   // Auditoría (opcional): verifica sobre el video ya grabado, ver "Auditoría: demo auditar".
   auditoria: {
     ocr: 'http://127.0.0.1:8110/ocr',   // Endpoint OCR. SIN DEFECTO: hay que declararlo.
-    patron: '\\d{7,8}-[\\dkK]',          // Qué cuenta como identificador (defecto: RUT-like)
+    patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])',  // Qué cuenta como identificador (defecto: RUT-like, ANCLADO)
     cada: 10,                            // Un frame cada N segundos (defecto: 10)
     maximo: 20,                          // Tope de frames por video (defecto: 20)
     validar: validarRut                  // Opcional. Descarta lecturas que no son un RUT real.
@@ -497,6 +497,25 @@ nada la detectara.
    devolvió el OCR. **Más de uno en el mismo frame significa que había una lista sin
    filtrar** — la misma fuga que `abrirFiltrado` existe para evitar.
 
+**El patrón por defecto está ANCLADO (desde v1.1.1).** Antes no lo estaba, y eso era un
+defecto de exactitud confirmado por una revisión de seguridad: `\d{7,8}-[\dkK]` sin anclar
+muerde **dentro** de cadenas más largas en vez de exigir un identificador completo. Dos
+casos reales:
+
+```
+"9918039759-0"        (número de 10 dígitos) → sin anclar extrae "18039759-0", que además
+                       VALIDA como RUT real: un identificador fantasma.
+"Folio 12345678-2024" → sin anclar extrae "12345678-2" (el validador de dígito verificador
+                       lo descarta después, pero ya se había extraído).
+```
+
+El daño va en las dos direcciones: un identificador fantasma marca **de más** (y un
+control que grita en falso termina desactivado); y dos cadenas largas **distintas** que
+comparten la cola (`9918039759-0` y `5518039759-0`, por ejemplo) colapsan en el **mismo**
+identificador extraído, marcando **de menos** — justo lo que este control existe para
+evitar. El patrón por defecto ahora exige que no haya otro dígito (ni un guion) inmediatamente
+antes del identificador, ni otro dígito (ni `k`/`K`) inmediatamente después.
+
 Si el video no tiene contenido examinable (duración cero, corrupto), no hay frames que
 muestrear. Eso **nunca** se reporta como "0 de 0 sospechosos": `demo auditar` corta con un
 mensaje explícito y código de salida distinto de cero — un resultado "0 de 0" sería
@@ -519,13 +538,22 @@ matcheando). Por eso alcanza con contar coincidencias del patrón.
 export default {
   // ...
   auditoria: {
-    ocr: 'http://127.0.0.1:8110/ocr',   // endpoint del servicio OCR, SIN VALOR POR DEFECTO
-    patron: '\\d{7,8}-[\\dkK]',          // qué cuenta como identificador (regex, sin flags)
-    cada: 10,                            // un frame cada N segundos
-    maximo: 20,                          // tope de frames por video
+    ocr: 'http://127.0.0.1:8110/ocr',                  // endpoint del servicio OCR, SIN VALOR POR DEFECTO
+    patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])',  // qué cuenta como identificador (regex, sin flags; anclado desde v1.1.1)
+    cada: 10,                                          // un frame cada N segundos
+    maximo: 20,                                        // tope de frames por video
   },
 };
 ```
+
+**Compatibilidad (v1.1.1):** el patrón por defecto cambió (ver arriba). Esto es un arreglo
+de exactitud, no un cambio de comportamiento declarado — pero cambia lo que se detecta. Un
+sistema que hoy pasa `demo auditar` limpio podría empezar a marcarse (si dependía, sin
+saberlo, de que un identificador fantasma quedara agrupado con otro y no superara el
+umbral de "más de uno"); y al revés, un sistema con dos identificadores largos que
+compartían cola y colapsaban en uno solo ahora los verá contados como corresponde. Si se
+depende del comportamiento viejo (sin anclar) por algún motivo, `auditoria.patron` sigue
+siendo 100% configurable: basta con declarar `'\\d{7,8}-[\\dkK]'` explícitamente.
 
 **`auditoria.ocr` no tiene valor por defecto, a propósito:** es un host al que el proceso se
 conecta, y esa decisión le corresponde a quien configura el sistema, no al motor genérico —
@@ -590,7 +618,7 @@ export default {
   // ...
   auditoria: {
     ocr: 'http://127.0.0.1:8110/ocr',
-    patron: '\\d{7,8}-[\\dkK]',
+    patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])',
     validar: validarRut,
   },
 };

@@ -30,7 +30,13 @@ const DEFECTOS = {
     // `patron: null` la apaga igual (nada que buscar); `chequeoEnVivo: false` es el
     // interruptor explícito para cuando se quiere seguir usando `patron`/`validar` en
     // `demo auditar` sin bloquear la grabación en vivo.
-    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
+    // `patron` DEBE quedar idéntico a `PATRON_POR_DEFECTO` en src/auditoria.mjs — es el
+    // mismo defecto duplicado acá porque importarlo de allá crearía un ciclo (auditoria.mjs
+    // ya importa `ErrorConfig` desde este archivo). Ver ahí el porqué de estar ANCLADO
+    // (desde v1.1.1: `\d{7,8}-[\dkK]` sin anclar mordía dentro de cadenas más largas). Hay
+    // un test en pruebas/configurar.test.mjs que compara ambos literales para detectar que
+    // se desincronicen.
+    auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
     sembrar: null,
     limpiar: null,
 };

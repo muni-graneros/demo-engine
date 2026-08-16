@@ -12,6 +12,7 @@ import {
     contarIdentificadores,
     exigirAuditoriaConfigurada,
     muestrearFrames,
+    PATRON_POR_DEFECTO,
 } from '../src/auditoria.mjs';
 
 const PATRON = '\\d{7,8}-[\\dkK]';
@@ -42,6 +43,90 @@ test('contarIdentificadores no necesita que el OCR acierte el valor, solo la for
 
 test('sin nada que matchee, no hay identificadores', () => {
     assert.deepEqual(contarIdentificadores('Solicitudes de hoy — Panel de gestión', PATRON), []);
+});
+
+// PATRON_POR_DEFECTO (v1.1.1): el patrón sin anclar mordía DENTRO de cadenas más largas
+// en vez de exigir un identificador COMPLETO — defecto señalado por una revisión de
+// seguridad. Estos tests fallan con el patrón viejo (`PATRON` de arriba, sin anclar) y
+// pasan con el nuevo default; se comparan lado a lado para dejar la regresión evidente.
+
+test('PATRON_POR_DEFECTO no extrae un RUT-fantasma de la cola de un número más largo', () => {
+    const texto = 'numero de seguimiento: 9918039759-0';
+
+    // El patrón viejo (sin anclar) extraía "18039759-0" —que además valida como RUT
+    // real— de un número de 10 dígitos que no es un RUT. Se deja explícito acá para que
+    // el contraste con el default nuevo sea imposible de perder de vista.
+    assert.deepEqual(contarIdentificadores(texto, PATRON), ['18039759-0'],
+        'documenta el bug del patrón viejo: no se toca, solo se compara contra el default');
+
+    assert.deepEqual(contarIdentificadores(texto, PATRON_POR_DEFECTO), [],
+        'anclado: un número de 10 dígitos no es un RUT, así que no debe extraer nada');
+});
+
+test('PATRON_POR_DEFECTO no extrae un RUT de un folio "8 dígitos - año"', () => {
+    const texto = 'Folio 12345678-2024';
+
+    assert.deepEqual(contarIdentificadores(texto, PATRON), ['12345678-2'],
+        'documenta el bug del patrón viejo: extraía un pedazo del folio (el validador lo ' +
+        'descartaría después, pero ya se había extraído)');
+
+    assert.deepEqual(contarIdentificadores(texto, PATRON_POR_DEFECTO), [],
+        'anclado: "2024" pegado al supuesto dígito verificador lo invalida como identificador');
+});
+
+test('PATRON_POR_DEFECTO no colapsa dos números largos distintos en un solo identificador', () => {
+    // Comparten la cola "18039759-0" pero son números de 10 dígitos DISTINTOS. Con el
+    // patrón viejo, ambos "prestan" la misma subcadena y el conteo colapsa a 1 —marcando
+    // de MENOS: dos personas distintas leídas como una sola.
+    const texto = 'seguimiento 9918039759-0 y también seguimiento 5518039759-0';
+
+    assert.deepEqual(contarIdentificadores(texto, PATRON), ['18039759-0'],
+        'documenta el bug del patrón viejo: dos números distintos colapsan en 1 identificador');
+
+    assert.deepEqual(contarIdentificadores(texto, PATRON_POR_DEFECTO), [],
+        'anclado: ninguno de los dos números completos es un RUT, así que no cuenta ninguno');
+});
+
+test('PATRON_POR_DEFECTO sigue detectando dos RUT normales, sin cambios', () => {
+    const dos = contarIdentificadores(
+        'vemos 12345678-5 y también 87654321-0 en la lista', PATRON_POR_DEFECTO,
+    );
+    assert.equal(dos.length, 2);
+    assert.ok(dos.includes('12345678-5') && dos.includes('87654321-0'));
+});
+
+test('PATRON_POR_DEFECTO sigue detectando un RUT solo, sin cambios', () => {
+    assert.deepEqual(contarIdentificadores('el RUT 11111111-1 aparece una vez', PATRON_POR_DEFECTO),
+        ['11111111-1']);
+});
+
+test('PATRON_POR_DEFECTO: casos límite de posición y separadores', () => {
+    assert.deepEqual(
+        contarIdentificadores('11111111-1 es el primero de la lista', PATRON_POR_DEFECTO),
+        ['11111111-1'], 'un RUT al principio del texto (nada antes) debe matchear');
+
+    assert.deepEqual(
+        contarIdentificadores('el último de la lista es 87654321-0', PATRON_POR_DEFECTO),
+        ['87654321-0'], 'un RUT al final del texto (nada después) debe matchear');
+
+    assert.deepEqual(
+        contarIdentificadores('el RUT es 18039759-0.', PATRON_POR_DEFECTO),
+        ['18039759-0'], 'un RUT seguido de un punto debe matchear igual');
+
+    assert.deepEqual(
+        contarIdentificadores('el RUT es 18039759-0, y sigue el texto', PATRON_POR_DEFECTO),
+        ['18039759-0'], 'un RUT seguido de una coma debe matchear igual');
+
+    // El anclaje es contra DÍGITOS/guion, no contra letras: un RUT pegado a texto
+    // alfanumérico (sin espacio) sigue siendo un RUT completo, no un pedazo de algo más
+    // largo — el problema medido era específicamente colisión entre dígitos.
+    assert.deepEqual(
+        contarIdentificadores('codigoXX18039759-0YYfin', PATRON_POR_DEFECTO),
+        ['18039759-0'], 'un RUT dentro de una palabra (pegado a letras) sigue matcheando');
+
+    assert.deepEqual(
+        contarIdentificadores('11111111-1\n87654321-0', PATRON_POR_DEFECTO),
+        ['11111111-1', '87654321-0'], 'dos RUT separados por un salto de línea, ambos distintos');
 });
 
 // validar: caso real medido a mano (ver README, "Validación de identificadores"). Una sola

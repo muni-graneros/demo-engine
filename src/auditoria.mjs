@@ -21,9 +21,41 @@ import { basename, dirname, extname, join } from 'node:path';
 import { ff, duracion } from './ffmpeg.mjs';
 import { ErrorConfig } from './configurar.mjs';
 
+/**
+ * Patrón por defecto: RUT chileno (7-8 dígitos, guion, dígito verificador o 'k'/'K').
+ *
+ * ANCLADO a propósito (desde v1.1.1) — antes no lo estaba, y eso era un defecto de
+ * exactitud confirmado por una revisión de seguridad: `\d{7,8}-[\dkK]` sin anclar
+ * MUERDE dentro de cadenas más largas en vez de exigir un identificador COMPLETO.
+ * Dos ejemplos reales:
+ *
+ *   "9918039759-0"        (número de 10 dígitos) → sin anclar extrae "18039759-0", que
+ *                          además VALIDA como RUT real: un identificador fantasma.
+ *   "Folio 12345678-2024" → sin anclar extrae "12345678-2" (el validador de dígito
+ *                          verificador lo descarta, pero igual se extrajo).
+ *
+ * El daño va en las dos direcciones: un identificador fantasma marca de más (y un
+ * control que grita en falso termina desactivado); y dos cadenas largas DISTINTAS que
+ * compartan la cola (p. ej. "9918039759-0" y "5518039759-0") colapsan en el MISMO
+ * identificador extraído — eso marca de menos, justo lo que este control existe para
+ * evitar.
+ *
+ * El anclaje: `(?<![\d-])` exige que lo que precede al primer dígito no sea otro
+ * dígito ni un guion (así no se arranca a mitad de una cadena numérica más larga, ni
+ * justo después de un guion ajeno); `(?![\dkK])` exige que lo que sigue al dígito
+ * verificador no sea otro dígito ni 'k'/'K' (así no se corta a mitad de un folio o de
+ * un identificador más largo). Ninguno de los dos exige un límite de PALABRA: un RUT
+ * pegado a letras (`ABC18039759-0XYZ`) sigue matcheando — el problema medido era
+ * específicamente colisión entre dígitos, no adyacencia con texto.
+ *
+ * Sigue siendo 100% configurable vía `auditoria.patron` en demo.config.mjs — esto es
+ * solo el valor por defecto (ver README, "Auditoría: demo auditar").
+ */
+export const PATRON_POR_DEFECTO = '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])';
+
 const DEFECTOS = {
     ocr: null,
-    patron: '\\d{7,8}-[\\dkK]',
+    patron: PATRON_POR_DEFECTO,
     cada: 10,
     maximo: 20,
     // Sin defecto, a propósito: el motor no sabe qué es un RUT chileno ni ningún otro

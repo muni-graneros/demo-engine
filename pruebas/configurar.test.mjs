@@ -4,6 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { cargarConfig, ErrorConfig } from '../src/configurar.mjs';
+import { PATRON_POR_DEFECTO } from '../src/auditoria.mjs';
 
 function proyecto(config) {
     const dir = mkdtempSync(join(tmpdir(), 'demo-cfg-'));
@@ -33,9 +34,39 @@ test('aplica los valores por defecto', async () => {
     // auditoria.ocr queda en null sin defecto: es un host, y el motor no puede adivinarlo
     // (ver src/auditoria.mjs). patron/cada/maximo sí traen un valor razonable.
     assert.equal(cfg.auditoria.ocr, null);
-    assert.equal(cfg.auditoria.patron, '\\d{7,8}-[\\dkK]');
+    // El literal vive duplicado en src/configurar.mjs (no se puede importar de
+    // src/auditoria.mjs sin crear un ciclo — ver el comentario ahí). Este test compara
+    // contra `PATRON_POR_DEFECTO`, la fuente de verdad, para que una futura edición que
+    // toque un literal y se olvide del otro rompa acá en vez de divergir en silencio.
+    assert.equal(cfg.auditoria.patron, PATRON_POR_DEFECTO);
     assert.equal(cfg.auditoria.cada, 10);
     assert.equal(cfg.auditoria.maximo, 20);
+});
+
+// El patrón por defecto quedó ANCLADO en v1.1.1 (ver src/auditoria.mjs,
+// PATRON_POR_DEFECTO): antes de esto, `\d{7,8}-[\dkK]` sin anclar mordía dentro de
+// cadenas más largas. Se verifica acá, contra el defecto REAL que sale de cargarConfig
+// (no una copia del literal en el test), con el caso real reportado en la revisión de
+// seguridad.
+test('el patrón por defecto no confunde la cola de un número largo con un RUT completo', async () => {
+    const cfg = await cargarConfig(proyecto(minima));
+    const regex = new RegExp(cfg.auditoria.patron, 'g');
+
+    assert.deepEqual(
+        [...'numero de seguimiento: 9918039759-0'.matchAll(regex)].map((m) => m[0]),
+        [],
+        'un número de 10 dígitos no debe leerse como si terminara en un RUT de 8+1',
+    );
+    assert.deepEqual(
+        [...'Folio 12345678-2024'.matchAll(regex)].map((m) => m[0]),
+        [],
+        'un folio "8 dígitos - año" no debe leerse como un RUT',
+    );
+    assert.deepEqual(
+        [...'el RUT es 11111111-1'.matchAll(regex)].map((m) => m[0]),
+        ['11111111-1'],
+        'un RUT real, bien delimitado, sigue matcheando igual que siempre',
+    );
 });
 
 test('auditoria se fusiona con sus defectos, sin pisar lo que no se declara', async () => {
