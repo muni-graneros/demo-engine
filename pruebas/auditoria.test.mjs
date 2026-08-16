@@ -43,6 +43,56 @@ test('sin nada que matchee, no hay identificadores', () => {
     assert.deepEqual(contarIdentificadores('Solicitudes de hoy — Panel de gestión', PATRON), []);
 });
 
+// validar: caso real medido a mano (ver README, "Validación de identificadores"). Una sola
+// persona en pantalla, RUT real 18039759-0, que aparece TRES veces en la interfaz (buscador,
+// chip de filtro activo, celda de la tabla). El OCR —afinado para cédulas, no para texto de
+// interfaz— lo transcribe distinto en dos de esas tres lecturas: "16030759-0" y "18023759-0"
+// matchean el patrón (la FORMA de un RUT) pero no son RUT chilenos válidos (dígito
+// verificador módulo 11 incorrecto). El motor no sabe qué es un RUT: `validarRutDePrueba`
+// simula la función que el propio `demo.config.mjs` del sistema consumidor declararía en
+// `auditoria.validar`.
+function validarRutDePrueba(id) {
+    const limpio = id.toUpperCase();
+    const [cuerpo, dv] = limpio.split('-');
+    if (!cuerpo || !dv) return false;
+    let suma = 0;
+    let multiplicador = 2;
+    for (let i = cuerpo.length - 1; i >= 0; i--) {
+        suma += Number(cuerpo[i]) * multiplicador;
+        multiplicador = multiplicador === 7 ? 2 : multiplicador + 1;
+    }
+    const resto = 11 - (suma % 11);
+    const dvEsperado = resto === 11 ? '0' : resto === 10 ? 'K' : String(resto);
+    return dv === dvEsperado;
+}
+
+test('contarIdentificadores con validador descarta lecturas que matchean el patrón pero no pasan la validación', () => {
+    const texto = 'buscador: 16030759-0  filtro activo: 18023759-0  tabla: 18039759-0';
+
+    const sinValidar = contarIdentificadores(texto, PATRON);
+    assert.equal(sinValidar.length, 3,
+        'sin validador, cada lectura distinta del OCR sigue contando como un identificador distinto (hoy)');
+
+    const conValidar = contarIdentificadores(texto, PATRON, validarRutDePrueba);
+    assert.deepEqual(conValidar, ['18039759-0'],
+        'con validador, solo la lectura con dígito verificador correcto queda');
+});
+
+test('contarIdentificadores sin validador no cambia su comportamiento (compatibilidad hacia atrás)', () => {
+    const resultado = contarIdentificadores('11111111-1 y 87654321-0', PATRON);
+    assert.equal(resultado.length, 2, 'sin validar declarado, se cuenta todo lo que matchea el patrón, como hoy');
+});
+
+test('contarIdentificadores propaga un error claro si el validador lanza', () => {
+    const validadorRoto = () => { throw new Error('boom'); };
+    assert.throws(() => contarIdentificadores('11111111-1', PATRON, validadorRoto),
+        (e) => {
+            assert.match(e.message, /auditoria\.validar/);
+            assert.match(e.message, /11111111-1/);
+            return true;
+        });
+});
+
 // exigirAuditoriaConfigurada: sin auditoria.ocr, el comando debe fallar con un mensaje claro
 // (qué falta y un ejemplo), no con un error críptico de conexión contra `null`.
 
@@ -122,6 +172,37 @@ test('con un solo identificador por frame, no hay sospechosos', async () => {
 
     assert.equal(resultado.sospechosos.length, 0);
     assert.equal(resultado.total, 2);
+});
+
+// auditoria.validar de punta a punta: el falso positivo real que motivó esta condición
+// (ver README) — una sola persona, RUT real 18039759-0 leído 3 veces, con dos lecturas del
+// OCR que matchean el patrón pero no el dígito verificador.
+
+test('auditarVideo con validador no marca sospechoso un frame con dos lecturas erróneas del mismo RUT', async () => {
+    const { dir, video } = videoDePrueba(2);
+    const config = {
+        auditoria: {
+            ocr: 'http://fake.local/ocr', patron: PATRON, cada: 1, maximo: 1,
+            validar: validarRutDePrueba,
+        },
+    };
+    const ocrFalso = async () => ({ text: 'buscador: 16030759-0 filtro: 18023759-0 tabla: 18039759-0' });
+
+    const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames'), ocr: ocrFalso });
+
+    assert.equal(resultado.sospechosos.length, 0,
+        'con validador, dos lecturas erróneas del mismo RUT no deben marcar la pantalla como sospechosa');
+});
+
+test('auditarVideo SIN validador declarado sigue marcando el mismo caso (comportamiento de hoy sin cambios)', async () => {
+    const { dir, video } = videoDePrueba(2);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON, cada: 1, maximo: 1 } };
+    const ocrFalso = async () => ({ text: 'buscador: 16030759-0 filtro: 18023759-0 tabla: 18039759-0' });
+
+    const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames'), ocr: ocrFalso });
+
+    assert.equal(resultado.sospechosos.length, 1,
+        'sin auditoria.validar, el comportamiento no cambia: sigue contando toda forma que matchea el patrón');
 });
 
 // Bug real medido a mano: con el `cada` por defecto (10s), un video más corto que eso no
@@ -227,6 +308,30 @@ test('con un solo identificador por captura, no hay sospechosos', async () => {
 
     assert.equal(resultado.sospechosos.length, 0);
     assert.equal(resultado.total, 1);
+});
+
+test('auditarCapturas con validador no marca sospechosa una captura con dos lecturas erróneas del mismo RUT', async () => {
+    const dir = dirCapturasDePrueba(['panel-0.png']);
+    const config = {
+        auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON, validar: validarRutDePrueba },
+    };
+    const ocrFalso = async () => ({ text: 'buscador: 16030759-0 filtro: 18023759-0 tabla: 18039759-0' });
+
+    const resultado = await auditarCapturas(dir, config, { ocr: ocrFalso });
+
+    assert.equal(resultado.sospechosos.length, 0,
+        'con validador, dos lecturas erróneas del mismo RUT no deben marcar la captura como sospechosa');
+});
+
+test('auditarCapturas SIN validador declarado sigue marcando el mismo caso (comportamiento de hoy sin cambios)', async () => {
+    const dir = dirCapturasDePrueba(['panel-0.png']);
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON } };
+    const ocrFalso = async () => ({ text: 'buscador: 16030759-0 filtro: 18023759-0 tabla: 18039759-0' });
+
+    const resultado = await auditarCapturas(dir, config, { ocr: ocrFalso });
+
+    assert.equal(resultado.sospechosos.length, 1,
+        'sin auditoria.validar, el comportamiento no cambia: sigue contando toda forma que matchea el patrón');
 });
 
 test('auditarCapturas ignora archivos que no son PNG en la carpeta', async () => {

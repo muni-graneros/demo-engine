@@ -160,7 +160,8 @@ export default {
     ocr: 'http://127.0.0.1:8110/ocr',   // Endpoint OCR. SIN DEFECTO: hay que declararlo.
     patron: '\\d{7,8}-[\\dkK]',          // Qué cuenta como identificador (defecto: RUT-like)
     cada: 10,                            // Un frame cada N segundos (defecto: 10)
-    maximo: 20                           // Tope de frames por video (defecto: 20)
+    maximo: 20,                          // Tope de frames por video (defecto: 20)
+    validar: validarRut                  // Opcional. Descarta lecturas que no son un RUT real.
   }
 };
 ```
@@ -525,6 +526,89 @@ qué falta (no un `ECONNREFUSED` críptico contra `null`).
 El servicio OCR debe aceptar `POST` con el archivo en un campo `file` (`multipart/form-data`)
 y responder `{ text: "..." }`.
 
+### Validación de identificadores (`auditoria.validar`)
+
+**El problema, diagnosticado con un caso real.** `demo auditar` cuenta identificadores
+DISTINTOS que matchean `auditoria.patron`; más de uno en una pantalla es la señal de una
+lista sin filtrar. Corrido sobre el curso real de un sistema en producción, marcó una
+captura como sospechosa:
+
+```
+[SOSPECHOSO CAPTURA] 2 identificadores distintos (16030759-0, 18023759-0)
+```
+
+Era un **falso positivo**: la pantalla mostraba una sola persona, con la tabla correctamente
+filtrada a un resultado. Su RUT real (`18039759-0`) aparecía **tres veces** en pantalla —en
+el buscador, en el chip de filtro activo, y en la celda de la tabla— y el OCR, que está
+afinado para cédulas y no para texto de interfaz, lo transcribió mal en dos de esas tres
+lecturas. Las dos cadenas "distintas" eran lecturas erróneas del **mismo** identificador, no
+dos personas.
+
+**Por qué esto importa más que un aviso molesto:** un portero que grita en falso termina
+desactivado, y entonces no protege nada.
+
+**La solución: `auditoria.validar` es una función OPCIONAL que descarta coincidencias del
+patrón que no son un identificador real.** El RUT chileno trae dígito verificador (módulo
+11); una lectura errónea del OCR casi nunca lo satisface por casualidad:
+
+```
+18039759-0   RUT VÁLIDO      ← el real
+16030759-0   inválido        ← lectura errónea del OCR
+18023759-0   inválido        ← lectura errónea del OCR
+```
+
+```js
+// demo.config.mjs
+function validarRut(id) {
+  const limpio = id.toUpperCase();
+  const [cuerpo, dv] = limpio.split('-');
+  if (!cuerpo || !dv) return false;
+
+  let suma = 0;
+  let multiplicador = 2;
+  for (let i = cuerpo.length - 1; i >= 0; i--) {
+    suma += Number(cuerpo[i]) * multiplicador;
+    multiplicador = multiplicador === 7 ? 2 : multiplicador + 1;
+  }
+  const resto = 11 - (suma % 11);
+  const dvEsperado = resto === 11 ? '0' : resto === 10 ? 'K' : String(resto);
+  return dv === dvEsperado;
+}
+
+export default {
+  // ...
+  auditoria: {
+    ocr: 'http://127.0.0.1:8110/ocr',
+    patron: '\\d{7,8}-[\\dkK]',
+    validar: validarRut,
+  },
+};
+```
+
+Con `validar` declarado, `contarIdentificadores` llama a esa función por cada coincidencia
+del patrón y descarta las que no aprueba; un frame o captura donde todas menos una resultan
+inválidas queda con **un solo** identificador real, y ya no se marca como sospechoso.
+**Sin `validar`, el comportamiento no cambia**: se sigue contando todo lo que matchea
+`patron`, exactamente como hasta ahora — es puramente opt-in.
+
+**El motor sigue sin saber qué es un RUT.** `validarRut` de arriba no vive en el motor: es
+un ejemplo para `demo.config.mjs` de cada sistema consumidor, igual que `patron` u `ocr`.
+Cualquier otro identificador (RFC mexicano, DNI argentino, un ID interno con su propio
+checksum) se resuelve con la misma idea: una función `(id: string) => boolean` que solo
+quien configura el sistema puede escribir, porque solo esa persona sabe qué hace válido a
+su identificador.
+
+**El límite honesto: esto reduce mucho los falsos positivos, no los elimina.** Una lectura
+errónea del OCR puede, por pura casualidad, caer en un identificador con dígito verificador
+correcto — con un solo dígito de control eso pasa aproximadamente 1 de cada 11 veces. Frente
+a "toda coincidencia del patrón cuenta", que es 100% de las lecturas erróneas, la mejora es
+grande mientras `patron` produzca varios candidatos por pantalla (el caso real de arriba). No
+es una garantía criptográfica: es un filtro de forma, igual que `patron` lo es, solo que un
+paso más estricto.
+
+Si `validar` lanza una excepción, `demo auditar` falla con un mensaje que dice qué
+identificador estaba validando y el motivo — no se traga el error en silencio.
+
 ### Salida
 
 ```
@@ -644,14 +728,17 @@ Todas estas funciones se reexportan desde `demo-engine`:
 
 ### Auditoría
 - `auditarVideo(video, config, { dirFrames?, ocr? }?) → Promise<{total, sospechosos}>`
-  — `config.auditoria`: `{ocr, patron, cada, maximo}`; `sospechosos`: `{segundo, archivo, identificadores}[]`
+  — `config.auditoria`: `{ocr, patron, cada, maximo, validar}`; `sospechosos`: `{segundo, archivo, identificadores}[]`
   — `ocr` es inyectable (para pruebas); sin él usa el endpoint real de `config.auditoria.ocr`
 - `auditarCapturas(dirCapturas, config, { ocr? }?) → Promise<{total, sospechosos}>`
   — audita las capturas del manual (`config.salida/capturas`), mismo criterio que `auditarVideo`
     pero sin muestreo (una imagen por paso, se auditan todas); `sospechosos`: `{archivo, identificadores}[]`
   — sin la carpeta de capturas en disco, devuelve `{total: 0, sospechosos: []}` sin fallar
 - `muestrearFrames(video, { cada, maximo, dirSalida }) → {segundo, archivo}[]` (usa ffmpeg, no ffprobe)
-- `contarIdentificadores(texto, patron) → string[]` (identificadores DISTINTOS que matchean el patrón)
+- `contarIdentificadores(texto, patron, validar?) → string[]` (identificadores DISTINTOS que
+  matchean el patrón; `validar?: (id: string) => boolean` opcional descarta coincidencias que
+  no aprueban — ver "Validación de identificadores" más arriba; sin él, cuenta todo lo que
+  matchea, como siempre)
 - `exigirAuditoriaConfigurada(auditoria) → void` (falla con mensaje claro si falta `auditoria.ocr`)
 
 ### Cámara (visual)
@@ -675,4 +762,4 @@ Todas estas funciones se reexportan desde `demo-engine`:
 4. **Reproducibilidad**: mismo guion + misma config = mismo MP4.
 5. **Genérico**: el motor no conoce RUT chilenos, puertos ni hosts concretos de ningún
    sistema consumidor — eso vive en `demo.config.mjs` (`baseURL`, `auditoria.ocr`,
-   `auditoria.patron`, etc.), nunca hardcodeado.
+   `auditoria.patron`, `auditoria.validar`, etc.), nunca hardcodeado.

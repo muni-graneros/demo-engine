@@ -18,7 +18,11 @@ const DEFECTOS = {
     // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso
     // decide quien configura el sistema, no el motor (ver src/auditoria.mjs). `patron`,
     // `cada` y `maximo` sí tienen un valor razonable porque no comprometen a ningún host.
-    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20 },
+    // `validar` también queda sin defecto: es un filtro OPCIONAL (por ejemplo, el dígito
+    // verificador de un RUT chileno) que solo quien configura el sistema puede aportar — el
+    // motor no sabe qué hace válido a un identificador. Sin declararlo, se sigue contando
+    // todo lo que matchea `patron`, como hasta ahora.
+    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20, validar: null },
     sembrar: null,
     limpiar: null,
 };

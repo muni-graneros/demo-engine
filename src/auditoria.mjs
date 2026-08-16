@@ -7,10 +7,13 @@
  * en la misma pantalla es la misma fuga que `abrirFiltrado` existe para evitar.
  *
  * Genérico a propósito: el motor no sabe qué es un RUT chileno ni en qué puerto vive el OCR
- * del sistema consumidor. Todo eso —`ocr`, `patron`, `cada`, `maximo`— sale de
+ * del sistema consumidor. Todo eso —`ocr`, `patron`, `cada`, `maximo`, `validar`— sale de
  * `config.auditoria`, sin defecto para `ocr` (ver `exigirAuditoriaConfigurada`): un motor
  * genérico no puede adivinar a qué host conectarse, y "adivinar un endpoint" es exactamente
- * el tipo de decisión que tiene que tomar quien configura el sistema, no el motor.
+ * el tipo de decisión que tiene que tomar quien configura el sistema, no el motor. `validar`
+ * es la misma idea aplicada a los identificadores: una función OPCIONAL que descarta
+ * coincidencias del patrón que no son un identificador real (ver `contarIdentificadores`),
+ * porque el motor tampoco sabe calcular un dígito verificador de RUT.
  */
 
 import { existsSync, readdirSync, readFileSync, mkdirSync } from 'node:fs';
@@ -23,6 +26,11 @@ const DEFECTOS = {
     patron: '\\d{7,8}-[\\dkK]',
     cada: 10,
     maximo: 20,
+    // Sin defecto, a propósito: el motor no sabe qué es un RUT chileno ni ningún otro
+    // identificador concreto. Es un filtro OPCIONAL que aporta quien configura el sistema
+    // (ver contarIdentificadores más abajo); sin declararlo, el comportamiento es el de
+    // siempre: contar toda forma que matchee `patron`.
+    validar: null,
 };
 
 /** Fusiona `auditoria` de la config con los defectos, igual que hace cargarConfig() con voz/video/marca. */
@@ -91,14 +99,40 @@ export function muestrearFrames(video, { cada, maximo, dirSalida }) {
  * Por eso alcanza con contar coincidencias del patrón — no hace falta que el OCR acierte el
  * valor exacto, solo que reconozca la FORMA.
  *
+ * `validar`, si se pasa, descarta coincidencias que matchean la FORMA pero no son un
+ * identificador real — el caso medido a mano que motiva esto: una sola persona en pantalla
+ * cuyo RUT aparece 3 veces en la interfaz (buscador, chip de filtro, celda), y el OCR lo
+ * transcribe distinto en dos de esas tres lecturas. Ambas matchean `patron` (parecen un RUT)
+ * pero no pasan el dígito verificador — un chequeo que el motor no puede aplicar SOLO porque
+ * no sabe qué es un RUT chileno. `validar` es exactamente ese conocimiento, aportado por
+ * quien configura el sistema (`auditoria.validar` en demo.config.mjs); el motor se limita a
+ * llamarlo. Sin `validar`, el comportamiento es el de siempre: se cuenta todo lo que matchea
+ * `patron`, sin descartar nada.
+ *
  * @param {string} texto
  * @param {string} patron fuente de un RegExp (sin flags; se le agrega 'g' acá)
+ * @param {(id: string) => boolean} [validar] opcional; si se pasa, descarta lo que no aprueba
  * @returns {string[]}
  */
-export function contarIdentificadores(texto, patron) {
+export function contarIdentificadores(texto, patron, validar) {
     const regex = new RegExp(patron, 'g');
     const vistos = new Set();
-    for (const coincidencia of (texto ?? '').matchAll(regex)) vistos.add(coincidencia[0]);
+    for (const coincidencia of (texto ?? '').matchAll(regex)) {
+        const id = coincidencia[0];
+        if (validar) {
+            let aprueba;
+            try {
+                aprueba = validar(id);
+            } catch (error) {
+                throw new Error(
+                    `auditoria.validar lanzó un error al validar "${id}": ${error.message}`,
+                    { cause: error },
+                );
+            }
+            if (!aprueba) continue;
+        }
+        vistos.add(id);
+    }
     return [...vistos];
 }
 
@@ -167,7 +201,7 @@ export async function auditarVideo(video, config, { dirFrames, ocr } = {}) {
     const sospechosos = [];
     for (const frame of frames) {
         const { text } = await leerFrame(frame.archivo);
-        const identificadores = contarIdentificadores(text, auditoria.patron);
+        const identificadores = contarIdentificadores(text, auditoria.patron, auditoria.validar);
         if (identificadores.length > 1) {
             sospechosos.push({ segundo: frame.segundo, archivo: frame.archivo, identificadores });
         }
@@ -209,7 +243,7 @@ export async function auditarCapturas(dirCapturas, config, { ocr } = {}) {
     for (const nombre of nombres) {
         const archivo = join(dirCapturas, nombre);
         const { text } = await leerFrame(archivo);
-        const identificadores = contarIdentificadores(text, auditoria.patron);
+        const identificadores = contarIdentificadores(text, auditoria.patron, auditoria.validar);
         if (identificadores.length > 1) {
             sospechosos.push({ archivo, identificadores });
         }
