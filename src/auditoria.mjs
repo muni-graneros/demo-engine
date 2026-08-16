@@ -137,12 +137,26 @@ export function contarIdentificadores(texto, patron, validar) {
 }
 
 /**
- * Llama al servicio OCR configurado con los bytes del frame. Implementación por defecto de
- * `ocr` en `auditarVideo`: cualquier otra se puede inyectar (los tests lo hacen, para no
- * pagar los ~9,5s por frame del OCR real).
+ * Un intento de llamar al OCR. Nunca lanza: siempre devuelve un resultado, para que
+ * `ocrPorDefecto` decida si vale la pena reintentar sin tener que parsear un mensaje.
+ *
+ * Distingue DOS clases de fallo, porque solo una vale la pena reintentar:
+ *
+ * - TRANSITORIO (`transitorio: true`): `fetch` no llegó a completar la petición — el
+ *   servicio nunca contestó. Caso real: `UND_ERR_SOCKET` ("other side closed") a mitad de
+ *   una auditoría de 31 peticiones que venía perfecta; la corrida siguiente, idéntica,
+ *   terminó limpia. Es la misma clase de fallo por contención que ya resiste `sintetizar()`
+ *   en voz/proceso.mjs (ver ahí). Acá SÍ vale la pena reintentar: la segunda vez puede
+ *   simplemente funcionar.
+ *
+ * - PERMANENTE (`transitorio: false`): el servidor SÍ contestó (un status HTTP, aunque sea
+ *   de error) o contestó con un cuerpo que no se puede interpretar. Un 404 significa
+ *   endpoint mal configurado; un 500 consistente es un servicio roto de verdad. Ninguno de
+ *   los dos se arregla reintentando: la respuesta va a ser exactamente la misma, así que
+ *   reintentar ahí solo demora el fracaso sin cambiar el resultado — tan malo como no
+ *   reintentar nunca, según qué tan caro sea el reintento (acá, ~9,5s más por frame).
  */
-async function ocrPorDefecto(endpoint, archivoFrame) {
-    const datos = readFileSync(archivoFrame);
+async function intentarOcr(endpoint, archivoFrame, datos) {
     const formulario = new FormData();
     formulario.append('file', new Blob([datos]), basename(archivoFrame));
 
@@ -150,13 +164,53 @@ async function ocrPorDefecto(endpoint, archivoFrame) {
     try {
         respuesta = await fetch(endpoint, { method: 'POST', body: formulario });
     } catch (error) {
-        throw new Error(`no se pudo llamar al servicio OCR (${endpoint}) para ${archivoFrame}: ${error.message}`, { cause: error });
+        return {
+            ok: false, transitorio: true, causa: error,
+            mensaje: `no se pudo llamar al servicio OCR (${endpoint}) para ${archivoFrame}: ${error.message}`,
+        };
     }
     if (!respuesta.ok) {
-        throw new Error(`el servicio OCR (${endpoint}) respondió ${respuesta.status} para ${archivoFrame}`);
+        return {
+            ok: false, transitorio: false, causa: null,
+            mensaje: `el servicio OCR (${endpoint}) respondió ${respuesta.status} para ${archivoFrame}`,
+        };
     }
-    const cuerpo = await respuesta.json();
-    return { text: cuerpo?.text ?? '' };
+    try {
+        const cuerpo = await respuesta.json();
+        return { ok: true, text: cuerpo?.text ?? '' };
+    } catch (error) {
+        return {
+            ok: false, transitorio: false, causa: error,
+            mensaje: `el servicio OCR (${endpoint}) respondió algo que no es JSON válido para ${archivoFrame}: ${error.message}`,
+        };
+    }
+}
+
+/**
+ * Llama al servicio OCR configurado con los bytes del frame. Implementación por defecto de
+ * `ocr` en `auditarVideo`: cualquier otra se puede inyectar (los tests lo hacen, para no
+ * pagar los ~9,5s por frame del OCR real).
+ *
+ * Un fallo TRANSITORIO (ver `intentarOcr`) se reintenta UNA vez — mismo criterio que
+ * `sintetizar()` en voz/proceso.mjs — antes de darse por perdido. Si tras el reintento
+ * sigue fallando (transitorio o no), esto LANZA: la auditoría de ese frame/captura queda sin
+ * examinar, y `auditarVideo`/`auditarCapturas` deben cortar en seco, nunca reportar "limpio"
+ * sobre una imagen que no se pudo leer.
+ */
+async function ocrPorDefecto(endpoint, archivoFrame) {
+    const datos = readFileSync(archivoFrame);
+
+    let resultado = await intentarOcr(endpoint, archivoFrame, datos);
+    let reintentado = false;
+    if (!resultado.ok && resultado.transitorio) {
+        reintentado = true;
+        resultado = await intentarOcr(endpoint, archivoFrame, datos);
+    }
+    if (!resultado.ok) {
+        const sufijo = reintentado ? ' (tras reintentar una vez)' : '';
+        throw new Error(`${resultado.mensaje}${sufijo}`, resultado.causa ? { cause: resultado.causa } : undefined);
+    }
+    return { text: resultado.text };
 }
 
 /**

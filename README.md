@@ -337,7 +337,18 @@ demo auditar docs/manual/panel.mp4
   un error de conexión críptico.
 
 **Costo:** el OCR tarda ~9,5s por frame. Por eso es un comando aparte, no algo que corra
-en cada `demo grabar` — auditar un video de varios minutos toma minutos, no segundos.
+en cada `demo grabar` — auditar un video de varios minutos toma minutos, no segundos (un
+curso real: 31 peticiones, ~5 minutos).
+
+**Reintento ante fallos transitorios.** Con ese costo, una sola petición perdida por un
+parpadeo de red no puede tirar toda la corrida — eso solo empuja a saltarse el control. Un
+fallo de RED (la petición no llegó a tener respuesta: socket cortado, timeout) se reintenta
+una vez, mismo criterio que ya usa la síntesis de voz (ver `src/voz/proceso.mjs`). Un fallo
+que SÍ trae respuesta del servidor (un 404 por endpoint mal configurado, un 500 consistente)
+no se reintenta: el servidor ya contestó, y va a contestar exactamente lo mismo la segunda
+vez — reintentar ahí solo demora el fracaso. Si tras el reintento el frame o la captura
+siguen sin poder leerse, `demo auditar` corta con un mensaje que dice qué imagen falló y por
+qué — nunca se reporta "limpio" sobre algo que no se pudo revisar.
 
 ## Privacidad: `abrirFiltrado` y `abrirVerificado`
 

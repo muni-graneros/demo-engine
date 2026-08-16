@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
 import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -359,4 +360,131 @@ test('auditarCapturas sin auditoria.ocr configurado falla claro, sin siquiera in
             return true;
         },
     );
+});
+
+// Reintento ante fallos TRANSITORIOS del OCR real (implementación por defecto, la que usan
+// auditarVideo/auditarCapturas cuando NO se inyecta `ocr` — la que de verdad habla por HTTP).
+//
+// El caso motivador es real: "demo auditar" sobre un curso completo (31 peticiones a ~9,5s
+// cada una, ~5 minutos) murió con UND_ERR_SOCKET tras procesar todo; la segunda corrida,
+// idéntica, terminó limpia con código 0. Un parpadeo de red tirando cinco minutos de trabajo
+// empuja a la gente a saltarse el control.
+//
+// Estas pruebas NO inyectan `ocr`: levantan un servidor HTTP real (mismo patrón que
+// `iniciarOcrDeJuguete` en pruebas/cli.test.mjs) para ejercitar la implementación por
+// defecto tal como la usa un usuario real.
+
+/**
+ * Servidor OCR de juguete con fallos controlables:
+ * - `fallosTransitorios`: cuántas peticiones iniciales cortan el socket ANTES de responder
+ *   (`req.socket.destroy()`), simulando el UND_ERR_SOCKET real — un fallo de RED, no una
+ *   respuesta del servidor. Verificado a mano (ver informe): esto es justo lo que produce
+ *   fetch() cuando el otro lado cierra la conexión, mismo `error.code` que el incidente real.
+ * - `siempreDevuelve404`: cada petición responde 404 — una respuesta HTTP REAL (el servidor
+ *   sí contestó), el caso de "endpoint mal configurado", que reintentar no arregla.
+ */
+function iniciarOcrDeJugueteConFallos({ fallosTransitorios = 0, siempreDevuelve404 = false, texto = '' } = {}) {
+    let llamadas = 0;
+    const servidor = createServer((req, res) => {
+        llamadas++;
+        if (siempreDevuelve404) {
+            req.resume();
+            res.writeHead(404);
+            return res.end('no existe ese endpoint');
+        }
+        if (llamadas <= fallosTransitorios) {
+            req.socket.destroy();
+            return;
+        }
+        req.resume();
+        req.on('end', () => {
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ text: texto }));
+        });
+    });
+    return new Promise((listo) => {
+        servidor.listen(0, '127.0.0.1', () => {
+            const { port } = servidor.address();
+            listo({
+                url: `http://127.0.0.1:${port}/ocr`,
+                llamadas: () => llamadas,
+                cerrar: () => new Promise((f) => servidor.close(f)),
+            });
+        });
+    });
+}
+
+test('un fallo TRANSITORIO (socket cortado) en la primera petición se reintenta y la auditoría termina limpia', async () => {
+    const ocr = await iniciarOcrDeJugueteConFallos({ fallosTransitorios: 1, texto: 'única persona a la vista: 11111111-1' });
+    try {
+        const dir = dirCapturasDePrueba(['panel-0.png']);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON } };
+
+        const resultado = await auditarCapturas(dir, config);
+
+        assert.equal(resultado.total, 1);
+        assert.equal(resultado.sospechosos.length, 0);
+        assert.equal(ocr.llamadas(), 2, 'debe haber reintentado una vez tras el fallo transitorio, igual que sintetizar() en voz/proceso.mjs');
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+test('un fallo PERMANENTE (404: el servidor SÍ contestó) no se reintenta y la auditoría falla en el acto', async () => {
+    const ocr = await iniciarOcrDeJugueteConFallos({ siempreDevuelve404: true });
+    try {
+        const dir = dirCapturasDePrueba(['panel-0.png']);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON } };
+
+        await assert.rejects(
+            () => auditarCapturas(dir, config),
+            (e) => {
+                assert.match(e.message, /404/, 'el mensaje debe traer el código de estado que devolvió el servidor');
+                assert.match(e.message, /panel-0\.png/, 'el mensaje debe decir qué imagen no se pudo auditar');
+                return true;
+            },
+        );
+        assert.equal(ocr.llamadas(), 1,
+            'un 404 es una respuesta REAL del servidor: reintentar no cambia el resultado, así que no debe reintentarse');
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+test('si el fallo transitorio persiste incluso tras el reintento, la auditoría sigue fallando (nunca "limpia")', async () => {
+    // Los DOS intentos cortan el socket: el reintento no alcanza a salvar la corrida.
+    const ocr = await iniciarOcrDeJugueteConFallos({ fallosTransitorios: 2 });
+    try {
+        const dir = dirCapturasDePrueba(['panel-0.png']);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON } };
+
+        await assert.rejects(
+            () => auditarCapturas(dir, config),
+            (e) => {
+                assert.match(e.message, /panel-0\.png/, 'el mensaje debe decir qué imagen no se pudo auditar');
+                assert.match(e.message, /ocr|OCR/, 'el mensaje debe explicar que fue el servicio OCR el que falló, no un error genérico');
+                return true;
+            },
+            'nunca debe reportarse "limpio" (sin sospechosos) sobre una imagen que no se pudo auditar de verdad',
+        );
+        assert.equal(ocr.llamadas(), 2, 'debe haber reintentado exactamente una vez, ni cero ni más');
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+test('el reintento transitorio también aplica a auditarVideo (frames del .mp4, no solo capturas)', async () => {
+    const ocr = await iniciarOcrDeJugueteConFallos({ fallosTransitorios: 1, texto: 'única persona a la vista: 11111111-1' });
+    try {
+        const { dir, video } = videoDePrueba(2);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON, cada: 1, maximo: 2 } };
+
+        const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames') });
+
+        assert.equal(resultado.total, 2);
+        assert.equal(resultado.sospechosos.length, 0);
+        assert.ok(ocr.llamadas() >= 3, 'al menos un reintento debió ocurrir entre los frames procesados');
+    } finally {
+        await ocr.cerrar();
+    }
 });
