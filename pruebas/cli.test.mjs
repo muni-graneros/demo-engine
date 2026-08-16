@@ -75,6 +75,9 @@ function escribirGuionPanel(proyecto, id, url) {
         escenas: [{ id: 'ver-panel', titulo: 'Ver panel (${id})', pasos: [{
             actor: 'funcionario',
             narrar: 'Abrimos el panel.',
+            // El juguete lista tres personas ficticias a propósito: es una fixture, no una
+            // fuga. Se declara para que la protección automática no lo confunda.
+            variasPersonas: true,
             hacer: async (page) => { await page.goto('${url}/panel'); },
         }] }],
     };`);

@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
+import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mjs';
 import { instalarCursor } from './camara.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { duracion } from './ffmpeg.mjs';
@@ -94,6 +94,21 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                         if (wav) msVoz = Math.round(duracion(wav) * 1000);
                     }
                     await page.waitForTimeout(Math.max(pausaMinima, msVoz));
+
+                    // Comprobación en vivo, al cierre del paso y ANTES de la captura para el
+                    // manual: lee el DOM (sin OCR, 4-6 ms medido) y cuenta identificadores
+                    // distintos con el `patron`/`validar` de `config.auditoria`. Es la misma
+                    // pasada la que cubre "antes de cada captura" y "al cerrar cada paso" — en
+                    // este bucle son el mismo instante, porque cada paso deja EXACTAMENTE una
+                    // captura, siempre al final. Ver src/privacidad.mjs.
+                    //
+                    // `paso.variasPersonas: true` es la excepción declarada a propósito, para
+                    // las pantallas donde mostrar varias personas es lo correcto (un reporte
+                    // agregado, una cola). Lo seguro es el valor por defecto: hay que escribir
+                    // la excepción, no al revés.
+                    if (!paso.variasPersonas) {
+                        await exigirUnaSolaPersona(page, config.auditoria);
+                    }
 
                     // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
                     // usaría cualquiera: si el guion puso el cubridor, sale tapada, que es lo

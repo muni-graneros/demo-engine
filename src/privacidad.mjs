@@ -3,6 +3,8 @@
  * (Ley 19.628 / 21.719). Este módulo es el que lo garantiza.
  */
 
+import { contarIdentificadores } from './auditoria.mjs';
+
 /**
  * Aborta si hay cualquier señal de que esto no es un entorno de desarrollo.
  *
@@ -216,4 +218,69 @@ export async function abrirFiltrado(page, url, { filtro, valor, selectorFilas, a
         },
         mensajeError: async () => `el filtro no redujo la tabla a una fila estable (quedaron ${await cuenta()}): no se graba`,
     });
+}
+
+/**
+ * Identificadores DISTINTOS que hay AHORA MISMO en el DOM de `page`. Misma noción de
+ * "identificador" que el portero de `auditoria.mjs` — mismo `patron` (y el mismo `validar`
+ * opcional para descartar coincidencias de forma que no son un identificador real) — pero acá
+ * se lee el DOM en vivo en vez de pasarle el frame a un OCR: no hay proceso externo que
+ * llamar, así que el costo es de milisegundos (medido contra el sistema de juguete: 4-6 ms) y
+ * puede correr en cada paso de la grabación sin que se note.
+ *
+ * `validar` vive en Node (a veces hace aritmética de dígito verificador) y no se puede
+ * serializar dentro de `page.evaluate()`. Por eso acá se extraen los CANDIDATOS adentro del
+ * navegador —aplicando el mismo `patron` sobre el texto visible de la página— y se valida
+ * AFUERA, con la misma `contarIdentificadores` que usa `auditoria.mjs` sobre el texto del OCR.
+ *
+ * Sin `patron`, no hay nada que buscar y esto devuelve `[]` sin tocar la página: es la forma
+ * de apagar la comprobación por sistema (ver `exigirUnaSolaPersona`).
+ *
+ * @param {import('playwright').Page} page
+ * @param {{patron?: string, validar?: (id: string) => boolean}} [opciones]
+ * @returns {Promise<string[]>}
+ */
+export async function identificadoresEnPantalla(page, { patron, validar } = {}) {
+    if (!patron) return [];
+    const texto = await page.evaluate(() => document.body.innerText);
+    return contarIdentificadores(texto, patron, validar);
+}
+
+/**
+ * Falla CERRADO si la pantalla que el grabador está a punto de capturar muestra más de un
+ * identificador distinto — la misma fuga que `demo auditar` detecta DESPUÉS de grabar (ver
+ * `auditoria.mjs`), pero acá se corta ANTES de que el frame exista, al cierre de cada paso, en
+ * vez de depender de que alguien se acuerde de correr la auditoría más tarde.
+ *
+ * Hasta ahora la única protección era OPT-IN: `abrirFiltrado`/`abrirVerificado` cubren la
+ * pantalla, pero nada obligaba a un guion a llamarlas — una auditoría real encontró 4 de 10
+ * guiones de un sistema en uso que no lo hacían, y dejaban varias personas a la vista. Esto
+ * invierte el diseño: el motor se niega a grabar POR DEFECTO, y hace falta declarar la
+ * excepción a propósito (`paso.variasPersonas`, ver `grabador.mjs`) para lo legítimo —un
+ * reporte agregado, una cola que se quiere enseñar como tal.
+ *
+ * Se apaga por sistema, a propósito (nunca por omisión — ver README): con
+ * `auditoria.patron: null` (nada que buscar) o con `auditoria.chequeoEnVivo: false`
+ * (interruptor explícito que deja `patron`/`validar` intactos para que `demo auditar` los
+ * siga usando).
+ *
+ * @param {import('playwright').Page} page
+ * @param {{patron?: string, validar?: Function, chequeoEnVivo?: boolean}} [auditoria]
+ */
+export async function exigirUnaSolaPersona(page, auditoria) {
+    if (auditoria?.chequeoEnVivo === false) return;
+
+    const identificadores = await identificadoresEnPantalla(page, auditoria ?? {});
+    if (identificadores.length > 1) {
+        // Cubre de inmediato: el take completo se descarta de todas formas (grabar() lanza y
+        // ningún video final sale de esta corrida — ver cli.mjs), pero no hay razón para dejar
+        // la pantalla real a la vista ni un instante más de lo necesario mientras el error se
+        // propaga hacia arriba.
+        await cubrir(page);
+        throw new Error(
+            `la pantalla muestra ${identificadores.length} identificadores distintos ` +
+            `(${identificadores.join(', ')}): sin abrirFiltrado/abrirVerificado ni ` +
+            'paso.variasPersonas = true, no se graba (falla cerrado)',
+        );
+    }
 }

@@ -206,3 +206,135 @@ test('si un paso revienta, el error dice qué escena y qué paso fallaron, y la 
         await juguete.cerrar();
     }
 });
+
+// La protección por defecto: antes, `abrirFiltrado`/`abrirVerificado` eran OPT-IN — nada
+// obligaba a un guion a llamarlas. Con `auditoria.patron` configurado, el grabador se niega a
+// grabar un paso que deja más de un identificador a la vista, sin que el guion tenga que
+// pedirlo. Ver src/privacidad.mjs (exigirUnaSolaPersona) y src/grabador.mjs.
+
+const PATRON_RUT = '\\d{7,8}-[\\dkK]';
+
+function configConAuditoria(juguete, extra = {}) {
+    return {
+        baseURL: juguete.url,
+        login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+        actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+        video: { ancho: 800, alto: 600, pausaMinima: 200 },
+        auditoria: { patron: PATRON_RUT },
+        ...extra,
+    };
+}
+
+test('un guion descuidado que abre un listado sin filtrar hace fallar la grabación (falla cerrado por defecto)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = configConAuditoria(juguete);
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guion = {
+            id: 'descuidado',
+            escenas: [{ id: 'panel', titulo: 'Panel sin filtrar', pasos: [{
+                actor: 'funcionario',
+                // Defecto real: abre el panel y NO llama a abrirFiltrado/abrirVerificado.
+                // Las 3 personas de PERSONAS quedan a la vista en el mismo frame.
+                hacer: async (page) => { await page.goto(`${juguete.url}/panel`); },
+            }] }],
+        };
+
+        await assert.rejects(
+            () => grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) }),
+            (error) => {
+                assert.match(error.message, /panel/, 'el error debe identificar la escena');
+                assert.match(error.message, /paso 1/, 'el error debe identificar el paso');
+                assert.match(error.message, /identificadores distintos/, 'el error debe decir qué encontró');
+                return true;
+            },
+        );
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('el mismo paso con paso.variasPersonas = true graba sin problema (excepción declarada a propósito)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = configConAuditoria(juguete);
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guion = {
+            id: 'reporte-agregado',
+            escenas: [{ id: 'panel', titulo: 'Panel agregado, mostrado a propósito', pasos: [{
+                actor: 'funcionario',
+                variasPersonas: true,
+                hacer: async (page) => { await page.goto(`${juguete.url}/panel`); },
+            }] }],
+        };
+
+        const { pasos } = await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+        assert.equal(pasos.length, 1);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('un guion que usa abrirFiltrado correctamente no se ve afectado por la comprobación en vivo', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = configConAuditoria(juguete);
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+        const { abrirFiltrado } = await import('../src/privacidad.mjs');
+
+        const guion = {
+            id: 'filtrado-correcto',
+            escenas: [{ id: 'panel', titulo: 'Panel filtrado a una persona', pasos: [{
+                actor: 'funcionario',
+                hacer: async (page) => {
+                    await abrirFiltrado(page, `${juguete.url}/panel`, {
+                        filtro: '#filtro', valor: '11111111-1', selectorFilas: 'tr.fila',
+                    });
+                },
+            }] }],
+        };
+
+        const { pasos } = await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+        assert.equal(pasos.length, 1);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('sin auditoria.patron declarado, la comprobación en vivo no interfiere (compatibilidad hacia atrás)', async () => {
+    // Los tests de arriba en este archivo ya cubren esto (ninguno declara `auditoria`), pero
+    // se deja un caso explícito: un guion descuidado, sin patron configurado, sigue grabando
+    // igual que en v1.0.x. Es la vía de apagado "patron sin declarar" del punto 4 del diseño.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = configConAuditoria(juguete, { auditoria: undefined });
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guion = {
+            id: 'sin-auditoria-configurada',
+            escenas: [{ id: 'panel', titulo: 'Panel sin filtrar', pasos: [{
+                actor: 'funcionario',
+                hacer: async (page) => { await page.goto(`${juguete.url}/panel`); },
+            }] }],
+        };
+
+        const { pasos } = await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+        assert.equal(pasos.length, 1);
+    } finally {
+        await juguete.cerrar();
+    }
+});

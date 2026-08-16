@@ -22,7 +22,15 @@ const DEFECTOS = {
     // verificador de un RUT chileno) que solo quien configura el sistema puede aportar — el
     // motor no sabe qué hace válido a un identificador. Sin declararlo, se sigue contando
     // todo lo que matchea `patron`, como hasta ahora.
-    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20, validar: null },
+    //
+    // `chequeoEnVivo` es la comprobación EN CADA PASO de la grabación (ver
+    // src/privacidad.mjs, exigirUnaSolaPersona): con `patron` presente por defecto, queda
+    // ACTIVA por omisión — es un cambio de comportamiento a propósito (ver README, "Migrar a
+    // v1.1.0"): apagarla debe ser una decisión consciente, nunca el estado por omisión.
+    // `patron: null` la apaga igual (nada que buscar); `chequeoEnVivo: false` es el
+    // interruptor explícito para cuando se quiere seguir usando `patron`/`validar` en
+    // `demo auditar` sin bloquear la grabación en vivo.
+    auditoria: { ocr: null, patron: '\\d{7,8}-[\\dkK]', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
     sembrar: null,
     limpiar: null,
 };

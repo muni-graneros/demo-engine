@@ -2,7 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { exigirEntornoDeDesarrollo, abrirFiltrado, abrirVerificado, cubrir, descubrir } from '../src/privacidad.mjs';
+import {
+    exigirEntornoDeDesarrollo, abrirFiltrado, abrirVerificado, cubrir, descubrir,
+    identificadoresEnPantalla, exigirUnaSolaPersona,
+} from '../src/privacidad.mjs';
+
+const PATRON_RUT = '\\d{7,8}-[\\dkK]';
 
 /** Solo los "Turno Demo N" están permitidos en la cola de atención de juguete. */
 const esPermitido = (nombre) => /^Turno Demo \d+$/.test(nombre);
@@ -271,6 +276,114 @@ test('abrirVerificado: espera a que el predicado se estabilice antes de destapar
 
         const final = await page.evaluate(() => !!document.getElementById('__cubridor'));
         assert.equal(final, false, 'una vez asentado en un estado permitido, debe terminar destapada');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+// La comprobación en vivo: en vez de depender de que el guion llame a abrirFiltrado/
+// abrirVerificado, el grabador lee el DOM directo (sin OCR) en cada paso y cuenta
+// identificadores distintos con el mismo patron/validar que usa auditoria.mjs.
+
+test('identificadoresEnPantalla: cuenta los RUT distintos que hay en el DOM, sin patron declarado no busca nada', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+
+        const conPatron = await identificadoresEnPantalla(page, { patron: PATRON_RUT });
+        assert.equal(conPatron.length, 3, 'el panel sin filtrar trae los 3 RUT de PERSONAS');
+
+        const sinPatron = await identificadoresEnPantalla(page, {});
+        assert.deepEqual(sinPatron, [], 'sin patron declarado, no hay nada que buscar: así se apaga por sistema');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('exigirUnaSolaPersona: falla cerrado y cubre la pantalla si hay más de un identificador', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+
+        await assert.rejects(
+            () => exigirUnaSolaPersona(page, { patron: PATRON_RUT }),
+            (error) => {
+                assert.match(error.message, /3 identificadores distintos/);
+                assert.match(error.message, /11111111-1/);
+                return true;
+            },
+        );
+
+        const tapada = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(tapada, true, 'debe cubrir la pantalla de inmediato al detectar la fuga');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('exigirUnaSolaPersona: no hace nada si hay un solo identificador (o ninguno)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.goto(`${juguete.url}/detalle/11111111-1`, { waitUntil: 'domcontentloaded' });
+        await assert.doesNotReject(() => exigirUnaSolaPersona(page, { patron: PATRON_RUT }));
+
+        const tapada = await page.evaluate(() => !!document.getElementById('__cubridor'));
+        assert.equal(tapada, false, 'una pantalla con un solo identificador no debe taparse');
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('exigirUnaSolaPersona: se apaga con auditoria.chequeoEnVivo === false, aunque patron esté declarado', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+        await assert.doesNotReject(
+            () => exigirUnaSolaPersona(page, { patron: PATRON_RUT, chequeoEnVivo: false }),
+        );
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+});
+
+test('exigirUnaSolaPersona: respeta validar, descartando coincidencias que no son un identificador real', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ storageState: { cookies: [
+        { name: 'sesion', value: 'funcionario', domain: '127.0.0.1', path: '/' },
+    ], origins: [] } });
+    const page = await ctx.newPage();
+    try {
+        await page.goto(`${juguete.url}/panel`, { waitUntil: 'domcontentloaded' });
+        // validar deja pasar solo el primer RUT: los otros dos "matchean la forma" pero acá
+        // se los trata como lecturas inválidas, igual que auditoria.validar en auditoria.mjs.
+        const validar = (id) => id === '11111111-1';
+        await assert.doesNotReject(() => exigirUnaSolaPersona(page, { patron: PATRON_RUT, validar }));
     } finally {
         await navegador.close();
         await juguete.cerrar();

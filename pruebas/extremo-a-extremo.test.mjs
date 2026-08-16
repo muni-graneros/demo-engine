@@ -31,7 +31,9 @@ test('del guion al mp4 con subtítulos, sin tocar Laravel', async () => {
         const voz = crearVoz({ motor: 'ninguno', respaldo: 'ninguno' });
 
         const guion = { id: 'recorrido', titulo: 'Recorrido', escenas: [
+            // El panel del juguete lista tres personas ficticias: fixture declarada, no fuga.
             { id: 'panel', titulo: 'Panel', pasos: [{ actor: 'funcionario', narrar: 'Abre el panel.',
+              variasPersonas: true,
               hacer: async (page) => { await page.goto('/panel'); } }] },
             { id: 'detalle', titulo: 'Detalle', pasos: [{ actor: 'funcionario', narrar: 'Ve el detalle.',
               hacer: async (page) => { await page.goto('/detalle/11111111-1'); } }] },
