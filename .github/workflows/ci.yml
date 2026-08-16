@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  # Manual, push a main (gate final) y PRs hacia main. Repo público: los minutos de
+  # Actions son gratis, así que el ahorro acá no es de plata sino de ruido — no correr
+  # en cada rama, solo cuando algo va a integrarse.
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tests:
+    name: node --test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '20'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # ffmpeg viene con ffmpeg-static (dependencia del paquete) — no hace falta
+      # instalarlo aparte. Las pruebas de voz que necesitan los modelos (~670 MB) se
+      # saltan solas sin DEMO_CON_VOZ: no se instalan acá, y eso es lo correcto (queda
+      # 1 prueba SKIP, no una prueba roja por un modelo ausente).
+      - name: Instalar navegador (Chromium) para Playwright
+        run: npx playwright install --with-deps chromium
+
+      # Concurrencia serializada a propósito, NO reintento. La suite tiene una
+      # intermitencia MEDIDA (ver pruebas/voz-motores.test.mjs y src/voz/proceso.mjs):
+      # bajo carga, con varios navegadores y ffmpeg compitiendo por el mismo runner,
+      # fork/exec de un proceso real falla de forma transitoria (~1 de cada 8 corridas
+      # medido en local). La causa es contención, no un bug — así que la solución es
+      # sacarle la concurrencia que la provoca (--test-concurrency=1 serializa los
+      # archivos de prueba, en vez de correr varios en paralelo), no reintentar tests
+      # que fallaron. Un reintento (por test o por job) haría que una regresión real
+      # también pudiera "pasar" en el segundo intento si toca a algo con timing
+      # variable; serializar en cambio achica la ventana de contención SIN volver a
+      # ejecutar nada que ya falló, así que un rojo acá sigue significando "hay que
+      # mirarlo". El costo es tiempo de CI nomás (repo público, minutos gratis): pasa de
+      # ~50s a ~1m45s en local con la máquina ya ocupada por otras cosas.
+      - name: Ejecutar pruebas (node --test)
+        run: node --test --test-concurrency=1 pruebas/
