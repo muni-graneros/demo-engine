@@ -336,3 +336,29 @@ test('demo auditar con un solo identificador por frame sale con código 0', asyn
         await juguete.cerrar();
     }
 });
+
+test('demo grabar siembra antes de cada corrida, no solo demo preparar', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        // El seed de mentira deja un rastro por cada vez que lo llaman: así se
+        // distingue "sembró una vez" de "no sembró nunca".
+        const proyecto = proyectoDeJuguete(juguete, `sembrar: 'sh -c "echo sembrado >> sembrados.txt"',`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const rastro = join(proyecto, 'sembrados.txt');
+
+        const primera = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(primera.status, 0, `demo grabar falló: ${primera.stderr}`);
+        assert.ok(existsSync(rastro), 'demo grabar debió ejecutar config.sembrar');
+        assert.equal(readFileSync(rastro, 'utf8').trim().split('\n').length, 1);
+
+        // Y la segunda corrida vuelve a sembrar: si no, grabaría sobre lo que
+        // dejó la primera —casos ya resueltos, filas acumuladas— y el guion
+        // terminaría abriendo el registro equivocado.
+        const segunda = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(segunda.status, 0, `demo grabar (segunda vez) falló: ${segunda.stderr}`);
+        assert.equal(readFileSync(rastro, 'utf8').trim().split('\n').length, 2,
+            'cada grabación tiene que sembrar de nuevo');
+    } finally {
+        await juguete.cerrar();
+    }
+});

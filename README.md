@@ -159,7 +159,12 @@ export default {
   },
 
   // Comandos shell (opcionales).
-  sembrar: 'npm run seed',      // Antes de grabar (resetea BD, etc.)
+  sembrar: 'npm run seed',      // Se ejecuta en CADA `demo grabar`, `demo curso` y `demo preparar`.
+                                // Tiene que ser IDEMPOTENTE: lo normal es que borre lo suyo y
+                                // vuelva a crearlo. Sin siembra por corrida, la segunda graba
+                                // sobre lo que dejó la primera —casos ya resueltos que no
+                                // muestran sus botones, filas acumuladas— y cada síntoma parece
+                                // un selector roto cuando en realidad es el estado.
   limpiar: 'npm run clean',     // Después de todo
 
   // Auditoría (opcional): verifica sobre el video ya grabado, ver "Auditoría: demo auditar".

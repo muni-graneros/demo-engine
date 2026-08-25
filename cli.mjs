@@ -100,6 +100,14 @@ async function ejecutarOrden(config, voz) {
 
     if (orden === 'grabar') {
         limpiarCapturas(config);
+        // Sembrar antes de CADA grabación, no solo en `preparar`.
+        //
+        // Sin esto, la segunda corrida graba sobre lo que dejó la primera: casos
+        // ya resueltos que no muestran sus botones, filas acumuladas de tomas
+        // anteriores, y un guion que abre el registro equivocado porque el
+        // primero que coincide es uno viejo. Cuesta horas de diagnosticar,
+        // porque cada síntoma parece un selector roto y en realidad es el estado.
+        if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
         const guion = await cargarGuion(config, argumento);
         const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
         const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
@@ -109,6 +117,7 @@ async function ejecutarOrden(config, voz) {
 
     if (orden === 'curso') {
         limpiarCapturas(config);
+        if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
         const maestro = await cargarGuion(config, 'curso');
         const partes = [];
         for (const cap of maestro.capitulos) {
