@@ -25,7 +25,7 @@ test('aplica los valores por defecto', async () => {
     const cfg = await cargarConfig(proyecto(minima));
     assert.equal(cfg.video.ancho, 1600);
     assert.equal(cfg.video.alto, 1000);
-    assert.equal(cfg.video.pausaMinima, 1200);
+    assert.equal(cfg.video.pausaMinima, 350);
     assert.equal(cfg.voz.motor, 'kokoro');
     assert.equal(cfg.voz.respaldo, 'piper');
     assert.equal(cfg.voz.venv, null);
@@ -120,4 +120,35 @@ test('falla si la carpeta de guiones no existe', async () => {
 test('falla si baseURL no es una URL', async () => {
     const dir = proyecto({ ...minima, baseURL: 'localhost:8031' });
     await assert.rejects(() => cargarConfig(dir), /baseURL/);
+});
+
+test('el ritmo por defecto es el ágil: un proyecto nuevo no hereda pausas muertas', async () => {
+    const cfg = await cargarConfig(proyecto(minima));
+
+    // Estos tres números son el resultado de una medición, no una preferencia: con
+    // los valores viejos (1200 / 550 / 1) el mismo tutorial duraba 7:28 y con estos
+    // 3:13, sin sacar una sola escena. Más de la mitad eran huecos.
+    //
+    // Se fijan en una prueba para que devolverlos a los lentos tenga que ser una
+    // decisión explícita de alguien, y no el efecto de un merge distraído.
+    assert.ok(cfg.video.pausaMinima <= 400,
+        `la pausa mínima por defecto debe ser ágil y es ${cfg.video.pausaMinima} ms`);
+    assert.ok(cfg.video.msCursor <= 300,
+        `el viaje del puntero por defecto debe ser ágil y es ${cfg.video.msCursor} ms`);
+    assert.ok(cfg.voz.velocidad > 1,
+        `la locución por defecto debe ir por encima de la velocidad natural y va a ${cfg.voz.velocidad}`);
+});
+
+test('un tutorial que quiera ir pausado puede pedirlo, y se respeta', async () => {
+    // El defecto ágil no puede convertirse en una imposición: una capacitación
+    // larga sí quiere aire entre paso y paso.
+    const cfg = await cargarConfig(proyecto({
+        ...minima,
+        video: { pausaMinima: 1800, msCursor: 700 },
+        voz: { velocidad: 0.95 },
+    }));
+
+    assert.equal(cfg.video.pausaMinima, 1800);
+    assert.equal(cfg.video.msCursor, 700);
+    assert.equal(cfg.voz.velocidad, 0.95);
 });

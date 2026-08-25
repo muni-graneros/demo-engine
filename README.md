@@ -191,6 +191,47 @@ cualquiera, pero un panel Filament típico NO los cumple:
   ANTES de esa hidratación no encuentra nada. Selector que sí funciona, y que no depende de
   cuándo hidrató Alpine: `input[wire\\:model="data.password"]`.
 
+## Ritmo: por qué el video sale fluido
+
+Un tutorial se siente lento por cosas que no son la velocidad de la voz. El motor
+resuelve las tres, y por eso **el ritmo ágil es el comportamiento por defecto**:
+
+**1. La locución se sintetiza ANTES de grabar.** Kokoro tarda decenas de segundos
+por frase en una máquina sin GPU. Sintetizándola dentro del bucle, ese rato queda
+grabado como una pantalla congelada entre paso y paso, y quien mira lo lee como
+«el sistema se quedó pensando». Ahora todas las locuciones se generan antes de
+abrir la grabación, cacheadas por texto.
+
+**2. La voz suena MIENTRAS el paso actúa.** Antes cada paso duraba la acción más
+la locución entera: primero la pantalla se movía en silencio, después se quedaba
+quieta hablando. Ahora lo que la acción ya consumió se descuenta de la espera, así
+que el paso dura lo que dura su locución y las dos cosas coinciden.
+
+**3. Los tiempos por defecto son cortos** (`pausaMinima: 350`, `msCursor: 260`,
+`voz.velocidad: 1.25`). A velocidad natural una locución de tutorial se arrastra,
+porque quien mira ya está viendo en pantalla lo que se le cuenta.
+
+Medido en un tutorial de 13 escenas y 19 narraciones: **de 7:28 a 3:13 sin sacar
+una sola escena**. Más de la mitad del video eran huecos.
+
+### Si tu tutorial quiere ir más pausado
+
+Es legítimo —una capacitación larga quiere aire— y se pide en la config:
+
+```js
+video: { pausaMinima: 1800, msCursor: 700 },
+voz:   { velocidad: 0.95 },
+```
+
+### Lo que sigue estando en tus manos
+
+Las esperas que escribas dentro de `hacer` **se suman** a la locución, no la
+reemplazan. Si un paso queda largo, revisá esos `waitForTimeout` antes de tocar la
+velocidad de la voz. Y preferí esperar por un elemento (`waitFor({ state:
+'visible' })`) antes que dormir un número fijo: una espera fija que «funcionaba»
+suele estar apoyada en el colchón de otro paso, y se rompe en cuanto el ritmo
+cambia.
+
 ## Guiones: estructura
 
 Un **guion** es un ESM que exporta un objeto `default`:
