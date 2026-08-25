@@ -5,3 +5,8 @@ salida/
 *.mp4
 *.webm
 *.wav
+
+# Basura que dejaban las pruebas de voz cuando el destino del .wav no era el
+# ultimo argumento del comando. El convenio ya esta fijado por una prueba, pero
+# un descuido no tiene que volver a llegar al repositorio.
+/1
