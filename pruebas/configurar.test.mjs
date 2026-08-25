@@ -152,3 +152,20 @@ test('un tutorial que quiera ir pausado puede pedirlo, y se respeta', async () =
     assert.equal(cfg.video.msCursor, 700);
     assert.equal(cfg.voz.velocidad, 0.95);
 });
+
+test('la version declarada en package.json coincide con el ultimo tag publicado', async () => {
+    // Se publicaron cinco versiones seguidas sin tocar este campo: el tarball de
+    // v1.6.0 traía adentro `"version": "1.1.2"`, y quien lo instalaba y verificaba
+    // creía tener una versión vieja. Un tag no actualiza el package.json solo.
+    const { execFileSync } = await import('node:child_process');
+    const { readFileSync } = await import('node:fs');
+    const { fileURLToPath } = await import('node:url');
+    const { dirname, join } = await import('node:path');
+
+    const raiz = join(dirname(fileURLToPath(import.meta.url)), '..');
+    const declarada = JSON.parse(readFileSync(join(raiz, 'package.json'), 'utf8')).version;
+    const ultimoTag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: raiz, encoding: 'utf8' }).trim();
+
+    assert.equal(`v${declarada}`, ultimoTag,
+        `package.json dice ${declarada} y el último tag es ${ultimoTag}: uno de los dos quedó atrás`);
+});
