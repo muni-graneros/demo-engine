@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, readdirSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
@@ -336,5 +336,51 @@ test('sin auditoria.patron declarado, la comprobación en vivo no interfiere (co
         assert.equal(pasos.length, 1);
     } finally {
         await juguete.cerrar();
+    }
+});
+
+test('la locución suena mientras el paso actúa: lo que tarda la acción se descuenta de la espera', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-solape-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 100 },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        // Un paso cuya ACCIÓN tarda casi tanto como su locución: antes el paso duraba
+        // acción + locución entera (una pantalla muda y después una congelada hablando).
+        const guion = {
+            id: 'solape',
+            titulo: 'Solape',
+            escenas: [{
+                id: 'unica',
+                titulo: 'Única',
+                pasos: [{
+                    actor: 'funcionario',
+                    narrar: 'Una locución de dos segundos.',
+                    hacer: async (page) => { await page.waitForTimeout(1500); },
+                }],
+            }],
+        };
+
+        const t0 = Date.now();
+        await grabar(guion, { config, sesiones, salida, voz: vozDe(2, salida) });
+        const transcurrido = Date.now() - t0;
+
+        // Con solape el paso dura ~2 s (la locución), no ~3,5 s (1,5 de acción + 2 de voz).
+        // El margen es generoso a propósito: acá adentro hay un login y un arranque de
+        // navegador reales, y lo que se afirma es que NO se suman los dos tiempos.
+        assert.ok(transcurrido < 3400,
+            `el paso debió durar lo que la locución, no la acción MÁS la locución (tardó ${transcurrido} ms)`);
+    } finally {
+        await juguete.cerrar();
+        rmSync(salida, { recursive: true, force: true });
+        rmSync(dirSesiones, { recursive: true, force: true });
     }
 });

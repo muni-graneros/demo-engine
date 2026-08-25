@@ -96,7 +96,18 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                         wav = voz.sintetizar(paso.narrar);
                         if (wav) msVoz = Math.round(duracion(wav) * 1000);
                     }
-                    await page.waitForTimeout(Math.max(pausaMinima, msVoz));
+                    // Lo que el paso YA consumió —la acción y la síntesis— se descuenta de
+                    // la espera. Antes se esperaba la locución ENTERA después de actuar, así
+                    // que cada paso era una acción muda seguida de una pantalla congelada
+                    // hablando: la voz y lo que se ve nunca coincidían, y el video se sentía
+                    // arrastrado aunque la locución fuera rápida. Medido en un tutorial de
+                    // doce pasos: pasos de 30 a 60 segundos para narraciones de tres frases.
+                    //
+                    // Ahora el paso dura lo que dure su locución contando desde que empezó a
+                    // actuar, y el audio —que el montaje pega al inicio del paso— suena
+                    // mientras la pantalla se mueve, que es como se ve un tutorial de verdad.
+                    const consumido = Date.now() - t0 - inicioLocal;
+                    await page.waitForTimeout(Math.max(pausaMinima, msVoz - consumido));
 
                     // Comprobación en vivo, al cierre del paso y ANTES de la captura para el
                     // manual: lee el DOM (sin OCR, 4-6 ms medido) y cuenta identificadores
