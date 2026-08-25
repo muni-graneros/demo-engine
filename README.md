@@ -132,7 +132,9 @@ export default {
   video: {
     ancho: 1600,                // Píxeles (defecto: 1600)
     alto: 1000,                 // Píxeles (defecto: 1000)
-    pausaMinima: 1200           // Milisegundos entre pasos (defecto: 1200)
+    pausaMinima: 1200,          // Milisegundos entre pasos (defecto: 1200)
+    msCursor: 550               // Lo que tarda el puntero en viajar a lo que va a pulsar
+                                // (defecto: 550). Bajalo para un tutorial ágil.
   },
 
   // Voz: síntesis de audio.
@@ -145,6 +147,11 @@ export default {
   voz: {
     motor: 'kokoro',            // Motor principal: 'kokoro' | 'piper' (defecto: kokoro)
     voz: 'ef_dora',             // Voz del motor principal (defecto: ef_dora, de Kokoro)
+    velocidad: 1,               // Ritmo de la locución: 1.2 habla un 20 % más rápido (defecto: 1).
+                                // A 1.0 un tutorial se siente lento: quien mira ya está viendo
+                                // lo que se le cuenta. Se aplica igual en Kokoro (speed) y en
+                                // Piper (length-scale, que es su inverso), para que caer al
+                                // respaldo no cambie la cadencia del video.
     respaldo: 'piper',          // Si el principal no está disponible (defecto: piper)
     vozRespaldo: null,          // Voz del respaldo; si es null, el respaldo usa la suya
     venv: null,                 // Carpeta del venv de Python, opcional (ver "Instalación")

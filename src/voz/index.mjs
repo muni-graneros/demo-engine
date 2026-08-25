@@ -74,7 +74,7 @@ function avisarCaidaARespaldo({ motor, usado, errores }) {
  * motor principal) — es lo que un consumidor espera al escribir solo `voz` para el motor
  * principal.
  */
-export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', vozRespaldo, venv, voces } = {}) {
+export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', vozRespaldo, venv, voces, velocidad = 1 } = {}) {
     // `?? undefined` normaliza el `null` que trae `cargarConfig()` cuando el consumidor no
     // declaró `vozRespaldo`: los `crear()` de cada motor solo aplican su valor por defecto
     // cuando el parámetro es `undefined`, no cuando es `null`.
@@ -82,12 +82,15 @@ export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', vozRespald
         { nombre: motor, voz },
         { nombre: respaldo, voz: vozRespaldo ?? undefined },
     ].filter((c) => c.nombre);
+    // La velocidad es del VIDEO, no del motor: si el principal no arranca y entra
+    // el respaldo, el ritmo de la locución tiene que ser el mismo o el tutorial
+    // cambia de cadencia a mitad de camino.
     const errores = [];
     for (const [indice, candidato] of candidatos.entries()) {
         const { nombre, voz: vozCandidato } = candidato;
         const modulo = MOTORES[nombre];
         if (!modulo) continue;
-        const instancia = modulo.crear({ voz: vozCandidato, venv, voces });
+        const instancia = modulo.crear({ voz: vozCandidato, venv, voces, velocidad });
         if (instancia.disponible()) {
             if (indice > 0) avisarCaidaARespaldo({ motor, usado: nombre, errores });
             return instancia;

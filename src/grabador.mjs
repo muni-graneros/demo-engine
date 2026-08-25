@@ -2,7 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mjs';
-import { instalarCursor } from './camara.mjs';
+import { configurarCamara, instalarCursor } from './camara.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { duracion } from './ffmpeg.mjs';
 
@@ -16,7 +16,10 @@ import { duracion } from './ffmpeg.mjs';
 export async function grabar(guion, { config, sesiones, salida, voz }) {
     exigirEntornoDeDesarrollo(config.baseURL);
 
-    const { ancho, alto, pausaMinima, calidad, fps } = config.video;
+    const { ancho, alto, pausaMinima, calidad, fps, msCursor } = config.video;
+    // El ritmo del puntero es del proyecto, no del motor: un tutorial de trámite
+    // se sigue mejor ágil y uno de capacitación, pausado.
+    configurarCamara({ msCursor });
     const navegador = await chromium.launch();
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];

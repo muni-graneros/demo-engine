@@ -221,3 +221,23 @@ for (const [nombre, motor, vocesFalsas] of [['piper', piper, vocesPiperFalsas], 
         assert.ok(wav && existsSync(wav));
     });
 }
+
+test('la velocidad de la locución llega a los dos motores, y el destino sigue siendo el último argumento', () => {
+    // El destino al final es un convenio del que depende crearMotorProceso (y el
+    // ejecutor falso de estas pruebas): agregar un argumento después lo rompía en
+    // silencio, y el motor se quedaba sin escribir el .wav.
+    const venv = venvConSoloArchivo();
+
+    const kok = kokoro.crear({ voz: 'x', venv, voces: vocesKokoroFalsas(), velocidad: 1.25 }).comando?.('/tmp/x.wav');
+    const pip = piper.crear({ voz: 'es_ES-davefx-medium', venv, voces: vocesPiperFalsas(), velocidad: 1.25 }).comando?.('/tmp/y.wav');
+
+    if (kok) {
+        assert.ok(kok.args.includes('1.25'), 'kokoro debe recibir la velocidad tal cual');
+        assert.equal(kok.args.at(-1), '/tmp/x.wav', 'el destino debe seguir siendo el último argumento');
+    }
+    if (pip) {
+        // Piper habla más rápido con un length-scale MENOR: es el inverso.
+        assert.ok(pip.args.includes('0.8'), 'piper debe recibir el inverso de la velocidad');
+        assert.equal(pip.args.at(-1), '/tmp/y.wav', 'el destino debe seguir siendo el último argumento');
+    }
+});

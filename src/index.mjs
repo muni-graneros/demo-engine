@@ -11,4 +11,4 @@ export {
     identificadoresEnPantalla, exigirUnaSolaPersona,
 } from './privacidad.mjs';
 export { auditarVideo, auditarCapturas, muestrearFrames, contarIdentificadores, exigirAuditoriaConfigurada } from './auditoria.mjs';
-export { instalarCursor, moverCursorA, pulsar, acercarA, alejar } from './camara.mjs';
+export { instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara } from './camara.mjs';

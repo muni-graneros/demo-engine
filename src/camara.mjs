@@ -4,7 +4,16 @@
  * cosa que el navegador headless no dibuja por su cuenta.
  */
 
-const MS_MOVIMIENTO = 550;
+let MS_MOVIMIENTO = 550;
+
+/** Ajusta el ritmo del puntero desde la config del proyecto (`video.msCursor`).
+ *
+ * Es un valor de MONTAJE, no de comportamiento: 550 ms se ve didáctico en un
+ * tutorial pausado y arrastrado en uno ágil, y hasta ahora estaba fijo en el
+ * motor, así que ningún proyecto podía elegir su propio ritmo. */
+export function configurarCamara({ msCursor } = {}) {
+    if (Number.isFinite(msCursor) && msCursor > 0) MS_MOVIMIENTO = msCursor;
+}
 
 /** Dibuja el cursor y el estilo de los halos. Idempotente.
  *
