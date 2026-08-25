@@ -384,3 +384,63 @@ test('la locución suena mientras el paso actúa: lo que tarda la acción se des
         rmSync(dirSesiones, { recursive: true, force: true });
     }
 });
+
+test('las locuciones se sintetizan ANTES de grabar, y una repetida se sintetiza una sola vez', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-presint-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 100 },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        // Voz de mentira que cuenta cuándo y cuántas veces la llaman.
+        const base = vozDe(1, salida);
+        let sintesis = 0;
+        let sintesisAntesDeGrabar = 0;
+        let grabando = false;
+        const voz = {
+            ...base,
+            sintetizar: (texto) => {
+                sintesis++;
+                if (!grabando) sintesisAntesDeGrabar++;
+                return base.sintetizar(texto);
+            },
+        };
+
+        const guion = {
+            id: 'presint',
+            titulo: 'Presíntesis',
+            escenas: [{
+                id: 'unica',
+                titulo: 'Única',
+                pasos: [
+                    { actor: 'funcionario', narrar: 'Frase que se repite.',
+                      hacer: async (page) => { grabando = true; await page.waitForTimeout(50); } },
+                    { actor: 'funcionario', narrar: 'Frase que se repite.',
+                      hacer: async (page) => { await page.waitForTimeout(50); } },
+                    { actor: 'funcionario', narrar: 'Otra frase distinta.',
+                      hacer: async (page) => { await page.waitForTimeout(50); } },
+                ],
+            }],
+        };
+
+        await grabar(guion, { config, sesiones, salida, voz });
+
+        // Dos textos distintos, no tres pasos: la repetida se cachea.
+        assert.equal(sintesis, 2, `debió sintetizar 2 textos distintos y sintetizó ${sintesis}`);
+        // Y las dos ocurrieron antes de que el primer paso empezara a actuar: si
+        // se sintetizara dentro del bucle, el costo quedaría DENTRO del video.
+        assert.equal(sintesisAntesDeGrabar, 2,
+            'las locuciones deben sintetizarse antes de que la grabación empiece a correr');
+    } finally {
+        await juguete.cerrar();
+        rmSync(salida, { recursive: true, force: true });
+        rmSync(dirSesiones, { recursive: true, force: true });
+    }
+});

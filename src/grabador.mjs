@@ -23,6 +23,30 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     const navegador = await chromium.launch();
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];
+
+    /*
+     * Todas las locuciones se sintetizan ANTES de que empiece a grabarse nada.
+     *
+     * Sintetizarlas dentro del bucle metía el costo del motor de voz DENTRO del
+     * video: en una máquina sin GPU cada locución tarda decenas de segundos, y
+     * ese rato quedaba grabado como una pantalla congelada entre paso y paso. El
+     * espectador lo lee como «el sistema se quedó pensando», y no es el sistema:
+     * es el tutorial sintetizando la frase siguiente.
+     *
+     * Se cachea por TEXTO, no por paso: dos pasos que narran lo mismo —una
+     * muletilla repetida entre capítulos— pagan una sola síntesis.
+     */
+    const locuciones = new Map();
+    if (voz.disponible()) {
+        for (const escena of guion.escenas) {
+            for (const paso of escena.pasos) {
+                if (!paso.narrar || locuciones.has(paso.narrar)) continue;
+                const wav = voz.sintetizar(paso.narrar);
+                locuciones.set(paso.narrar, wav ? { wav, ms: Math.round(duracion(wav) * 1000) } : null);
+            }
+        }
+    }
+
     const t0Global = Date.now();
 
     // El manual (`generarManual`) sale de docs/manual junto con `salida`: por eso la ruta
@@ -90,14 +114,10 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                     // la ruta viaja en el paso para que el montaje lo reutilice. Sintetizarla de
                     // nuevo al montar duplicaría el trabajo más caro del pipeline en una máquina
                     // sin GPU.
-                    let wav = null;
-                    let msVoz = 0;
-                    if (paso.narrar && voz.disponible()) {
-                        wav = voz.sintetizar(paso.narrar);
-                        if (wav) msVoz = Math.round(duracion(wav) * 1000);
-                    }
-                    // Lo que el paso YA consumió —la acción y la síntesis— se descuenta de
-                    // la espera. Antes se esperaba la locución ENTERA después de actuar, así
+                    const locucion = paso.narrar ? locuciones.get(paso.narrar) : null;
+                    const wav = locucion?.wav ?? null;
+                    const msVoz = locucion?.ms ?? 0;
+                    // Lo que la acción del paso YA consumió se descuenta de la espera. Antes se esperaba la locución ENTERA después de actuar, así
                     // que cada paso era una acción muda seguida de una pantalla congelada
                     // hablando: la voz y lo que se ve nunca coincidían, y el video se sentía
                     // arrastrado aunque la locución fuera rápida. Medido en un tutorial de
