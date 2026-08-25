@@ -35,6 +35,23 @@ export function totp(secreto, segundos = Math.floor(Date.now() / 1000)) {
  * Loguea a cada actor y guarda su sesión en disco.
  * @returns {Promise<Record<string,string>>} actor → ruta del storageState
  */
+/**
+ * Hace click en el botón de envío del login y espera a que la URL cambie. El login de
+ * Filament/Livewire NO navega con el click: resuelve por una request de fondo y redirige
+ * por JS un instante después, así que `waitForLoadState('domcontentloaded')` retorna antes
+ * del salto y el chequeo de sesión corría estando todavía en /login. Esperar el cambio de
+ * URL cubre por igual el redirect de servidor (navegación normal) y el diferido por JS; si
+ * el login falla y nada cambia, cae por timeout y el chequeo posterior lo reporta.
+ * @param {import('playwright').Page} page
+ * @param {string} selector
+ */
+async function enviarYEsperarSalida(page, selector) {
+    const urlAntes = page.url();
+    await page.click(selector);
+    await page.waitForFunction((u) => location.href !== u, urlAntes, { timeout: 8000 }).catch(() => {});
+    await page.waitForLoadState('domcontentloaded').catch(() => {});
+}
+
 export async function prepararSesiones(config, { dirSesiones }) {
     // Antes de nada: esto loguea con credenciales reales y persiste cookies de sesión a
     // disco. Solo `grabar()` pasaba por este guardián; una baseURL mal puesta acá loguearía
@@ -59,15 +76,13 @@ export async function prepararSesiones(config, { dirSesiones }) {
             await page.goto(login.url ?? '/');
             await page.fill(login.usuario ?? 'input[name=email]', datos.email);
             await page.fill(login.clave ?? 'input[type=password]', datos.password);
-            await page.click(login.enviar ?? 'button[type=submit]');
-            await page.waitForLoadState('domcontentloaded');
+            await enviarYEsperarSalida(page, login.enviar ?? 'button[type=submit]');
 
             if (datos.totp) {
                 const campo = login.codigo ?? 'input[name=code]';
                 if (await page.locator(campo).count()) {
                     await page.fill(campo, totp(datos.totp));
-                    await page.click(login.enviar ?? 'button[type=submit]');
-                    await page.waitForLoadState('domcontentloaded');
+                    await enviarYEsperarSalida(page, login.enviar ?? 'button[type=submit]');
                 }
             }
 

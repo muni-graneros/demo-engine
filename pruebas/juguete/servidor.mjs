@@ -61,6 +61,28 @@ function paginaPanel(rut) {
     </script>`);
 }
 
+// Login que NO navega al enviar: intercepta el submit, deja la sesión en el cliente y
+// recién DESPUÉS —con retardo— cambia `location.href`. Reproduce el login de
+// Filament/Livewire, que resuelve por una request de fondo y redirige por JS. El click no
+// dispara ninguna navegación, así que `waitForLoadState('domcontentloaded')` retorna de
+// inmediato; sin esperar a SALIR de /login, el motor daba por fallido un login correcto.
+function paginaLoginJs() {
+    return marco('Entrar (diferido)', `<h1>Login diferido</h1>
+    <form id="f" method="POST" action="/login">
+      <p><input name="usuario" placeholder="usuario"></p>
+      <p><input name="clave" type="password" placeholder="clave"></p>
+      <p><button type="submit" id="entrar">Entrar</button></p>
+    </form>
+    <script>
+      document.getElementById('f').addEventListener('submit', (e) => {
+          e.preventDefault();
+          document.cookie = 'sesion=funcionario; Path=/';
+          document.cookie = 'epoca=0; Path=/';
+          setTimeout(() => { location.href = '/panel'; }, 500);
+      });
+    </script>`);
+}
+
 // Segunda pantalla de código, para el usuario "conmfa". Existe para que el camino del
 // TOTP tenga cobertura: el sistema real (Filament con MFA) pide el código en una pantalla
 // aparte, y ese salto es justo donde se rompen las sesiones de los actores.
@@ -157,6 +179,11 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
             // GUARDADA sigue sirviendo: visitar login.url y ver si te rebota o no.
             if (conSesion) { res.writeHead(302, { location: '/panel' }); return res.end(); }
             return html(paginaLogin());
+        }
+        if (url.pathname === '/login-js') {
+            // Login con redirect diferido por JS (imita Filament/Livewire).
+            if (conSesion) { res.writeHead(302, { location: '/panel' }); return res.end(); }
+            return html(paginaLoginJs());
         }
         if (url.pathname === '/login' && req.method === 'POST') {
             return leerCuerpo(req, (datos) => {

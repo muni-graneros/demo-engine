@@ -59,6 +59,28 @@ test('deja un storageState por actor', async () => {
     }
 });
 
+test('espera el redirect diferido por JS (login estilo Filament/Livewire)', async () => {
+    // El login de Filament/Livewire no navega al hacer click: resuelve por una request de
+    // fondo y redirige por JS un instante después. `waitForLoadState('domcontentloaded')`
+    // retorna ANTES de ese salto, así que sin esperar a SALIR de /login prepararSesiones
+    // daba por fallido un login correcto. El juguete reproduce ese retardo en /login-js.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/login-js', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+        };
+        const sesiones = await prepararSesiones(config, { dirSesiones: dir });
+        const guardado = JSON.parse(readFileSync(sesiones.funcionario, 'utf8'));
+        assert.ok(guardado.cookies.some((c) => c.name === 'sesion'),
+            'sin esperar el redirect diferido, un login correcto se daba por fallido');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
 test('pasa por el guardián de entorno antes de loguear: con host público no escribe ninguna sesión', async () => {
     // Defecto #3: prepararSesiones navegaba, logueaba y ESCRIBÍA cookies de sesión a disco
     // sin pasar nunca por exigirEntornoDeDesarrollo. Con una baseURL pública, ni siquiera
