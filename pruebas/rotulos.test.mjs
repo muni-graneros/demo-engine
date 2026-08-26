@@ -1,7 +1,6 @@
-import { test } from 'node:test';
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { portada, cierre } from '../src/rotulos.mjs';
@@ -13,12 +12,14 @@ const PNG_1X1 = Buffer.from(
     'base64',
 );
 
+// El escudo va DENTRO del proyecto: assets.mjs confina las lecturas al cwd (como en la vida
+// real, donde el escudo institucional vive en el repo). Un tmpdir quedaría fuera y daría null.
+const RUTA_ESCUDO = join(process.cwd(), 'pruebas', 'tmp-escudo.png');
 function escudoDePrueba() {
-    const dir = mkdtempSync(join(tmpdir(), 'demo-escudo-'));
-    const ruta = join(dir, 'escudo.png');
-    writeFileSync(ruta, PNG_1X1);
-    return ruta;
+    writeFileSync(RUTA_ESCUDO, PNG_1X1);
+    return RUTA_ESCUDO;
 }
+after(() => rmSync(RUTA_ESCUDO, { force: true }));
 
 test('la portada se dibuja sobre about:blank, nunca sobre datos', async () => {
     const navegador = await chromium.launch();

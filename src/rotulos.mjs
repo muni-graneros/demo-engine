@@ -3,31 +3,12 @@
  * una pantalla con datos dejaría esos datos en los frames de transición.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { extname } from 'node:path';
+import { imagenComoDataUri } from './assets.mjs';
 
-const MIME_POR_EXTENSION = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.svg': 'image/svg+xml',
-    '.webp': 'image/webp',
-};
-
-/**
- * Incrusta el escudo como `data:` URI. La portada se dibuja sobre `about:blank` (ver
- * arriba), y ahí una ruta de archivo relativa —o incluso absoluta— del sistema de archivos
- * NO carga: hay que llevar los bytes adentro del propio HTML. Si no viene ruta, el archivo
- * no existe o la extensión no se reconoce, devuelve `null` y la portada sigue funcionando
- * exactamente como sin escudo (degradación silenciosa a propósito: un escudo mal declarado
- * no debe tumbar la grabación).
- */
-function escudoComoDataUri(ruta) {
-    if (!ruta || !existsSync(ruta)) return null;
-    const mime = MIME_POR_EXTENSION[extname(ruta).toLowerCase()];
-    if (!mime) return null;
-    return `data:${mime};base64,${readFileSync(ruta).toString('base64')}`;
-}
+// El escudo se incrusta como `data:` URI (la portada se dibuja sobre `about:blank`, donde una
+// ruta de archivo no carga) y CONFINADO al proyecto (ver `assets.mjs`). Un escudo ausente, mal
+// declarado o fuera del proyecto devuelve null y la portada sigue igual, sin escudo.
+const escudoComoDataUri = imagenComoDataUri;
 
 /**
  * Portada de capítulo. `marca.escudo` es opcional: si viene y el archivo existe, se pinta

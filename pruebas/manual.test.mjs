@@ -53,6 +53,24 @@ test('la portada, el rol y el elenco salen en el HTML del manual', async () => {
     assert.match(h, /Paula/);
 });
 
+test('la narración con HTML NO se inyecta en el manual: va escapada', async () => {
+    const salida = mkdtempSync(join(tmpdir(), 'demo-man-xss-'));
+    const { html } = await generarManual({
+        guion: { id: 'x', titulo: '<script>alert(1)</script>' },
+        pasos: [{
+            escena: 'a', titulo: '<img src=x onerror=alert(2)>', actor: 'funcionario',
+            narrar: '<script>alert(3)</script> texto normal', captura: null,
+        }],
+        marca: { nombre: '<b>Municipio</b>' },
+    }, { salida });
+
+    const h = readFileSync(html, 'utf8');
+    assert.doesNotMatch(h, /<script>alert/);           // ninguna etiqueta <script> cruda del guion
+    assert.doesNotMatch(h, /<img[^>]*onerror/);        // ni un <img onerror=...> crudo (el texto escapado sí puede contener "onerror")
+    assert.match(h, /&lt;script&gt;alert\(3\)/);       // la narración quedó escapada
+    assert.match(h, /texto normal/);
+});
+
 test('el manual sale con capturas: integración real de grabar() + generarManual()', async () => {
     // Defecto #4: grabador.mjs nunca escribía paso.captura, así que el manual salía siempre
     // de puro texto pese a que el README promete "manual con capturas". Este test usa los

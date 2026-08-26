@@ -10,3 +10,6 @@ salida/
 # ultimo argumento del comando. El convenio ya esta fijado por una prueba, pero
 # un descuido no tiene que volver a llegar al repositorio.
 /1
+
+# Artefactos temporales de tests (assets/escudos/fotos de prueba)
+pruebas/tmp-*

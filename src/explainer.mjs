@@ -9,23 +9,7 @@
  * silencio: una foto que falta no tumba la grabación.
  */
 
-import { existsSync, readFileSync } from 'node:fs';
-import { extname } from 'node:path';
-
-const MIME_POR_EXTENSION = {
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.webp': 'image/webp',
-    '.svg': 'image/svg+xml',
-};
-
-function imagenComoDataUri(ruta) {
-    if (!ruta || !existsSync(ruta)) return null;
-    const mime = MIME_POR_EXTENSION[extname(ruta).toLowerCase()];
-    if (!mime) return null;
-    return `data:${mime};base64,${readFileSync(ruta).toString('base64')}`;
-}
+import { imagenComoDataUri } from './assets.mjs';
 
 /**
  * Carta de presentación del elenco: cada personaje con su foto, nombre y rol, sobre

@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { elenco, presentar, quitarPresentacion, anotar } from '../src/explainer.mjs';
 
@@ -13,8 +12,8 @@ const PNG_1x1 = Buffer.from(
 );
 
 test('elenco pinta a cada personaje con nombre, rol y la foto incrustada', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'demo-exp-'));
-    const foto = join(dir, 'carlos.png');
+    // La foto va DENTRO del proyecto: assets.mjs confina las lecturas al cwd (como en la vida real).
+    const foto = join(process.cwd(), 'pruebas', 'tmp-carlos.png');
     writeFileSync(foto, PNG_1x1);
     const navegador = await chromium.launch();
     const page = await (await navegador.newContext()).newPage();
@@ -35,6 +34,7 @@ test('elenco pinta a cada personaje con nombre, rol y la foto incrustada', async
         assert.match(texto, /P\b/);
     } finally {
         await navegador.close();
+        rmSync(foto, { force: true });
     }
 });
 
