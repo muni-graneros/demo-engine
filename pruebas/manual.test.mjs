@@ -30,6 +30,29 @@ test('escribe md, html y pdf desde los pasos grabados', async () => {
     assert.match(texto, /funcionario/);
 });
 
+test('la portada, el rol y el elenco salen en el HTML del manual', async () => {
+    const salida = mkdtempSync(join(tmpdir(), 'demo-man-elenco-'));
+    const { html } = await generarManual({
+        guion: {
+            id: 'atencion', titulo: 'La atención de las personas',
+            subtitulo: 'Cómo se atiende a un vecino, paso a paso',
+            rol: 'Manual de Oficina de Atención',
+            elenco: [{ nombre: 'Carlos', rol: 'Vecino' }, { nombre: 'Paula', rol: 'Funcionaria de mesón' }],
+        },
+        pasos: [{ escena: 'x', titulo: 'Registrar', actor: 'funcionario', narrar: 'Se registra al vecino.', captura: null }],
+        marca: { nombre: 'Municipalidad de Graneros', color: '#0e6b5c' },
+    }, { salida });
+
+    const h = readFileSync(html, 'utf8');
+    assert.match(h, /class="portada"/);
+    assert.match(h, /Cómo se atiende a un vecino/);
+    assert.match(h, /Manual de Oficina de Atención/);
+    assert.match(h, /class="elenco"/);
+    assert.match(h, /Carlos/);
+    assert.match(h, /Vecino/);
+    assert.match(h, /Paula/);
+});
+
 test('el manual sale con capturas: integración real de grabar() + generarManual()', async () => {
     // Defecto #4: grabador.mjs nunca escribía paso.captura, así que el manual salía siempre
     // de puro texto pese a que el README promete "manual con capturas". Este test usa los
