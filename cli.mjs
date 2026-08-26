@@ -58,6 +58,34 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
     return { id: guion.id, titulo: guion.titulo, pasos };
 }
 
+/**
+ * Graba un curso maestro en UNA sola pasada: monta cada capítulo (video) y, de paso, junta los
+ * pasos de todos para poder generar el manual sin re-grabar. Devuelve `{ mp4, md, maestro, pasos }`.
+ */
+async function grabarCurso(config, voz, sesionesDe, idCurso) {
+    limpiarCapturas(config);
+    if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
+    const maestro = await cargarGuion(config, idCurso);
+    const partes = [];
+    const pasos = [];
+    for (const cap of maestro.capitulos) {
+        if (cap.fuente === 'video') {
+            partes.push({ id: cap.id, titulo: cap.titulo, archivo: join(raiz, cap.archivo) });
+            pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: `(Ver video: ${cap.archivo})`, captura: null });
+            continue;
+        }
+        const guion = await cargarGuion(config, cap.guion);
+        const { pistas, pasos: pasosCap } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
+        const { mp4 } = await montar({ pistas, pasos: pasosCap, voz, video: config.video },
+            { salida: config.salida, nombre: `${cap.id}.mp4` });
+        partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4 });
+        for (const p of pasosCap) pasos.push({ ...p, escena: `${cap.id}-${p.escena}` });
+    }
+    const { mp4, md } = await pegarCapitulos(partes,
+        { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video });
+    return { mp4, md, maestro, pasos };
+}
+
 async function main() {
     const config = await cargarConfig(raiz);
     const voz = crearVoz(config.voz);
@@ -133,24 +161,39 @@ async function ejecutarOrden(config, voz) {
     }
 
     if (orden === 'curso') {
-        limpiarCapturas(config);
-        if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
-        const maestro = await cargarGuion(config, 'curso');
-        const partes = [];
-        for (const cap of maestro.capitulos) {
-            if (cap.fuente === 'video') {
-                partes.push({ id: cap.id, titulo: cap.titulo, archivo: join(raiz, cap.archivo) });
-                continue;
-            }
-            const guion = await cargarGuion(config, cap.guion);
-            const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
-            const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
-                { salida: config.salida, nombre: `${cap.id}.mp4` });
-            partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4 });
-        }
-        const { mp4, md } = await pegarCapitulos(partes,
-            { salida: config.salida, nombre: 'curso.mp4', titulo: maestro.titulo, video: config.video });
+        const { mp4, md } = await grabarCurso(config, voz, sesionesDe, argumento ?? 'curso');
         return console.log(`${mp4}\n${md}`);
+    }
+
+    if (orden === 'todo') {
+        // Pipeline COMPLETO para cualquier sistema, en un comando: pack de contexto + curso
+        // (video) + manual (PDF), con la PII aislada durante todo el proceso.
+        //
+        // Requisitos del sistema (en demo.config.mjs): `contexto` (pantallas + aislar/mostrar)
+        // y un guion maestro de curso (`<id>.mjs` con `capitulos`). Lo específico —el seeder
+        // determinista y los guiones— se escribe una vez siguiendo la skill `mapa-funcional`.
+        const idCurso = argumento ?? 'curso';
+        const salidaCtx = resolve(raiz, config.contexto?.salida ?? './demo/contexto');
+        if (config.contexto?.aislar) execSync(config.contexto.aislar, { stdio: 'inherit' });
+        try {
+            let pack = { ok: 0, fail: 0 };
+            if (config.contexto?.pantallas?.length) {
+                const sesiones = await prepararSesiones(config, { dirSesiones });
+                pack = await capturarContexto({ config, sesiones, salida: salidaCtx });
+            }
+            const { mp4, md, maestro, pasos } = await grabarCurso(config, voz, sesionesDe, idCurso);
+            const { pdf } = await generarManual(
+                { guion: { id: maestro.id ?? idCurso, titulo: maestro.titulo }, pasos, marca: config.marca },
+                { salida: config.salida });
+            console.log(`\n== demo todo ==\n`
+                + ` contexto : ${pack.ok} pantallas → ${salidaCtx}\n`
+                + ` curso    : ${mp4}\n`
+                + ` índice   : ${md}\n`
+                + ` manual   : ${pdf}`);
+        } finally {
+            if (config.contexto?.mostrar) execSync(config.contexto.mostrar, { stdio: 'inherit' });
+        }
+        return;
     }
 
     if (orden === 'manual') {
@@ -200,7 +243,7 @@ async function ejecutarOrden(config, voz) {
         return;
     }
 
-    console.log('Uso: demo <preparar|grabar <guion>|curso|manual [guion]|contexto|auditar <guion|video>>');
+    console.log('Uso: demo <preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>>');
     process.exitCode = 1;
 }
 
