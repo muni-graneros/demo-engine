@@ -1,9 +1,7 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
-import { imagenComoDataUri } from './assets.mjs';
-
-const escape = (t) => String(t).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+import { imagenComoDataUri, escapeHtml as escape } from './assets.mjs';
 
 const hoja = (color) => `
   @page { margin: 16mm 14mm; }

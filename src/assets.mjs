@@ -9,6 +9,18 @@ const MIME_POR_EXTENSION = {
     '.svg': 'image/svg+xml',
 };
 
+const ENTIDADES_HTML = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+
+/**
+ * Escapa texto para incrustarlo en HTML (contenido y atributos con comillas dobles o simples).
+ * Fuente única del escapado del lado Node. Los rótulos que se serializan dentro de
+ * `page.evaluate` no pueden importar esto —viven en el contexto del navegador— y por eso
+ * repiten una copia mínima e idéntica; esa duplicación es a propósito, no un descuido.
+ */
+export function escapeHtml(t) {
+    return String(t).replace(/[&<>"']/g, (c) => ENTIDADES_HTML[c]);
+}
+
 /**
  * Incrusta una imagen (escudo, retrato del elenco) como `data:` URI, CONFINADA al proyecto.
  *

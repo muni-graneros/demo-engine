@@ -24,7 +24,7 @@ export function ff(args) {
  * @returns {number}
  */
 export function duracion(archivo) {
-    const r = spawnSync(RUTA_FFMPEG, ['-i', archivo], { encoding: 'utf8' });
+    const r = spawnSync(RUTA_FFMPEG, ['-i', archivo], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
     const m = (r.stderr || '').match(/Duration: (\d+):(\d+):(\d+\.\d+)/);
     if (!m) return 0;
     return (+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]);
