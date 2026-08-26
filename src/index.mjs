@@ -4,6 +4,7 @@ export { grabar } from './grabador.mjs';
 export { montar } from './montaje.mjs';
 export { pegarCapitulos } from './curso.mjs';
 export { generarManual } from './manual.mjs';
+export { capturarContexto } from './contexto.mjs';
 export { crearVoz } from './voz/index.mjs';
 export { portada, cierre } from './rotulos.mjs';
 export { elenco, presentar, quitarPresentacion, anotar } from './explainer.mjs';

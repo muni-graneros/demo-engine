@@ -9,6 +9,7 @@ import { grabar } from './src/grabador.mjs';
 import { montar } from './src/montaje.mjs';
 import { pegarCapitulos } from './src/curso.mjs';
 import { generarManual } from './src/manual.mjs';
+import { capturarContexto } from './src/contexto.mjs';
 import { crearVoz } from './src/voz/index.mjs';
 import { auditarVideo, auditarCapturas } from './src/auditoria.mjs';
 
@@ -98,6 +99,22 @@ async function ejecutarOrden(config, voz) {
         return console.log('Sesiones listas.');
     }
 
+    if (orden === 'contexto') {
+        // Pack de contexto: un screenshot por pantalla declarada en `config.contexto.pantallas`.
+        // El aislamiento de PII se corre por fuera (`aislar`/`mostrar`), y `mostrar` va en
+        // `finally` para restaurar los datos reales aunque la captura falle a la mitad.
+        const salida = resolve(raiz, config.contexto?.salida ?? './demo/contexto');
+        if (config.contexto?.aislar) execSync(config.contexto.aislar, { stdio: 'inherit' });
+        try {
+            const sesiones = await prepararSesiones(config, { dirSesiones });
+            const { ok, fail } = await capturarContexto({ config, sesiones, salida });
+            console.log(`contexto: ${ok} capturadas, ${fail} fallidas → ${salida}`);
+        } finally {
+            if (config.contexto?.mostrar) execSync(config.contexto.mostrar, { stdio: 'inherit' });
+        }
+        return;
+    }
+
     if (orden === 'grabar') {
         limpiarCapturas(config);
         // Sembrar antes de CADA grabación, no solo en `preparar`.
@@ -183,7 +200,7 @@ async function ejecutarOrden(config, voz) {
         return;
     }
 
-    console.log('Uso: demo <preparar|grabar <guion>|curso|manual [guion]|auditar <guion|video>>');
+    console.log('Uso: demo <preparar|grabar <guion>|curso|manual [guion]|contexto|auditar <guion|video>>');
     process.exitCode = 1;
 }
 
