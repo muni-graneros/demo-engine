@@ -33,9 +33,29 @@ npx demo todo              # aislar PII → pack → curso → manual → restau
 `curso [maestro]` (encadena capítulos) · `manual [guion]` (PDF) · `contexto` (screenshots) ·
 `todo [maestro]` (todo el pipeline) · `auditar <guion|video>` (revisa PII).
 
-**No versiones** los videos ni `demo/contexto/`: son binarios grandes y data sensible. Agrégalos
-a `.gitignore`. El **mapa de flujos** (Mermaid) no lo hace el CLI: lo produce el análisis
-funcional (skill `mapa-funcional`) y da el orden de los capítulos.
+`demo init` deja además un `demo/.gitignore` que **ignora todo lo generado** (`contexto/`,
+`salida/`, `*.mp4`) — no versiones videos ni el pack (binarios grandes + data sensible).
+
+### La skill (la parte que hace la IA)
+
+El **mapa de flujos** (Mermaid), el **análisis funcional** y la **plantilla del seeder
+determinista** no los hace el CLI: los hace un asistente de IA (Claude) siguiendo una skill.
+El paquete la trae en **`skill/`**:
+
+- `skill/mapa-funcional/` — radiografía el sistema (mapa Mermaid + pack de contexto) y guía el
+  seeder determinista y los guiones. Es el paso previo que da el ORDEN de los capítulos.
+- `skill/catalogo-funcional/` — extrae todo lo funcional (flujos, roles, mensajes) en lenguaje
+  de usuario, para alimentar guiones y manuales.
+
+Para usarlas con Claude Code, cópialas a tus skills:
+
+```bash
+cp -r node_modules/demo-engine/skill/* ~/.claude/skills/
+```
+
+Flujo completo: **la skill** (entender + mapear + escribir seeder y guiones) → **el CLI**
+(`demo todo`, que genera pack + video + manual). Una parte la hace la IA una vez por sistema; el
+resto es un comando.
 
 ## Instalación
 

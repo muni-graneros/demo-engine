@@ -30,7 +30,7 @@ export default {
     // sembrar: 'docker compose exec -T app php artisan tu:seeder-demo',
 
     guiones: './demo/guiones',
-    salida: './docs/tutoriales',
+    salida: './demo/salida', // videos, manual, capturas — ignorado por demo/.gitignore
     video: { ancho: 1600, alto: 1000 },
 
     // Pack de contexto (`demo contexto` / `demo todo`): un screenshot por pantalla.

@@ -1,0 +1,7 @@
+# Todo lo que genera demo-engine: NO se versiona.
+# Son binarios grandes y data sensible (pantallas internas del sistema), y se
+# regeneran con `demo todo`. Las fotos del elenco (assets/) SÍ se versionan.
+contexto/
+salida/
+*.mp4
+*.vtt
