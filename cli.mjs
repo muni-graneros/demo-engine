@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import { execSync } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
-import { basename, extname, isAbsolute, join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cargarConfig, ErrorConfig } from './src/configurar.mjs';
 import { prepararSesiones, prepararSesionesParaGuion } from './src/sesiones.mjs';
 import { grabar } from './src/grabador.mjs';
@@ -86,7 +86,45 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
     return { mp4, md, maestro, pasos };
 }
 
+/**
+ * `demo init`: copia el andamiaje (demo.config.mjs + demo/guiones/ de ejemplo + guía) al
+ * directorio actual, SIN pisar lo que ya exista. Deja un sistema nuevo listo para editar.
+ */
+function ejecutarInit() {
+    const origen = fileURLToPath(new URL('./plantillas', import.meta.url));
+    let creados = 0;
+    let saltados = 0;
+    const copiar = (src, dst) => {
+        for (const entrada of readdirSync(src, { withFileTypes: true })) {
+            const s = join(src, entrada.name);
+            const d = join(dst, entrada.name);
+            if (entrada.isDirectory()) {
+                mkdirSync(d, { recursive: true });
+                copiar(s, d);
+                continue;
+            }
+            if (existsSync(d)) {
+                console.log(`  · ya existe, no se toca: ${relative(raiz, d)}`);
+                saltados++;
+                continue;
+            }
+            mkdirSync(dirname(d), { recursive: true });
+            copyFileSync(s, d);
+            console.log(`  + ${relative(raiz, d)}`);
+            creados++;
+        }
+    };
+    console.log(`demo init — andamiaje en ${raiz}`);
+    copiar(origen, raiz);
+    console.log(`\n${creados} archivo(s) creado(s), ${saltados} conservado(s).`);
+    console.log('Siguiente: edita demo.config.mjs y lee demo/CONTEXTO-Y-SEEDER.md; luego `demo preparar` y `demo todo`.');
+}
+
 async function main() {
+    // `init` corre ANTES de cargar la config: justamente sirve para crearla.
+    if (orden === 'init') {
+        return ejecutarInit();
+    }
     const config = await cargarConfig(raiz);
     const voz = crearVoz(config.voz);
     try {
@@ -243,7 +281,7 @@ async function ejecutarOrden(config, voz) {
         return;
     }
 
-    console.log('Uso: demo <preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>>');
+    console.log('Uso: demo <init|preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>>');
     process.exitCode = 1;
 }
 

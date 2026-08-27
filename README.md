@@ -12,10 +12,35 @@ Un sistema que automatiza la grabación de tutoriales de video para plataformas 
 - **Montaje offline**: ffmpeg local pega videos, dibuja subtítulos, normaliza audio.
 - **Genérico**: una config y un guion por sistema, sin código hardcodeado.
 
+## Empezar en un sistema nuevo (rápido)
+
+```bash
+# 1. Instalar (en la RAÍZ del proyecto que vas a grabar — ver nota abajo)
+npm install github:muni-graneros/demo-engine        # o el tarball de un tag: .../archive/refs/tags/v1.11.0.tar.gz
+
+# 2. Andamiaje: crea demo.config.mjs + demo/guiones/ de ejemplo + guía (no pisa lo existente)
+npx demo init
+
+# 3. Editar demo.config.mjs (baseURL, login, marca, actores) y los guiones de demo/guiones/.
+#    Leer demo/CONTEXTO-Y-SEEDER.md para el dataset determinista (sin PII).
+
+# 4. Generar TODO en un comando: pack de contexto + curso (video) + manual (PDF)
+npx demo preparar          # inicia sesión de los actores (una vez)
+npx demo todo              # aislar PII → pack → curso → manual → restaurar PII
+```
+
+**Comandos:** `init` (andamiaje) · `preparar` (sesiones) · `grabar <guion>` (un capítulo) ·
+`curso [maestro]` (encadena capítulos) · `manual [guion]` (PDF) · `contexto` (screenshots) ·
+`todo [maestro]` (todo el pipeline) · `auditar <guion|video>` (revisa PII).
+
+**No versiones** los videos ni `demo/contexto/`: son binarios grandes y data sensible. Agrégalos
+a `.gitignore`. El **mapa de flujos** (Mermaid) no lo hace el CLI: lo produce el análisis
+funcional (skill `mapa-funcional`) y da el orden de los capítulos.
+
 ## Instalación
 
 ```bash
-npm install demo-engine
+npm install github:muni-graneros/demo-engine
 ```
 
 **Importante — dónde correr ese `npm install`:** tiene que ser en el `package.json` **desde el
