@@ -1,0 +1,31 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>
+  html,body { margin:0; background:transparent; }
+  /* Cuatro rectángulos que dibujan el fondo dejando un agujero real para el video. */
+  .fondo-rect { position:fixed; }
+  #ventana { position:fixed; border-radius:var(--radio); overflow:hidden;
+             box-shadow:0 30px 60px rgba(0,0,0,.45), 0 8px 20px rgba(0,0,0,.3); }
+  #barra { height:38px; display:flex; align-items:center; gap:8px; padding:0 12px;
+           background:#1f2937; font:13px/1 system-ui,sans-serif; color:#cbd5e1; }
+  .luz { width:11px; height:11px; border-radius:50%; }
+  #url { flex:1; text-align:center; background:#111827; border-radius:6px;
+         padding:5px 10px; color:#e5e7eb; }
+  /* El hueco: transparente de verdad, para que el video se vea por debajo del PNG. */
+  #hueco { background:transparent; }
+</style></head>
+<body>
+  <!-- Cuatro rectángulos que juntos cubren el fondo dejando un agujero real. -->
+  <div id="fondo-arriba" class="fondo-rect"></div>
+  <div id="fondo-abajo" class="fondo-rect"></div>
+  <div id="fondo-izquierda" class="fondo-rect"></div>
+  <div id="fondo-derecha" class="fondo-rect"></div>
+  <div id="ventana">
+    <div id="barra">
+      <span class="luz" style="background:#ef4444"></span>
+      <span class="luz" style="background:#f59e0b"></span>
+      <span class="luz" style="background:#22c55e"></span>
+      <span id="url"></span>
+    </div>
+    <div id="hueco"></div>
+  </div>
+</body></html>
