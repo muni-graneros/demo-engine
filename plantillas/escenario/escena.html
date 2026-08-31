@@ -1,0 +1,48 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden}</style></head>
+<body>
+<script type="module">
+import * as THREE from '/three.module.js';
+
+// La escena es deliberadamente pobre: MeshBasicMaterial, sin luces ni sombras reales. El
+// Chromium headless renderiza por software (SwiftShader, sin GPU) y cada luz se paga en
+// milisegundos por frame, multiplicados por todos los frames de la transición.
+const escena = new THREE.Scene();
+const camara = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
+const render = new THREE.WebGLRenderer({ antialias: true });
+escena.background = new THREE.Color('#0f172a');
+
+const video = document.createElement('video');
+video.muted = true;
+const textura = new THREE.VideoTexture(video);
+const plano = new THREE.Mesh(
+    new THREE.PlaneGeometry(1.6, 1.0),
+    new THREE.MeshBasicMaterial({ map: textura }),
+);
+escena.add(plano);
+
+window.__preparar = async ({ ancho, alto, src, fondo }) => {
+    render.setSize(ancho, alto, false);
+    document.body.appendChild(render.domElement);
+    camara.aspect = ancho / alto;
+    camara.updateProjectionMatrix();
+    escena.background = new THREE.Color(fondo);
+    video.src = src;
+    await new Promise((ok) => { video.onloadedmetadata = ok; });
+};
+
+/** Coloca el video en `t` segundos y la cámara en el avance `p` (0 → 1) de la transición. */
+window.__frame = async ({ t, p, gradosMax }) => {
+    video.currentTime = t;
+    await new Promise((ok) => { video.onseeked = ok; });
+    // easing suave: entra inclinada y termina frontal, que es lo que protege la legibilidad
+    const suave = 1 - Math.pow(1 - p, 3);
+    const grados = gradosMax * (1 - suave);
+    plano.rotation.y = (grados * Math.PI) / 180;
+    camara.position.set(0, 0, 2.6 - 0.25 * suave);
+    camara.lookAt(0, 0, 0);
+    textura.needsUpdate = true;
+    render.render(escena, camara);
+};
+</script>
+</body></html>
