@@ -18,7 +18,7 @@ test('la cadena escala el video al hueco y superpone el marco encima', () => {
     assert.match(c, /scale=800:342/);
     // el video va primero y el marco después: el marco tapa el sobrante de las esquinas
     assert.ok(c.indexOf('[video]') < c.indexOf('[marco]'), 'el marco debe superponerse último');
-    assert.match(c, /overlay=80:118/);   // x=padding, y=padding+altoBarra
+    assert.match(c, /overlay=80:118:shortest=1/);   // x=padding, y=padding+altoBarra, shortest=1 detiene la fuente infinita
 });
 
 test('sin barra, el hueco ocupa todo el alto disponible', () => {

@@ -17,7 +17,7 @@ export function cadenaDePresentacion(presentacion) {
     return [
         `color=c=black:s=${ancho}x${alto}[fondo]`,
         `[0:v]scale=${g.ancho}:${g.alto}[video]`,
-        `[fondo][video]overlay=${g.x}:${g.y}[conVideo]`,
+        `[fondo][video]overlay=${g.x}:${g.y}:shortest=1[conVideo]`,
         `[1:v]scale=${ancho}:${alto}[marco]`,
         `[conVideo][marco]overlay=0:0,format=yuv420p[salida]`,
     ].join(';');
@@ -26,8 +26,9 @@ export function cadenaDePresentacion(presentacion) {
 /**
  * Compone `mp4Entrada` dentro de `marcoPng` y escribe `mp4Salida`.
  *
- * `-shortest` fija la duración a la del video: el marco es una imagen fija y, sin eso, el
- * `color` del fondo (que es infinito) haría un archivo sin final.
+ * `shortest=1` en el primer overlay detiene la generación de la fuente lavfi infinita
+ * (`color`) cuando termina el video de entrada. Sin eso el encodeo no finaliza nunca.
+ * El flag `-shortest` es un cinturón de seguridad redundante.
  */
 export function componer(mp4Entrada, marcoPng, mp4Salida, presentacion) {
     ff(['-y', '-i', mp4Entrada, '-i', marcoPng,
