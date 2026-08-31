@@ -76,13 +76,16 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
         }
         const guion = await cargarGuion(config, cap.guion);
         const { pistas, pasos: pasosCap } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
-        const { mp4 } = await montar({ pistas, pasos: pasosCap, voz, video: config.video },
-            { salida: config.salida, nombre: `${cap.id}.mp4` });
+        const { mp4 } = await montar({
+            pistas, pasos: pasosCap, voz, video: config.video,
+            presentacion: config.video.presentacion, marca: config.marca, baseURL: config.baseURL,
+        }, { salida: config.salida, nombre: `${cap.id}.mp4` });
         partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4 });
         for (const p of pasosCap) pasos.push({ ...p, escena: `${cap.id}-${p.escena}` });
     }
     const { mp4, md } = await pegarCapitulos(partes,
-        { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video });
+        { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video,
+            presentacion: config.video.presentacion });
     return { mp4, md, maestro, pasos };
 }
 
@@ -193,8 +196,10 @@ async function ejecutarOrden(config, voz) {
         if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
         const guion = await cargarGuion(config, argumento);
         const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
-        const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
-            { salida: config.salida, nombre: `${guion.id}.mp4` });
+        const { mp4 } = await montar({
+            pistas, pasos, voz, video: config.video,
+            presentacion: config.video.presentacion, marca: config.marca, baseURL: config.baseURL,
+        }, { salida: config.salida, nombre: `${guion.id}.mp4` });
         return console.log(mp4);
     }
 

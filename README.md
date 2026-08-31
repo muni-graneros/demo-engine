@@ -236,6 +236,39 @@ cualquiera, pero un panel Filament típico NO los cumple:
   ANTES de esa hidratación no encuentra nada. Selector que sí funciona, y que no depende de
   cuándo hidrató Alpine: `input[wire\\:model="data.password"]`.
 
+## Presentación
+
+Opcional y OPT-IN: sin este bloque en `video.presentacion`, el video sale exactamente
+como la grabación cruda, a pantalla completa (comportamiento idéntico al de siempre —
+más de diez proyectos ya usan el motor y ninguno debe cambiar de aspecto sin declararlo).
+Declarado, la grabación se mete dentro de un marco tipo "ventana de navegador" sobre un
+fondo, y en `demo curso` cada cambio de capítulo puede hacer una transición 3D.
+
+```js
+video: {
+  ancho: 1600, alto: 1000,
+  presentacion: {
+    fondo: null,                  // Ruta a una imagen, o null = gradiente derivado de marca.color
+    padding: 80,                  // Margen entre el borde del fondo y la ventana (px)
+    radio: 16,                    // Radio de las esquinas de la ventana (px)
+    sombra: true,                 // Sombra proyectada bajo la ventana
+    barra: true,                  // Barra superior tipo navegador (con baseURL en la URL simulada)
+    salida: { ancho: 1920, alto: 1080 }, // Resolución final del video (distinta de video.ancho/alto)
+    transicion3d: { activa: true, ms: 900, gradosMax: 12 }, // Giro 3D al cambiar de capítulo
+  },
+},
+```
+
+**Costo de render:** las transiciones se calculan frame a frame, a ~94 ms por frame. Una
+transición de 900 ms (los ~22-23 frames que le corresponden a 25 fps) cuesta del orden de
+1 segundo de render — no se ve así en el video (dura los 900 ms declarados), pero sí se nota
+en cuánto tarda `demo curso` en terminar cuando tiene varios capítulos.
+
+**`transicion3d.activa: false`** deja el marco (fondo + ventana con sombra) pero sin ningún
+movimiento entre capítulos: es la opción para material que necesita una versión sin
+animación — por ejemplo, para cumplir `prefers-reduced-motion` o por pedido explícito de
+quien va a mirar el video.
+
 ## Ritmo: por qué el video sale fluido
 
 Un tutorial se siente lento por cosas que no son la velocidad de la voz. El motor

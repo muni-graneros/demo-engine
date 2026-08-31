@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
+import { RUTA_FFMPEG } from '../src/ffmpeg.mjs';
 
 // cli.mjs es el punto de entrada de todo el motor y hasta ahora solo se había verificado a
 // mano. No hace falta una suite exhaustiva (cada comando ya tiene su lógica de fondo probada
@@ -34,7 +35,7 @@ function correrCli(cwd, args) {
     });
 }
 
-function proyectoDeJuguete(juguete, extra = '') {
+function proyectoDeJuguete(juguete, extra = '', video = null) {
     const proyecto = mkdtempSync(join(tmpdir(), 'demo-cli-'));
     mkdirSync(join(proyecto, 'guiones'));
     writeFileSync(join(proyecto, 'demo.config.mjs'), `export default {
@@ -45,7 +46,7 @@ function proyectoDeJuguete(juguete, extra = '') {
         guiones: './guiones',
         salida: './salida',
         voz: { motor: 'ninguno', respaldo: 'ninguno' },
-        video: { ancho: 640, alto: 480, pausaMinima: 150 },
+        ${video ?? "video: { ancho: 640, alto: 480, pausaMinima: 150 },"}
         ${extra}
     };`);
     return proyecto;
@@ -358,6 +359,33 @@ test('demo grabar siembra antes de cada corrida, no solo demo preparar', async (
         assert.equal(segunda.status, 0, `demo grabar (segunda vez) falló: ${segunda.stderr}`);
         assert.equal(readFileSync(rastro, 'utf8').trim().split('\n').length, 2,
             'cada grabación tiene que sembrar de nuevo');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo grabar aplica la presentación declarada en la config', async () => {
+    // Este test protege el CABLEADO, que es donde se pierden las opciones: montar() ya está
+    // probado aparte, pero nada garantizaba que cli.mjs le pasara `presentacion`, `marca` y
+    // `baseURL`. Se verifica por la resolución del MP4: si la presentación no llegó, el video
+    // sale en 640x480 (la resolución de grabación) en vez de 960x540.
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete, `
+            video: { ancho: 640, alto: 480, pausaMinima: 150, presentacion: {
+                padding: 40, salida: { ancho: 960, alto: 540 },
+                transicion3d: { activa: false, ms: 900, gradosMax: 12 },
+            } },
+        `);
+        escribirGuionPanel(proyecto, 'panel', '/panel');
+
+        const r = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(r.status, 0, r.stderr);
+
+        const mp4 = join(proyecto, 'salida', 'panel.mp4');
+        assert.ok(existsSync(mp4), 'no se generó el mp4');
+        const info = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' });
+        assert.match(info.stderr, /960x540/);
     } finally {
         await juguete.cerrar();
     }

@@ -33,6 +33,18 @@ export default {
     salida: './demo/salida', // videos, manual, capturas — ignorado por demo/.gitignore
     video: { ancho: 1600, alto: 1000 },
 
+    // Presentación (opcional): fondo, ventana con sombra y transiciones 3D entre capítulos.
+    // Quita el bloque y el video sale como la grabación cruda, a pantalla completa.
+    // presentacion: {
+    //     fondo: null,          // null = gradiente derivado de marca.color
+    //     padding: 80, radio: 16, sombra: true, barra: true,
+    //     salida: { ancho: 1920, alto: 1080 },
+    //     // Las transiciones se renderizan frame a frame (~94 ms por frame): 900 ms entre
+    //     // capítulos cuestan ~1 s de render cada una. `activa: false` las apaga y deja
+    //     // solo el marco, que es lo indicado si necesitas una versión sin movimiento.
+    //     transicion3d: { activa: true, ms: 900, gradosMax: 12 },
+    // },
+
     // Pack de contexto (`demo contexto` / `demo todo`): un screenshot por pantalla.
     // `aislar`/`mostrar`: comandos que ocultan/restauran la PII real (ver CONTEXTO-Y-SEEDER.md).
     contexto: {
