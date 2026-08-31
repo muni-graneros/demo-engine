@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { RUTA_FFMPEG } from '../src/ffmpeg.mjs';
-import { renderizarMarco, geometria } from '../src/marco.mjs';
+import { renderizarMarco, geometria, fondoDelMarco } from '../src/marco.mjs';
 
 const presentacion = {
     fondo: null, padding: 80, radio: 16, sombra: true, barra: true,
@@ -90,4 +90,12 @@ test('sombra:false apaga de verdad la sombra', async () => {
     const y = (g.y - g.alturaBarra) + g.alto + g.alturaBarra + 10;
     assert.notDeepEqual(pixel(conSombra, 480, y), pixel(sinSombra, 480, y),
         'sin sombra el fondo bajo la ventana tiene que quedar más claro');
+});
+
+test('sin marca no revienta: el fondo cae al color de marca por defecto', () => {
+    // montar() recibe `marca = null` por defecto, así que `marca.color` tiraba TypeError.
+    assert.match(fondoDelMarco(presentacion, null), /#1e3a8a/);
+    assert.match(fondoDelMarco(presentacion, {}), /#1e3a8a/);
+    // Y con fondo declarado, la marca no pinta nada.
+    assert.equal(fondoDelMarco({ ...presentacion, fondo: '#123456' }, null), '#123456');
 });

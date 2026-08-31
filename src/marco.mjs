@@ -5,8 +5,23 @@ import { conPagina } from './render-web.mjs';
 const AQUI = dirname(fileURLToPath(import.meta.url));
 const PLANTILLA = join(AQUI, '..', 'plantillas', 'escenario', 'marco.html');
 
-/** Alto de la barra de ventana, en px. Debe coincidir con el CSS de marco.html. */
+/** Alto de la barra de ventana, en px. Lo aplica el JS al render (ver renderizarMarco). */
 export const ALTO_BARRA = 38;
+
+/** Mismo color que `DEFECTOS.marca.color` en src/configurar.mjs. */
+const COLOR_MARCA_POR_DEFECTO = '#1e3a8a';
+
+/**
+ * Decide el fondo CSS del marco: el declarado, o un gradiente derivado del color de marca.
+ *
+ * `montar()` recibe `marca = null` por defecto, así que leer `marca.color` a secas reventaba
+ * con un TypeError a quien compusiera sin marca — que es un uso perfectamente legítimo del
+ * motor. Sin marca se usa el mismo azul que trae la config por defecto.
+ */
+export function fondoDelMarco(presentacion, marca) {
+    const color = marca?.color ?? COLOR_MARCA_POR_DEFECTO;
+    return presentacion.fondo ?? `linear-gradient(135deg, ${color} 0%, #0f172a 100%)`;
+}
 
 /**
  * Calcula dónde queda el hueco del video dentro del marco. Es la geometría que después
@@ -31,8 +46,7 @@ export function geometria({ salida, padding, barra }) {
 export async function renderizarMarco({ salida, presentacion, marca, baseURL, devolverTexto = false }) {
     const { ancho, alto } = presentacion.salida;
     const g = geometria(presentacion);
-    const fondo = presentacion.fondo
-        ?? `linear-gradient(135deg, ${marca.color} 0%, #0f172a 100%)`;
+    const fondo = fondoDelMarco(presentacion, marca);
     const png = join(salida, 'marco.png');
 
     return conPagina({ '/marco.html': PLANTILLA }, async (page, baseUrl) => {
