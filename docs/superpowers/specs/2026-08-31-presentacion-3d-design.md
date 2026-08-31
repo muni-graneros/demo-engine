@@ -77,25 +77,61 @@ Comprobados en esta sesión contra el Chromium que baja Playwright y el ffmpeg d
   debe ser simple.
 - **La cadena de filtros del marco corre y produce lo esperado.** Contra ffmpeg 7.0.2-static:
   `gradients` (con `speed=0` para congelar la animación), `geq`, `boxblur`, `overlay`,
-  `colorchannelmixer` y `pad` están todos disponibles. Una composición de prueba
+  `colorchannelmixer`, `drawbox` y `pad` están disponibles. Una composición de prueba
   —gradiente 1920×1080, video escalado con esquinas redondeadas por `geq` sobre el canal
   alpha, sombra por `boxblur` + `colorchannelmixer=aa` desplazada, dos `overlay`— sale en
   1920×1080 con la duración de entrada preservada.
-- **El alfa del `geq` es binario: el borde redondeado sale con escalón.** Hay que suavizarlo
-  en la implementación (interpolar el alfa en el último pixel del radio en vez de saltar de
-  255 a 0). Es un detalle de acabado, no un riesgo de diseño.
+- **`drawtext` NO está disponible en el ffmpeg estático** (aunque `--enable-libfreetype`
+  aparezca en la configuración del build). Sin él, la barra de ventana con la URL no se puede
+  rotular con ffmpeg.
+- **El alfa del `geq` es binario: el borde redondeado sale con escalón.**
+
+Los dos últimos hallazgos apuntan a la misma solución, y por eso el marco no se dibuja con
+filtros (ver Decisión 4).
+
+### Decisión 4 — El marco se renderiza en el navegador como PNG, una vez
+
+En vez de construir el marco con filtros, se dibuja en HTML/CSS y se captura una sola vez
+como PNG con canal alfa. El navegador ya está en el pipeline por las transiciones 3D, así que
+no agrega dependencias.
+
+Ventajas sobre la cadena de filtros:
+
+- `border-radius` y `box-shadow` reales, con antialias del navegador: desaparece el escalón
+  del `geq`.
+- La barra con la URL se rotula con texto y fuente de verdad, sin depender de `drawtext`.
+- El marco lleva las esquinas opacas, así que tapa el sobrante del video: ya no hace falta
+  recortar el video con `geq`.
+- El marco es el mismo objeto que usa la escena 3D, así que el look frontal y el de la
+  transición coinciden por construcción.
+
+El costo es un render de un frame por proyecto —milisegundos— y se cachea junto a la salida.
+ffmpeg queda reducido a lo que hace bien: `overlay` del video sobre el fondo y del marco
+encima.
 
 ## Arquitectura
 
-Dos módulos nuevos. `src/montaje.mjs` ya tiene 130 líneas densas y no debe crecer.
+Cuatro módulos nuevos. `src/montaje.mjs` ya tiene 130 líneas densas y no debe crecer.
+
+### `src/render-web.mjs`
+
+Helper compartido por el marco y las transiciones: levanta un servidor HTTP efímero
+(puerto 0) que sirve archivos locales y `three` desde `node_modules`, abre Chromium con
+Playwright, ejecuta una función contra esa página y cierra todo. Existe porque `file://`
+está bloqueado y porque las dos piezas que usan navegador necesitan exactamente lo mismo.
+
+### `src/marco.mjs`
+
+Renderiza el PNG del marco (fondo, ventana con esquinas y sombra, barra con la URL) usando
+`render-web`. Un solo frame, cacheado junto a la salida.
 
 ### `src/presentacion.mjs`
 
-Compone el marco frontal con ffmpeg. Expone dos funciones:
+Compone con ffmpeg el video dentro del marco. Expone dos funciones:
 
 - `cadenaDePresentacion(opciones)` → string de `filter_complex`. Función pura, sin efectos:
   es lo que se testea barato y exhaustivo.
-- `componer(mp4Entrada, mp4Salida, opciones)` → invoca `ff()` con esa cadena.
+- `componer(mp4Entrada, marcoPng, mp4Salida, opciones)` → invoca `ff()` con esa cadena.
 
 **Punto de inserción:** en `montar()`, sobre `mudo.mp4`, entre el concat (`src/montaje.mjs:57`)
 y el paso de voz. Ahí la duración se preserva exacta, los tiempos de voz y subtítulos ya
@@ -108,9 +144,9 @@ tutorial municipal eso es información útil, no decoración.
 
 Produce los clips de transición. Algoritmo:
 
-1. Levantar un servidor HTTP efímero (puerto 0) que sirva el MP4, la escena y `three` desde
-   `node_modules`. Sin CDN: el motor funciona offline.
-2. Abrir la escena en Chromium con Playwright.
+1. Pedir a `render-web` una página con el MP4, la escena y `three` servidos por HTTP local.
+   Sin CDN: el motor funciona offline.
+2. Cargar el video como `VideoTexture` sobre el plano.
 3. Para cada frame `n` de la transición: fijar `video.currentTime = n/fps`, esperar `seeked`,
    posicionar la cámara según la curva de easing, renderizar, capturar el canvas a JPEG.
 4. Encodear los frames con ffmpeg a fps constante.
@@ -156,6 +192,8 @@ TDD estricto, una tarea por pieza:
 
 1. **`cadenaDePresentacion()`** — test de string puro contra configs conocidas: con y sin
    sombra, con y sin barra, fondo fijo vs derivado de marca. Instantáneo.
+1b. **`marco.mjs`** — el PNG sale con las dimensiones de `presentacion.salida`, tiene canal
+   alfa, el hueco de la ventana es transparente y la URL de `baseURL` aparece en la barra.
 2. **Composición real** — componer un MP4 de 1 s generado con `lavfi` y verificar que la
    duración se preserva y que las dimensiones de salida son las de `presentacion.salida`.
 3. **Escenario 3D** — renderizar una transición corta y verificar que salen exactamente N
