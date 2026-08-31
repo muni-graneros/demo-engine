@@ -3,12 +3,14 @@ import { join, resolve } from 'node:path';
 import { ff, duracion } from './ffmpeg.mjs';
 import { construirLineaDeTiempo } from './linea-tiempo.mjs';
 import { generarVtt, generarSrt } from './subtitulos.mjs';
+import { componer } from './presentacion.mjs';
+import { renderizarMarco } from './marco.mjs';
 
 /**
  * Corta cada pista en los tramos que le corresponden, los ordena por tiempo global,
  * los pega, y le suma la voz y los subtítulos.
  */
-export async function montar({ pistas, pasos, voz, video }, { salida, nombre = 'demo.mp4' }) {
+export async function montar({ pistas, pasos, voz, video, presentacion = null, marca = null, baseURL = null }, { salida, nombre = 'demo.mp4' }) {
     mkdirSync(salida, { recursive: true });
     const linea = construirLineaDeTiempo(pasos);
     const temporal = join(salida, '.tmp');
@@ -55,6 +57,16 @@ export async function montar({ pistas, pasos, voz, video }, { salida, nombre = '
     writeFileSync(lista, trozos.map((t) => `file '${t}'`).join('\n'));
     ff(['-y', '-f', 'concat', '-safe', '0', '-i', lista, '-c', 'copy', mudo]);
 
+    // 2b. Presentación: el marco va ANTES de la voz y los subtítulos, a propósito. Componer
+    //     reencodea el video, así que hacerlo acá deja intacto el `-c:v copy` del mux final
+    //     y —lo que de verdad importa— no toca la duración, que es de donde salen los
+    //     tiempos de las locuciones y de los cues.
+    let baseVideo = mudo;
+    if (presentacion) {
+        const marcoPng = await renderizarMarco({ salida: temporal, presentacion, marca, baseURL });
+        baseVideo = componer(mudo, marcoPng, join(temporal, 'presentado.mp4'), presentacion);
+    }
+
     // 3. Recalcular los tiempos: ahora cada segmento vive en el reloj del video final.
     let reloj = 0;
     const segmentos = recortados.map((seg) => {
@@ -76,8 +88,8 @@ export async function montar({ pistas, pasos, voz, video }, { salida, nombre = '
     // 5. Voz: una locución por segmento, retrasada hasta su marca, sobre una base de
     //    silencio del largo exacto del video (fija la duración y cubre los huecos).
     const mp4 = resolve(salida, nombre);
-    const total = duracion(mudo);
-    const entradas = ['-y', '-i', mudo, '-f', 'lavfi', '-t', String(total), '-i', 'anullsrc=r=22050:cl=mono'];
+    const total = duracion(baseVideo);
+    const entradas = ['-y', '-i', baseVideo, '-f', 'lavfi', '-t', String(total), '-i', 'anullsrc=r=22050:cl=mono'];
     const filtros = [];
     const mezclas = ['[1:a]'];
     let idx = 2;

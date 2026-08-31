@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ff, duracion } from '../src/ffmpeg.mjs';
+import { spawnSync } from 'node:child_process';
+import { ff, duracion, RUTA_FFMPEG } from '../src/ffmpeg.mjs';
 import { montar } from '../src/montaje.mjs';
 
 /** Fabrica una pista de color sólido de N segundos, como sustituto de una grabación. */
@@ -160,4 +161,41 @@ test('un desborde grande falla, en vez de recortar media escena en silencio', as
     const pasos = [{ escena: 'a', actor: 'uno', tLocal: 1000, tGlobal: 0, duracionMs: 5000 }];
     await assert.rejects(() => montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
         { salida: dir, nombre: 'final.mp4' }), /desfasados/);
+});
+
+test('sin presentacion, el video conserva las dimensiones de grabación', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 4, 'blue') };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 3000 }];
+
+    const { mp4 } = await montar({ pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 } },
+        { salida: dir, nombre: 'sin.mp4' });
+
+    const r = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' });
+    assert.match(r.stderr, /640x400/);
+});
+
+test('con presentacion, el video sale en las dimensiones de salida y dura lo mismo', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 6, 'blue') };
+    const pasos = [
+        { escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 3000 },
+        { escena: 'b', actor: 'uno', tLocal: 3000, tGlobal: 3000, duracionMs: 2000 },
+    ];
+    const presentacion = {
+        fondo: null, padding: 40, radio: 16, sombra: true, barra: true,
+        salida: { ancho: 960, alto: 540 },
+        transicion3d: { activa: false, ms: 900, gradosMax: 12 },
+    };
+
+    const { mp4, segmentos } = await montar({
+        pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 },
+        presentacion, marca: { color: '#1e3a8a' }, baseURL: 'http://localhost:8000',
+    }, { salida: dir, nombre: 'con.mp4' });
+
+    const r = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' });
+    assert.match(r.stderr, /960x540/);
+    // la presentación NO puede mover el reloj: los tiempos de los segmentos son los mismos
+    assert.deepEqual(segmentos.map((s) => s.inicioSeg), [0, 3]);
+    assert.ok(Math.abs(duracion(mp4) - 5) < 0.5, `duración ${duracion(mp4)}`);
 });
