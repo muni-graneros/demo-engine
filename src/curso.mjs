@@ -10,9 +10,9 @@ import { renderizarTransicion } from './escenario3d.mjs';
  * normalización de cada transición: ambas tienen que terminar con la misma resolución, mismo
  * fondo de letterbox y mismo fps, o el concat final los pega con un salto visible.
  */
-function filtroNormalizar(video) {
-    return `scale=${video.ancho}:${video.alto}:force_original_aspect_ratio=decrease,` +
-           `pad=${video.ancho}:${video.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`;
+function filtroNormalizar(lienzo) {
+    return `scale=${lienzo.ancho}:${lienzo.alto}:force_original_aspect_ratio=decrease,` +
+           `pad=${lienzo.ancho}:${lienzo.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`;
 }
 
 /**
@@ -23,6 +23,12 @@ function filtroNormalizar(video) {
  */
 export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null }) {
     mkdirSync(salida, { recursive: true });
+    // El lienzo del curso es el de la PRESENTACIÓN cuando está activa. Con presentación,
+    // `montar()` ya devolvió cada capítulo compuesto en `presentacion.salida` (1920x1080 por
+    // defecto); normalizar contra `video` (1600x1000) los bajaba de resolución Y les metía
+    // letterbox, porque los aspectos no coinciden. Una sola resolución de curso, sin
+    // re-escalado destructivo.
+    const lienzo = presentacion ? presentacion.salida : video;
     // Se limpia de entrada: si no, cada corrida deja sus trozos y los de la anterior
     // conviven con los nuevos.
     const temporal = join(salida, '.tmp-curso');
@@ -34,7 +40,7 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     const normalizados = partes.map((parte, i) => {
         const destino = join(temporal, `cap-${String(i).padStart(2, '0')}.mp4`);
         ff(['-y', '-i', parte.archivo,
-            '-vf', filtroNormalizar(video),
+            '-vf', filtroNormalizar(lienzo),
             '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
             '-c:a', 'aac', '-ar', '44100', '-ac', '2', destino]);
         return destino;
@@ -68,7 +74,7 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
             ff(['-y', '-i', transicion,
                 '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                 '-shortest',
-                '-vf', filtroNormalizar(video),
+                '-vf', filtroNormalizar(lienzo),
                 '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
                 '-c:a', 'aac', '-ar', '44100', '-ac', '2', normalizada]);
             conTransiciones.push(normalizada);

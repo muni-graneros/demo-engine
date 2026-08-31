@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,9 +8,9 @@ import { ff, RUTA_FFMPEG } from '../src/ffmpeg.mjs';
 import { pegarCapitulos } from '../src/curso.mjs';
 import { parseVtt } from '../src/subtitulos.mjs';
 
-function clip(dir, nombre, segundos, color) {
+function clip(dir, nombre, segundos, color, tamano = '640x400') {
     const archivo = join(dir, nombre);
-    ff(['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=640x400:d=${segundos}`,
+    ff(['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=${tamano}:d=${segundos}`,
         '-f', 'lavfi', '-t', String(segundos), '-i', 'anullsrc=r=22050:cl=mono',
         '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', archivo]);
     return archivo;
@@ -185,4 +185,37 @@ test('un capítulo sin .vtt propio (video de teléfono) no revienta y no aporta 
 
     assert.ok(existsSync(mp4));
     assert.equal(vtt, null);
+});
+
+test('con presentación, el curso conserva la resolución de salida y no letterboxea', async () => {
+    // Los capítulos ya vienen compuestos por `montar()` en `presentacion.salida`. Normalizarlos
+    // contra `video` los bajaba de resolución y les pegaba barras: el borde superior quedaba del
+    // color del letterbox (#0f172a) en vez del contenido.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-pres-'));
+    const partes = [
+        { id: 'uno', titulo: '1. Primero', archivo: clip(dir, 'a.mp4', 2, 'blue', '960x540') },
+        { id: 'dos', titulo: '2. Segundo', archivo: clip(dir, 'b.mp4', 2, 'blue', '960x540') },
+    ];
+
+    const { mp4 } = await pegarCapitulos(partes, {
+        salida: dir, nombre: 'curso.mp4', titulo: 'Curso presentado',
+        video: { ancho: 640, alto: 400 },
+        presentacion: {
+            fondo: null, padding: 80, radio: 16, sombra: true, barra: true,
+            salida: { ancho: 960, alto: 540 },
+            transicion3d: { activa: false, ms: 900, gradosMax: 12 },
+        },
+    });
+
+    let info;
+    try {
+        info = execFileSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }) + '';
+    } catch (e) { info = e.stderr.toString(); }
+    assert.match(info, /960x540/, 'el curso debe salir en la resolución de la presentación');
+
+    // El pixel del borde de arriba es contenido (azul), no la barra del letterbox.
+    const r = spawnSync(RUTA_FFMPEG, ['-i', mp4, '-frames:v', '1',
+        '-vf', 'crop=1:1:480:2:exact=1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1e6 });
+    const [rr, gg, bb] = [...r.stdout.subarray(0, 3)];
+    assert.ok(bb > 100 && rr < 80, `el borde debería ser el contenido azul, salió rgb(${rr},${gg},${bb})`);
 });
