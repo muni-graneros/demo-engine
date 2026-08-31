@@ -3,6 +3,7 @@ import { join, resolve } from 'node:path';
 import { ff, duracion } from './ffmpeg.mjs';
 import { capitulosConTiempos, ffmetadata, indiceMarkdown } from './capitulos.mjs';
 import { generarVtt, generarSrt, parseVtt } from './subtitulos.mjs';
+import { renderizarTransicion } from './escenario3d.mjs';
 
 /**
  * Une clips ya montados en un solo video-curso, con portada por capítulo ya incluida en
@@ -10,7 +11,7 @@ import { generarVtt, generarSrt, parseVtt } from './subtitulos.mjs';
  *
  * @param {Array<{id:string,titulo:string,archivo:string}>} partes
  */
-export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video }) {
+export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null }) {
     mkdirSync(salida, { recursive: true });
     // Se limpia de entrada: si no, cada corrida deja sus trozos y los de la anterior
     // conviven con los nuevos.
@@ -30,7 +31,36 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
         return destino;
     });
 
-    const duraciones = normalizados.map((a) => duracion(a));
+    // Transición 3D de ENTRADA a cada capítulo, salvo el primero: el video no puede empezar
+    // con un movimiento de cámara sobre nada.
+    //
+    // La transición se contabiliza como parte del capítulo que ENTRA, y eso no es un detalle
+    // estético: `capitulosConTiempos` recibe una duración por parte, y los cues de subtítulos
+    // se desplazan por `capitulos[i].inicioSeg`. Si la transición se contara aparte, cada
+    // capítulo a partir del segundo quedaría corrido contra sus propios subtítulos. Con el
+    // marcador al comienzo del movimiento, además, saltar a un capítulo muestra su entrada.
+    const conTransiciones = [];
+    const duraciones = [];
+    for (const [i, archivo] of normalizados.entries()) {
+        let duraCap = duracion(archivo);
+        if (i > 0 && presentacion?.transicion3d?.activa) {
+            const transicion = await renderizarTransicion({
+                mp4: archivo, desdeSeg: 0, salida: temporal, presentacion, fps: 25,
+            });
+            const normalizada = join(temporal, `trans-${String(i).padStart(2, '0')}.mp4`);
+            ff(['-y', '-i', transicion,
+                '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+                '-shortest',
+                '-vf', `scale=${video.ancho}:${video.alto}:force_original_aspect_ratio=decrease,` +
+                       `pad=${video.ancho}:${video.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`,
+                '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+                '-c:a', 'aac', '-ar', '44100', '-ac', '2', normalizada]);
+            conTransiciones.push(normalizada);
+            duraCap += duracion(normalizada);
+        }
+        conTransiciones.push(archivo);
+        duraciones.push(duraCap);
+    }
     const capitulos = capitulosConTiempos(partes.map(({ id, titulo }) => ({ id, titulo })), duraciones);
 
     // Subtítulos del curso: cada capítulo trae su .vtt al lado del clip (lo escribe
@@ -52,7 +82,7 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     });
 
     const lista = join(temporal, 'lista.txt');
-    writeFileSync(lista, normalizados.map((a) => `file '${a}'`).join('\n'));
+    writeFileSync(lista, conTransiciones.map((a) => `file '${a}'`).join('\n'));
     const pegado = join(temporal, 'pegado.mp4');
     ff(['-y', '-f', 'concat', '-safe', '0', '-i', lista, '-c', 'copy', pegado]);
 

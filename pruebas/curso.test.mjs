@@ -96,6 +96,46 @@ test('combina los .vtt de cada capítulo desplazados por su offset, y los deja m
     assert.match(info, /\(spa\)/);
 });
 
+test('con transiciones, los marcadores de capítulo incluyen su transición', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-'));
+    const partes = [
+        { id: 'uno', titulo: 'Primero', archivo: clip(dir, 'a.mp4', 2, 'blue') },
+        { id: 'dos', titulo: 'Segundo', archivo: clip(dir, 'b.mp4', 2, 'red') },
+    ];
+    const presentacion = {
+        fondo: '#0f172a', padding: 20, radio: 16, sombra: true, barra: false,
+        salida: { ancho: 480, alto: 270 },
+        transicion3d: { activa: true, ms: 400, gradosMax: 12 },
+    };
+
+    const { capitulos } = await pegarCapitulos(partes, {
+        salida: dir, nombre: 'curso.mp4', titulo: 'Curso', video: { ancho: 480, alto: 270 },
+        presentacion,
+    });
+
+    // el primer capítulo no lleva transición de entrada: arranca en 0
+    assert.equal(capitulos[0].inicioSeg, 0);
+    // el segundo empieza donde termina el primero, y su transición cuenta como suya:
+    // el marcador cae al comienzo del movimiento, no después
+    assert.ok(Math.abs(capitulos[1].inicioSeg - 2) < 0.3,
+        `el capítulo 2 debe empezar en ~2 s (con su transición adentro), midió ${capitulos[1].inicioSeg}`);
+    assert.ok(Math.abs((capitulos[1].finSeg - capitulos[1].inicioSeg) - 2.4) < 0.3,
+        'el capítulo 2 dura su clip más su transición');
+});
+
+test('sin presentacion, los capítulos quedan como siempre', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-'));
+    const partes = [
+        { id: 'uno', titulo: 'Primero', archivo: clip(dir, 'a.mp4', 2, 'blue') },
+        { id: 'dos', titulo: 'Segundo', archivo: clip(dir, 'b.mp4', 2, 'red') },
+    ];
+    const { capitulos } = await pegarCapitulos(partes, {
+        salida: dir, nombre: 'curso.mp4', titulo: 'Curso', video: { ancho: 480, alto: 270 },
+    });
+    assert.equal(capitulos[0].inicioSeg, 0);
+    assert.ok(Math.abs(capitulos[1].inicioSeg - 2) < 0.3);
+});
+
 test('un capítulo sin .vtt propio (video de teléfono) no revienta y no aporta entradas', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'demo-curso-sin-subs-'));
     const partes = [
