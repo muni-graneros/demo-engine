@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# ──────────────────────────────────────────────────────────────────────────────
+# pre-commit — escaneo de secretos sobre lo que se va a commitear.
+#
+# Versión para repos sin PHP (Python, Node, datos): sin Pint ni PHPStan.
+# Instalar a mano:  git config core.hooksPath .githooks
+# Saltárselo:       git commit --no-verify
+# ──────────────────────────────────────────────────────────────────────────────
+set -euo pipefail
+
+if command -v gitleaks >/dev/null 2>&1; then
+    if gitleaks git --help >/dev/null 2>&1; then
+        gitleaks_ok=0; gitleaks git --pre-commit --staged --redact --no-banner -v || gitleaks_ok=$?
+    else
+        gitleaks_ok=0; gitleaks protect --staged --redact --no-banner -v || gitleaks_ok=$?
+    fi
+    if [ "$gitleaks_ok" -ne 0 ]; then
+        echo "" >&2
+        echo "❌ pre-commit: gitleaks encontró un posible secreto en lo staged. Se canceló." >&2
+        echo "   Sácalo del commit (o, si es un falso positivo, añade la excepción en .gitleaks.toml)." >&2
+        exit 1
+    fi
+else
+    echo "pre-commit: gitleaks no está instalado; NO se escanearon secretos (instálalo: github.com/gitleaks/gitleaks)." >&2
+fi
+
+exit 0
