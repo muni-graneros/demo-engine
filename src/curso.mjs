@@ -6,6 +6,16 @@ import { generarVtt, generarSrt, parseVtt } from './subtitulos.mjs';
 import { renderizarTransicion } from './escenario3d.mjs';
 
 /**
+ * Filtro de escala+relleno+fps compartido por la normalización de cada capítulo y por la
+ * normalización de cada transición: ambas tienen que terminar con la misma resolución, mismo
+ * fondo de letterbox y mismo fps, o el concat final los pega con un salto visible.
+ */
+function filtroNormalizar(video) {
+    return `scale=${video.ancho}:${video.alto}:force_original_aspect_ratio=decrease,` +
+           `pad=${video.ancho}:${video.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`;
+}
+
+/**
  * Une clips ya montados en un solo video-curso, con portada por capítulo ya incluida en
  * cada clip, metadata de capítulos e índice en markdown.
  *
@@ -24,8 +34,7 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     const normalizados = partes.map((parte, i) => {
         const destino = join(temporal, `cap-${String(i).padStart(2, '0')}.mp4`);
         ff(['-y', '-i', parte.archivo,
-            '-vf', `scale=${video.ancho}:${video.alto}:force_original_aspect_ratio=decrease,` +
-                   `pad=${video.ancho}:${video.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`,
+            '-vf', filtroNormalizar(video),
             '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
             '-c:a', 'aac', '-ar', '44100', '-ac', '2', destino]);
         return destino;
@@ -35,14 +44,22 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     // con un movimiento de cámara sobre nada.
     //
     // La transición se contabiliza como parte del capítulo que ENTRA, y eso no es un detalle
-    // estético: `capitulosConTiempos` recibe una duración por parte, y los cues de subtítulos
-    // se desplazan por `capitulos[i].inicioSeg`. Si la transición se contara aparte, cada
-    // capítulo a partir del segundo quedaría corrido contra sus propios subtítulos. Con el
-    // marcador al comienzo del movimiento, además, saltar a un capítulo muestra su entrada.
+    // estético: `capitulosConTiempos` recibe una duración por parte, y el marcador de cada
+    // capítulo (`capitulos[i].inicioSeg`) cae correctamente al INICIO DE LA TRANSICIÓN — así,
+    // saltar a un capítulo muestra su entrada. Si la transición se contara aparte, cada
+    // capítulo a partir del segundo quedaría corrido contra sus propios subtítulos.
+    //
+    // Pero el CONTENIDO real del capítulo (y por lo tanto sus cues de subtítulos, que vienen
+    // en tiempos relativos al clip original) arranca DESPUÉS de la transición, no en el mismo
+    // punto que el marcador. Por eso se guarda aparte, por capítulo, la duración de su
+    // transición (`duraTransicion`, 0 para el primero o sin transición activa): el offset de
+    // los cues es `inicioSeg + duraTransicion[i]`, no `inicioSeg` a secas.
     const conTransiciones = [];
     const duraciones = [];
+    const duraTransicion = [];
     for (const [i, archivo] of normalizados.entries()) {
         let duraCap = duracion(archivo);
+        let duraTrans = 0;
         if (i > 0 && presentacion?.transicion3d?.activa) {
             const transicion = await renderizarTransicion({
                 mp4: archivo, desdeSeg: 0, salida: temporal, presentacion, fps: 25,
@@ -51,15 +68,16 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
             ff(['-y', '-i', transicion,
                 '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                 '-shortest',
-                '-vf', `scale=${video.ancho}:${video.alto}:force_original_aspect_ratio=decrease,` +
-                       `pad=${video.ancho}:${video.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`,
+                '-vf', filtroNormalizar(video),
                 '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
                 '-c:a', 'aac', '-ar', '44100', '-ac', '2', normalizada]);
             conTransiciones.push(normalizada);
-            duraCap += duracion(normalizada);
+            duraTrans = duracion(normalizada);
+            duraCap += duraTrans;
         }
         conTransiciones.push(archivo);
         duraciones.push(duraCap);
+        duraTransicion.push(duraTrans);
     }
     const capitulos = capitulosConTiempos(partes.map(({ id, titulo }) => ({ id, titulo })), duraciones);
 
@@ -68,14 +86,17 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     // ignoraba del todo: el concat con `-c copy` arrastraba —cuando arrastraba algo— la pista
     // de subtítulos del PRIMER capítulo tal cual, SIN desplazar sus tiempos y perdiendo las
     // de los demás, y el .vtt del curso nunca se escribía. Acá se releen y combinan a mano,
-    // desplazando cada cue por el inicio de SU capítulo (mismo offset que ya se usa para la
-    // metadata de capítulos). Un capítulo sin .vtt propio —el video de teléfono, por
-    // ejemplo— no aporta entradas, y eso está bien: no tiene narración que ofrecer.
+    // desplazando cada cue por el inicio del CONTENIDO de SU capítulo — que no es lo mismo
+    // que `capitulos[i].inicioSeg` cuando hay transición: ese offset marca el inicio de la
+    // transición, no el del clip. Sumar `duraTransicion[i]` es lo que alinea la cue (en
+    // tiempo relativo al clip original) con dónde ese clip realmente arranca en el video
+    // final. Un capítulo sin .vtt propio —el video de teléfono, por ejemplo— no aporta
+    // entradas, y eso está bien: no tiene narración que ofrecer.
     const segmentos = [];
     partes.forEach((parte, i) => {
         const vttCap = parte.archivo.replace(/\.mp4$/, '.vtt');
         if (!existsSync(vttCap)) return;
-        const offset = capitulos[i].inicioSeg;
+        const offset = capitulos[i].inicioSeg + duraTransicion[i];
         for (const cue of parseVtt(readFileSync(vttCap, 'utf8'))) {
             segmentos.push({ inicioSeg: cue.inicioSeg + offset, finSeg: cue.finSeg + offset, narrar: cue.narrar });
         }

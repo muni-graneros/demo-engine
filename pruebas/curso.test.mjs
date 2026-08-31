@@ -123,6 +123,42 @@ test('con transiciones, los marcadores de capítulo incluyen su transición', as
         'el capítulo 2 dura su clip más su transición');
 });
 
+test('con transiciones, los cues se desplazan por el inicio del CONTENIDO, no de la transición', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-cues-trans-'));
+    const cap1 = clip(dir, 'a.mp4', 2, 'blue');
+    const cap2 = clip(dir, 'b.mp4', 2, 'red');
+    // cue de prueba: 0.5s relativos al INICIO DEL CLIP del capítulo 2, no de su transición.
+    writeFileSync(cap2.replace(/\.mp4$/, '.vtt'),
+        'WEBVTT\n\n00:00:00.500 --> 00:00:01.000\nCue del capítulo dos.\n');
+
+    const partes = [
+        { id: 'uno', titulo: 'Primero', archivo: cap1 },
+        { id: 'dos', titulo: 'Segundo', archivo: cap2 },
+    ];
+    const presentacion = {
+        fondo: '#0f172a', padding: 20, radio: 16, sombra: true, barra: false,
+        salida: { ancho: 480, alto: 270 },
+        transicion3d: { activa: true, ms: 400, gradosMax: 12 },
+    };
+
+    const { vtt, capitulos } = await pegarCapitulos(partes, {
+        salida: dir, nombre: 'curso.mp4', titulo: 'Curso', video: { ancho: 480, alto: 270 },
+        presentacion,
+    });
+
+    assert.ok(existsSync(vtt));
+    const cues = parseVtt(readFileSync(vtt, 'utf8'));
+    assert.equal(cues.length, 1);
+
+    // El capítulo 2 dura su clip original (2s) más su transición: la diferencia entre su
+    // duración total y esos 2s es la duración real de la transición, medida sin asumir el
+    // `ms` nominal de la presentación (el render frame a frame no cae siempre exacto).
+    const duraTransicionReal = (capitulos[1].finSeg - capitulos[1].inicioSeg) - 2;
+    const esperado = capitulos[1].inicioSeg + duraTransicionReal + 0.5;
+    assert.ok(Math.abs(cues[0].inicioSeg - esperado) < 0.3,
+        `esperaba la cue en ~${esperado}s (inicio del CONTENIDO + 0.5s), midió ${cues[0].inicioSeg}s`);
+});
+
 test('sin presentacion, los capítulos quedan como siempre', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'demo-curso-'));
     const partes = [
