@@ -26,7 +26,12 @@ export async function conPagina(archivos, tarea) {
     const three = require.resolve('three');
     const dirThree = join(dirname(three), '..');
     const dirBuildThree = join(dirThree, 'build');
-    const mapa = { ...archivos, '/three.module.js': join(dirBuildThree, 'three.module.js') };
+    // three.module.js importa ./three.core.js internamente, así que sirven ambos archivos.
+    const mapa = {
+        ...archivos,
+        '/three.module.js': join(dirBuildThree, 'three.module.js'),
+        '/three.core.js': join(dirBuildThree, 'three.core.js'),
+    };
 
     const servidor = createServer((req, res) => {
         const ruta = req.url.split('?')[0];
@@ -34,30 +39,35 @@ export async function conPagina(archivos, tarea) {
             res.writeHead(200, { 'Content-Type': 'text/html' });
             return res.end('<!doctype html><html><body style="margin:0"></body></html>');
         }
-        let archivo = mapa[ruta];
-        // Si la ruta no está en el mapa y es un archivo de three, intenta servirlo desde el directorio build
-        if (!archivo && ruta.startsWith('/three.')) {
-            archivo = join(dirBuildThree, ruta.substring(1));
-        }
+        const archivo = mapa[ruta];
         if (!archivo) { res.writeHead(404); return res.end(); }
-        const cuerpo = readFileSync(archivo);
-        res.writeHead(200, {
-            'Content-Type': TIPOS[extname(archivo)] ?? 'application/octet-stream',
-            'Content-Length': cuerpo.length,
-            'Accept-Ranges': 'bytes',
-        });
-        res.end(cuerpo);
+        try {
+            const cuerpo = readFileSync(archivo);
+            res.writeHead(200, {
+                'Content-Type': TIPOS[extname(archivo)] ?? 'application/octet-stream',
+                'Content-Length': cuerpo.length,
+                'Accept-Ranges': 'bytes',
+            });
+            res.end(cuerpo);
+        } catch (error) {
+            res.writeHead(500, { 'Content-Type': 'text/plain' });
+            res.end('Error reading file');
+        }
     });
+
     await new Promise((ok) => servidor.listen(0, '127.0.0.1', ok));
     const baseUrl = `http://127.0.0.1:${servidor.address().port}`;
 
-    const navegador = await chromium.launch();
     try {
-        const page = await navegador.newPage();
-        await page.goto(baseUrl + '/');
-        return await tarea(page, baseUrl);
+        const navegador = await chromium.launch();
+        try {
+            const page = await navegador.newPage();
+            await page.goto(baseUrl + '/');
+            return await tarea(page, baseUrl);
+        } finally {
+            await navegador.close();
+        }
     } finally {
-        await navegador.close();
         await new Promise((ok) => servidor.close(ok));
     }
 }
