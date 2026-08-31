@@ -169,3 +169,31 @@ test('la version declarada en package.json coincide con el ultimo tag publicado'
     assert.equal(`v${declarada}`, ultimoTag,
         `package.json dice ${declarada} y el último tag es ${ultimoTag}: uno de los dos quedó atrás`);
 });
+
+test('presentacion queda en null si el proyecto no la declara', async () => {
+    const cfg = await cargarConfig(proyecto(minima));
+    assert.equal(cfg.video.presentacion, null);
+});
+
+test('presentacion aplica sus defectos cuando el bloque existe', async () => {
+    const cfg = await cargarConfig(proyecto({ ...minima, video: { presentacion: { padding: 120 } } }));
+    const p = cfg.video.presentacion;
+    assert.equal(p.padding, 120);          // lo declarado gana
+    assert.equal(p.radio, 16);             // el resto viene del defecto
+    assert.equal(p.sombra, true);
+    assert.equal(p.barra, true);
+    assert.equal(p.fondo, null);           // null = derivar de marca.color
+    assert.deepEqual(p.salida, { ancho: 1920, alto: 1080 });
+    assert.deepEqual(p.transicion3d, { activa: true, ms: 900, gradosMax: 12 });
+    // declarar presentacion no debe pisar ancho/alto de grabación
+    assert.equal(cfg.video.ancho, 1600);
+    assert.equal(cfg.video.alto, 1000);
+});
+
+test('presentacion respeta un sub-bloque parcial de transicion3d', async () => {
+    const cfg = await cargarConfig(proyecto({
+        ...minima, video: { presentacion: { transicion3d: { activa: false } } },
+    }));
+    assert.equal(cfg.video.presentacion.transicion3d.activa, false);
+    assert.equal(cfg.video.presentacion.transicion3d.ms, 900);
+});

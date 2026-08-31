@@ -21,7 +21,7 @@ const DEFECTOS = {
     // Un tutorial que quiera ir más pausado sube estos dos en su config; lo que
     // no debería pasar es que un proyecto nuevo herede el ritmo lento sin
     // haberlo elegido.
-    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260 },
+    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null },
     // `voz` y `vozRespaldo` son campos separados porque Kokoro y Piper nombran sus voces
     // distinto (ver el comentario de `crearVoz` en src/voz/index.mjs). Si `vozRespaldo`
     // queda en null, el respaldo usa su propio valor por defecto, no el del motor principal.
@@ -58,8 +58,39 @@ const DEFECTOS = {
     limpiar: null,
 };
 
+// `presentacion` queda en null a propósito: es OPT-IN. Hay más de diez proyectos usando el
+// motor y ninguno debe cambiar de aspecto sin declararlo. Los defectos de adentro viven
+// aparte porque solo se aplican si el bloque existe; fusionarlos siempre convertiría la
+// ausencia del bloque en "presentación con todo por defecto", que es justo lo contrario.
+const DEFECTOS_PRESENTACION = {
+    fondo: null,        // null = gradiente derivado de marca.color
+    padding: 80,
+    radio: 16,
+    sombra: true,
+    barra: true,
+    salida: { ancho: 1920, alto: 1080 },
+    transicion3d: { activa: true, ms: 900, gradosMax: 12 },
+};
+
 function exigir(condicion, mensaje) {
     if (!condicion) throw new ErrorConfig(`demo.config.mjs: ${mensaje}`);
+}
+
+/** Fusiona `video`, tratando `presentacion` (y su `salida`/`transicion3d`) como sub-bloques
+ *  opt-in: ausentes se quedan en null, presentes reciben sus defectos. */
+function fusionarVideo(defectos, cruda = {}) {
+    const video = { ...defectos, ...cruda };
+    if (!cruda.presentacion) {
+        video.presentacion = null;
+        return video;
+    }
+    video.presentacion = {
+        ...DEFECTOS_PRESENTACION,
+        ...cruda.presentacion,
+        salida: { ...DEFECTOS_PRESENTACION.salida, ...cruda.presentacion.salida },
+        transicion3d: { ...DEFECTOS_PRESENTACION.transicion3d, ...cruda.presentacion.transicion3d },
+    };
+    return video;
 }
 
 /**
@@ -116,7 +147,7 @@ export async function cargarConfig(rutaProyecto) {
         guiones,
         salida: absoluta(cruda.salida ?? './docs/manual'),
         marca,
-        video: { ...DEFECTOS.video, ...cruda.video },
+        video: fusionarVideo(DEFECTOS.video, cruda.video),
         auditoria: { ...DEFECTOS.auditoria, ...cruda.auditoria },
         voz,
         actores,
