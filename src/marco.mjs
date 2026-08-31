@@ -38,45 +38,54 @@ export async function renderizarMarco({ salida, presentacion, marca, baseURL, de
     return conPagina({ '/marco.html': PLANTILLA }, async (page, baseUrl) => {
         await page.setViewportSize({ width: ancho, height: alto });
         await page.goto(baseUrl + '/marco.html');
-        const texto = await page.evaluate(({ ancho, alto, g, fondo, url, radio }) => {
-            // Posiciona los 4 rectángulos del fondo dejando un agujero real para el video.
+        const texto = await page.evaluate(({ ancho, alto, g, fondo, url, radio, sombra }) => {
             const margenArriba = g.y - g.alturaBarra;  // padding
             const margenIzq = g.x;  // padding
             const altoVentana = g.alto + g.alturaBarra;
             const margenAbajo = alto - margenArriba - altoVentana;
             const margenDer = ancho - margenIzq - g.ancho;
 
-            // Rectángulo arriba
-            const fondoArriba = document.getElementById('fondo-arriba');
-            fondoArriba.style.top = '0';
-            fondoArriba.style.left = '0';
-            fondoArriba.style.width = ancho + 'px';
-            fondoArriba.style.height = margenArriba + 'px';
-            fondoArriba.style.background = fondo;
+            // Pinta `el` con LA PORCIÓN que le toca de un fondo único del tamaño del frame.
+            // Sin el desplazamiento, cada rectángulo dibujaba su propio gradiente de 135° y el
+            // fondo salía en cuatro trozos que no empalman entre sí — y tampoco empalmaban con
+            // el fondo de la transición 3D, que sí es uno solo (ver src/escenario3d.mjs).
+            // El shorthand `background` resetea size y position, así que va primero.
+            const pintar = (el, izq, arriba, anchoEl, altoEl) => {
+                el.style.left = izq + 'px';
+                el.style.top = arriba + 'px';
+                el.style.width = anchoEl + 'px';
+                el.style.height = altoEl + 'px';
+                el.style.background = fondo;
+                el.style.backgroundSize = `${ancho}px ${alto}px`;
+                el.style.backgroundPosition = `${-izq}px ${-arriba}px`;
+            };
 
-            // Rectángulo abajo
-            const fondoAbajo = document.getElementById('fondo-abajo');
-            fondoAbajo.style.top = (margenArriba + altoVentana) + 'px';
-            fondoAbajo.style.left = '0';
-            fondoAbajo.style.width = ancho + 'px';
-            fondoAbajo.style.height = margenAbajo + 'px';
-            fondoAbajo.style.background = fondo;
+            // Los cuatro rectángulos que cubren el fondo dejando el agujero del video.
+            pintar(document.getElementById('fondo-arriba'), 0, 0, ancho, margenArriba);
+            pintar(document.getElementById('fondo-abajo'), 0, margenArriba + altoVentana, ancho, margenAbajo);
+            pintar(document.getElementById('fondo-izquierda'), 0, margenArriba, margenIzq, altoVentana);
+            pintar(document.getElementById('fondo-derecha'), margenIzq + g.ancho, margenArriba, margenDer, altoVentana);
 
-            // Rectángulo izquierda
-            const fondoIzq = document.getElementById('fondo-izquierda');
-            fondoIzq.style.top = margenArriba + 'px';
-            fondoIzq.style.left = '0';
-            fondoIzq.style.width = margenIzq + 'px';
-            fondoIzq.style.height = altoVentana + 'px';
-            fondoIzq.style.background = fondo;
-
-            // Rectángulo derecha
-            const fondoDer = document.getElementById('fondo-derecha');
-            fondoDer.style.top = margenArriba + 'px';
-            fondoDer.style.left = (margenIzq + g.ancho) + 'px';
-            fondoDer.style.width = margenDer + 'px';
-            fondoDer.style.height = altoVentana + 'px';
-            fondoDer.style.background = fondo;
+            // Las cuatro esquinas del recorte redondeado. `overflow:hidden` NO pinta nada en
+            // el sobrante de la esquina: dejaba el PNG transparente ahí y por ese hueco asomaba
+            // la esquina cuadrada del video (abajo) o el negro del compuesto (arriba). Cada
+            // esquina pinta el fondo y se le saca el disco del radio con una máscara radial,
+            // que además llega con antialias del navegador.
+            const esquinas = [
+                ['esquina-si', margenIzq, margenArriba, '100% 100%'],
+                ['esquina-sd', margenIzq + g.ancho - radio, margenArriba, '0% 100%'],
+                ['esquina-ii', margenIzq, margenArriba + altoVentana - radio, '100% 0%'],
+                ['esquina-id', margenIzq + g.ancho - radio, margenArriba + altoVentana - radio, '0% 0%'],
+            ];
+            for (const [id, izq, arriba, centro] of esquinas) {
+                const el = document.getElementById(id);
+                if (radio <= 0) { el.style.display = 'none'; continue; }
+                pintar(el, izq, arriba, radio, radio);
+                const mascara = `radial-gradient(circle ${radio}px at ${centro},`
+                    + ` transparent ${radio - 0.7}px, #000 ${radio + 0.3}px)`;
+                el.style.maskImage = mascara;
+                el.style.webkitMaskImage = mascara;
+            }
 
             const v = document.getElementById('ventana');
             v.style.setProperty('--radio', radio + 'px');
@@ -84,10 +93,23 @@ export async function renderizarMarco({ salida, presentacion, marca, baseURL, de
             v.style.top = (g.y - g.alturaBarra) + 'px';
             v.style.width = g.ancho + 'px';
             v.style.height = (g.alto + g.alturaBarra) + 'px';
+            // `presentacion.sombra` era un interruptor muerto: el box-shadow vivía en el CSS y
+            // se dibujaba siempre. Ahora lo decide el JS, que es quien conoce la config.
+            v.style.boxShadow = sombra
+                ? '0 30px 60px rgba(0,0,0,.45), 0 8px 20px rgba(0,0,0,.3)'
+                : 'none';
+
+            // La barra también se dibujaba siempre, aunque `geometria()` ya no le reservara
+            // alto: con barra:false tapaba los primeros 38px del video. El alto lo manda el JS
+            // (ALTO_BARRA), así que el CSS ya no duplica el número.
+            const barra = document.getElementById('barra');
+            barra.style.height = g.alturaBarra + 'px';
+            barra.style.display = g.alturaBarra > 0 ? 'flex' : 'none';
+
             document.getElementById('hueco').style.height = g.alto + 'px';
             document.getElementById('url').textContent = url;
             return document.getElementById('url').textContent;
-        }, { ancho, alto, g, fondo, url: baseURL, radio: presentacion.radio });
+        }, { ancho, alto, g, fondo, url: baseURL, radio: presentacion.radio, sombra: presentacion.sombra });
 
         if (devolverTexto) return texto;
         await page.screenshot({ path: png, omitBackground: true, type: 'png' });

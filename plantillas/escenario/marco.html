@@ -3,9 +3,14 @@
   html,body { margin:0; background:transparent; }
   /* Cuatro rectángulos que dibujan el fondo dejando un agujero real para el video. */
   .fondo-rect { position:fixed; }
-  #ventana { position:fixed; border-radius:var(--radio); overflow:hidden;
-             box-shadow:0 30px 60px rgba(0,0,0,.45), 0 8px 20px rgba(0,0,0,.3); }
-  #barra { height:38px; display:flex; align-items:center; gap:8px; padding:0 12px;
+  /* Las cuatro esquinas del recorte redondeado: van ANTES de #ventana en el DOM a
+     propósito, para que la sombra de la ventana las pinte por encima igual que al resto
+     del fondo. Si fueran después, las esquinas quedarían más claras que su alrededor. */
+  .esquina { position:fixed; }
+  #ventana { position:fixed; border-radius:var(--radio); overflow:hidden; }
+  /* El alto de la barra lo fija el JS desde ALTO_BARRA: acá había un 38 duplicado que
+     tenía que coincidir a mano con el de marco.mjs. */
+  #barra { display:flex; align-items:center; gap:8px; padding:0 12px;
            background:#1f2937; font:13px/1 system-ui,sans-serif; color:#cbd5e1; }
   .luz { width:11px; height:11px; border-radius:50%; }
   #url { flex:1; text-align:center; background:#111827; border-radius:6px;
@@ -19,6 +24,11 @@
   <div id="fondo-abajo" class="fondo-rect"></div>
   <div id="fondo-izquierda" class="fondo-rect"></div>
   <div id="fondo-derecha" class="fondo-rect"></div>
+  <!-- Los cuatro recortes de las esquinas redondeadas, con el fondo detrás del radio. -->
+  <div id="esquina-si" class="esquina"></div>
+  <div id="esquina-sd" class="esquina"></div>
+  <div id="esquina-ii" class="esquina"></div>
+  <div id="esquina-id" class="esquina"></div>
   <div id="ventana">
     <div id="barra">
       <span class="luz" style="background:#ef4444"></span>
