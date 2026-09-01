@@ -82,6 +82,25 @@ test('la transición aterriza en el encuadre del capítulo: el plano llena el cu
     }
 });
 
+test('la VideoTexture respeta sRGB: el color no sale lavado', async () => {
+    // Antes VideoTexture no marcaba `colorSpace` y three la trataba como lineal: el pixel
+    // sRGB del video se usaba tal cual como si ya fuera lineal, y se volvía a codificar a
+    // sRGB al renderizar. Un rojo puro (0 en los otros canales) no lo delata porque
+    // sRGB_encode(0)=0, así que se sonda un GRIS MEDIO (128,128,128): sin el fix medía
+    // (187,187,187), muy fuera de tolerancia. Se sondea el CENTRO del último frame porque
+    // ahí la cámara ya aterrizó y el plano llena el cuadro: es video puro, sin fondo alrededor.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-3d-srgb-'));
+    const mp4 = join(dir, 'cap.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0x808080:s=640x400', '-t', '2',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', mp4]);
+
+    const clip = await renderizarTransicion({ mp4, desdeSeg: 0, salida: dir, presentacion, fps: 25 });
+    const p = pixel(clip, 240, 135, 0.36);
+    const esperado = [128, 128, 128];
+    p.forEach((c, i) => assert.ok(Math.abs(c - esperado[i]) <= 12,
+        `canal ${i}: medido ${c}, esperado ${esperado[i]} (rgb medido completo: ${p})`));
+});
+
 test('el fondo de la transición es el MISMO que el del marco', async () => {
     // Con `fondo:null` el marco pinta un gradiente derivado de marca.color y la escena pintaba
     // un gris fijo: cada transición saltaba de un fondo al otro.

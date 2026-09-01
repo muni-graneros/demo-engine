@@ -24,6 +24,11 @@ render.setClearAlpha(0);
 const video = document.createElement('video');
 video.muted = true;
 const textura = new THREE.VideoTexture(video);
+// El MP4 del capítulo ya viene codificado en sRGB. Three, por defecto, trata cualquier
+// textura como lineal y la vuelve a codificar a sRGB al renderizar: sin esta marca los
+// colores salen lavados (ej. rojo 253,0,0 → 253,84,0) y el corte hacia el clip real del
+// capítulo se nota como un salto de color.
+textura.colorSpace = THREE.SRGBColorSpace;
 let plano = null;
 
 // Cuánto más lejos arranca la cámara respecto de su distancia final, en tanto por uno. Es
