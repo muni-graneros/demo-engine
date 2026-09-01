@@ -101,6 +101,24 @@ test('la VideoTexture respeta sRGB: el color no sale lavado', async () => {
         `canal ${i}: medido ${c}, esperado ${esperado[i]} (rgb medido completo: ${p})`));
 });
 
+test('colores saturados no dejan residuo de croma: PNG en los frames intermedios, no JPEG', async () => {
+    // Antes cada frame se capturaba como JPEG (calidad 92, croma 4:2:0): ese submuestreo se
+    // sumaba al del encode final a h264 y en colores saturados dejaba un residuo de color
+    // notorio (medido en producción: rojo 253,0,0 → 254,24,0). Con PNG (sin pérdida) en los
+    // frames intermedios, solo queda el submuestreo del encode final, igual que en cualquier
+    // otro video del motor, y el corte hacia el clip real del capítulo no salta de color.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-3d-croma-'));
+    const mp4 = join(dir, 'cap.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=640x400', '-t', '2',
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', mp4]);
+
+    const clip = await renderizarTransicion({ mp4, desdeSeg: 0, salida: dir, presentacion, fps: 25 });
+    const p = pixel(clip, 240, 135, 0.36);
+    const esperado = [255, 0, 0];
+    p.forEach((c, i) => assert.ok(Math.abs(c - esperado[i]) <= 6,
+        `canal ${i}: medido ${c}, esperado ${esperado[i]} (rgb medido completo: ${p})`));
+});
+
 test('el fondo de la transición es el MISMO que el del marco', async () => {
     // Con `fondo:null` el marco pinta un gradiente derivado de marca.color y la escena pintaba
     // un gris fijo: cada transición saltaba de un fondo al otro.
