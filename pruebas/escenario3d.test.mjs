@@ -101,12 +101,16 @@ test('la VideoTexture respeta sRGB: el color no sale lavado', async () => {
         `canal ${i}: medido ${c}, esperado ${esperado[i]} (rgb medido completo: ${p})`));
 });
 
-test('colores saturados no dejan residuo de croma: PNG en los frames intermedios, no JPEG', async () => {
-    // Antes cada frame se capturaba como JPEG (calidad 92, croma 4:2:0): ese submuestreo se
-    // sumaba al del encode final a h264 y en colores saturados dejaba un residuo de color
-    // notorio (medido en producción: rojo 253,0,0 → 254,24,0). Con PNG (sin pérdida) en los
-    // frames intermedios, solo queda el submuestreo del encode final, igual que en cualquier
-    // otro video del motor, y el corte hacia el clip real del capítulo no salta de color.
+test('un rojo puro llega razonablemente saturado a la transición', async () => {
+    // Guarda de regresión con tolerancia acotada (≤6). Se investigó la captura JPEG del
+    // canvas (croma 4:2:0) como sospechosa de un residuo de color en colores saturados
+    // (rojo puro → [255,24,0] medido en producción con material real de 1080p) y se
+    // descartó: cambiar a PNG dio el MISMO residuo, y hasta el canvas capturado directo
+    // (sin pasar por ffmpeg) ya lo tenía. La causa real es el decodificador: los MP4 del
+    // motor se codifican sin etiqueta de colorspace (swscale usa BT.601) y Chromium
+    // decodifica HD como BT.709 — ver la nota "DEUDA CONOCIDA" en escenario3d.mjs. Con un
+    // video de prueba chico (640x400, sin esa ruta de decode HD) el residuo no aparece,
+    // por eso este test sigue en verde con la captura JPEG de siempre.
     const dir = mkdtempSync(join(tmpdir(), 'demo-3d-croma-'));
     const mp4 = join(dir, 'cap.mp4');
     ff(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=640x400', '-t', '2',

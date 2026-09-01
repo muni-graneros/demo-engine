@@ -19,15 +19,15 @@ const PLANTILLA = join(AQUI, 'escenario', 'escena.html');
  * frames y desacopla la narración, que ya está montada contra el reloj del video. Fijando
  * `currentTime` y capturando de a un frame, la cantidad de frames es exacta por construcción.
  *
- * La captura de cada frame es PNG, no JPEG: el JPEG intermedio hace su propio submuestreo
- * de croma (4:2:0) antes de que el encode final a h264 haga el suyo, y ese doble
- * submuestreo deja residuo de color en colores saturados (medido: rojo 253,0,0 → 254,24,0)
- * que se nota como salto al cortar hacia el clip real del capítulo. PNG es sin pérdida, así
- * que solo queda el submuestreo del encode final, igual que en cualquier otro video del motor.
+ * Medido en el equipo de referencia: ~94 ms por frame. Por eso solo pasan por acá las
+ * transiciones y no el video completo.
  *
- * Medido en el equipo de referencia: ~94 ms por frame con JPEG; con PNG el costo por frame
- * sube (canvas más grande cuesta más: ~36% en una transición de 900 ms a 1600x1000), pero
- * sigue siendo aceptable porque solo pasan por acá las transiciones y no el video completo.
+ * DEUDA CONOCIDA (no es la captura JPEG, se probó y no cambia nada): los MP4 del motor se
+ * codifican sin etiqueta de colorspace (swscale usa BT.601) y Chromium decodifica HD como
+ * BT.709: los colores 100% saturados llegan a la textura con un desvío de hasta ~40 niveles
+ * en un canal (rojo puro → [255,24,0]). El arreglo es transversal —etiquetar/convertir a
+ * BT.709 donde el motor codifica desde RGB (pantalla.mjs, presentacion.mjs, escenario3d.mjs)—
+ * y queda fuera de esta rama.
  */
 export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion, marca = null, fps = 25 }) {
     const { ancho, alto } = presentacion.salida;
@@ -38,7 +38,7 @@ export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion
     // dirFrames vive en el tmp del SISTEMA, no dentro de `salida`: a diferencia de los
     // temporales de montaje.mjs (que quedan adentro de la carpeta de salida y se barren en
     // la corrida siguiente), acá nadie más los va a limpiar. Si `conPagina` o `ff` explotan
-    // a mitad de camino, los PNG intermedios quedan huérfanos para siempre. Por eso todo el
+    // a mitad de camino, los JPEG intermedios quedan huérfanos para siempre. Por eso todo el
     // trabajo que los produce y consume va en try/finally: el clip solo se devuelve si todo
     // salió bien, pero la limpieza corre siempre, haya éxito o error.
     try {
@@ -59,14 +59,14 @@ export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion
                     gradosMax,
                 });
                 await page.locator('canvas').screenshot({
-                    path: join(dirFrames, `f-${String(i).padStart(5, '0')}.png`),
-                    type: 'png',
+                    path: join(dirFrames, `f-${String(i).padStart(5, '0')}.jpg`),
+                    type: 'jpeg', quality: 92,
                 });
             }
         });
 
         const clip = join(salida, `transicion-${Math.round(desdeSeg * 1000)}.mp4`);
-        ff(['-y', '-framerate', String(fps), '-i', join(dirFrames, 'f-%05d.png'),
+        ff(['-y', '-framerate', String(fps), '-i', join(dirFrames, 'f-%05d.jpg'),
             '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-r', String(fps), clip]);
         return clip;
     } finally {
