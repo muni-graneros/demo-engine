@@ -85,7 +85,7 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
     }
     const { mp4, md } = await pegarCapitulos(partes,
         { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video,
-            presentacion: config.video.presentacion });
+            presentacion: config.video.presentacion, marca: config.marca });
     return { mp4, md, maestro, pasos };
 }
 

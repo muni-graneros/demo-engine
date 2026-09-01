@@ -21,7 +21,7 @@ function filtroNormalizar(lienzo) {
  *
  * @param {Array<{id:string,titulo:string,archivo:string}>} partes
  */
-export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null }) {
+export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null, marca = null }) {
     mkdirSync(salida, { recursive: true });
     // El lienzo del curso es el de la PRESENTACIÓN cuando está activa. Con presentación,
     // `montar()` ya devolvió cada capítulo compuesto en `presentacion.salida` (1920x1080 por
@@ -68,7 +68,7 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
         let duraTrans = 0;
         if (i > 0 && presentacion?.transicion3d?.activa) {
             const transicion = await renderizarTransicion({
-                mp4: archivo, desdeSeg: 0, salida: temporal, presentacion, fps: 25,
+                mp4: archivo, desdeSeg: 0, salida: temporal, presentacion, marca, fps: 25,
             });
             const normalizada = join(temporal, `trans-${String(i).padStart(2, '0')}.mp4`);
             ff(['-y', '-i', transicion,

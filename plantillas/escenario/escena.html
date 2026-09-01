@@ -1,6 +1,15 @@
 <!doctype html>
-<html><head><meta charset="utf-8"><style>html,body{margin:0;overflow:hidden}</style></head>
+<html><head><meta charset="utf-8"><style>
+  html,body{margin:0;overflow:hidden}
+  canvas{display:block;position:relative}
+  /* El fondo NO lo pinta Three.js: lo pinta CSS, detrás de un canvas transparente. Three no
+     entiende `linear-gradient(...)`, y el fondo tiene que ser EXACTAMENTE el mismo que el del
+     marco (src/marco.mjs) o cada transición salta de gradiente a gris. Pintándolo con el
+     mismo motor CSS y la misma cadena, la coincidencia es por construcción, no por copia. */
+  #fondo{position:fixed;inset:0;z-index:-1}
+</style></head>
 <body>
+<div id="fondo"></div>
 <script type="module">
 import * as THREE from '/three.module.js';
 
@@ -9,26 +18,48 @@ import * as THREE from '/three.module.js';
 // milisegundos por frame, multiplicados por todos los frames de la transición.
 const escena = new THREE.Scene();
 const camara = new THREE.PerspectiveCamera(35, 1, 0.1, 100);
-const render = new THREE.WebGLRenderer({ antialias: true });
-escena.background = new THREE.Color('#0f172a');
+const render = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+render.setClearAlpha(0);
 
 const video = document.createElement('video');
 video.muted = true;
 const textura = new THREE.VideoTexture(video);
-const plano = new THREE.Mesh(
-    new THREE.PlaneGeometry(1.6, 1.0),
-    new THREE.MeshBasicMaterial({ map: textura }),
-);
-escena.add(plano);
+let plano = null;
+
+// Cuánto más lejos arranca la cámara respecto de su distancia final, en tanto por uno. Es
+// TODO el dolly de la transición: termina en la distancia exacta, no en una aproximación.
+const RETROCESO = 0.3;
+let zFinal = 1;
 
 window.__preparar = async ({ ancho, alto, src, fondo }) => {
     render.setSize(ancho, alto, false);
     document.body.appendChild(render.domElement);
+    document.getElementById('fondo').style.background = fondo;
     camara.aspect = ancho / alto;
     camara.updateProjectionMatrix();
-    escena.background = new THREE.Color(fondo);
     video.src = src;
     await new Promise((ok) => { video.onloadedmetadata = ok; });
+
+    // El plano se construye con el aspecto REAL del video, no con un 1.6 hardcodeado: con
+    // cualquier otra resolución, ese 1.6 deformaba la imagen dentro de la transición.
+    const altoPlano = 1;
+    const anchoPlano = altoPlano * (video.videoWidth / video.videoHeight);
+    plano = new THREE.Mesh(
+        new THREE.PlaneGeometry(anchoPlano, altoPlano),
+        new THREE.MeshBasicMaterial({ map: textura }),
+    );
+    escena.add(plano);
+
+    // Distancia a la que el plano llena EXACTAMENTE el frame: `mitad / tan(fov/2)` para el
+    // alto, y lo mismo corregido por el aspecto de la cámara para el ancho. Se toma la MENOR
+    // de las dos, que es la que garantiza que no quede fondo asomando por ningún borde.
+    // Antes la cámara terminaba en z=2.35 fijo: el plano ocupaba ~61%x67% del cuadro y al
+    // cortar al capítulo había un salto de escala de ~1,5x.
+    const tanMedioFov = Math.tan((camara.fov * Math.PI) / 360);
+    zFinal = Math.min(
+        (altoPlano / 2) / tanMedioFov,
+        (anchoPlano / 2) / (tanMedioFov * camara.aspect),
+    );
 };
 
 /** Coloca el video en `t` segundos y la cámara en el avance `p` (0 → 1) de la transición. */
@@ -39,7 +70,7 @@ window.__frame = async ({ t, p, gradosMax }) => {
     const suave = 1 - Math.pow(1 - p, 3);
     const grados = gradosMax * (1 - suave);
     plano.rotation.y = (grados * Math.PI) / 180;
-    camara.position.set(0, 0, 2.6 - 0.25 * suave);
+    camara.position.set(0, 0, zFinal * (1 + RETROCESO * (1 - suave)));
     camara.lookAt(0, 0, 0);
     textura.needsUpdate = true;
     render.render(escena, camara);

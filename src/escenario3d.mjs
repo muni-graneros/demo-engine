@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { conPagina } from './render-web.mjs';
+import { fondoDelMarco } from './marco.mjs';
 import { ff } from './ffmpeg.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
@@ -19,7 +20,7 @@ const PLANTILLA = join(AQUI, '..', 'plantillas', 'escenario', 'escena.html');
  * Medido en el equipo de referencia: ~94 ms por frame. Por eso solo pasan por acá las
  * transiciones y no el video completo.
  */
-export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion, fps = 25 }) {
+export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion, marca = null, fps = 25 }) {
     const { ancho, alto } = presentacion.salida;
     const { ms, gradosMax } = presentacion.transicion3d;
     const total = Math.max(1, Math.round((ms / 1000) * fps));
@@ -36,8 +37,11 @@ export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion
             await page.setViewportSize({ width: ancho, height: alto });
             await page.goto(baseUrl + '/escena.html');
             await page.waitForFunction(() => typeof window.__preparar === 'function');
+            // El fondo sale de la MISMA función que usa el marco: si acá se resolviera aparte
+            // (antes: `presentacion.fondo ?? '#0f172a'`), con el defecto `fondo:null` el video
+            // saltaba del gradiente de marca al gris en cada transición.
             await page.evaluate((args) => window.__preparar(args),
-                { ancho, alto, src: '/cap.mp4', fondo: presentacion.fondo ?? '#0f172a' });
+                { ancho, alto, src: '/cap.mp4', fondo: fondoDelMarco(presentacion, marca) });
 
             for (let i = 0; i < total; i++) {
                 await page.evaluate((args) => window.__frame(args), {
