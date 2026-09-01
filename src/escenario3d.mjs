@@ -7,7 +7,9 @@ import { fondoDelMarco } from './marco.mjs';
 import { ff } from './ffmpeg.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
-const PLANTILLA = join(AQUI, '..', 'plantillas', 'escenario', 'escena.html');
+// Igual que el marco: interno del motor, servido desde el paquete y fuera de plantillas/,
+// que es lo que `demo init` copia al proyecto del usuario.
+const PLANTILLA = join(AQUI, 'escenario', 'escena.html');
 
 /**
  * Renderiza la transición 3D de entrada a un capítulo, frame a frame.

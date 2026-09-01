@@ -3,7 +3,10 @@ import { fileURLToPath } from 'node:url';
 import { conPagina } from './render-web.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
-const PLANTILLA = join(AQUI, '..', 'plantillas', 'escenario', 'marco.html');
+// La plantilla vive en src/, no en plantillas/: `demo init` copia plantillas/ ENTERA al
+// proyecto del usuario, y esta página es un interno del motor que se carga desde el propio
+// paquete. En plantillas/ terminaba copiada a cada proyecto como si fuera andamiaje editable.
+const PLANTILLA = join(AQUI, 'escenario', 'marco.html');
 
 /** Alto de la barra de ventana, en px. Lo aplica el JS al render (ver renderizarMarco). */
 export const ALTO_BARRA = 38;

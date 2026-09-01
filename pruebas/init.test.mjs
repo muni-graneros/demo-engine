@@ -21,6 +21,12 @@ test('demo init copia el andamiaje y es idempotente (no pisa lo existente)', () 
     assert.ok(existsSync(join(dir, 'demo', 'guiones', '_ui.mjs')));
     assert.ok(existsSync(join(dir, 'demo', 'CONTEXTO-Y-SEEDER.md')));
     assert.match(r1.stdout, /archivo\(s\) creado/);
+    // Y NO deja internos del motor: las plantillas del escenario 3D (marco y escena) se
+    // cargan desde el propio paquete, así que copiarlas al proyecto solo genera confusión
+    // y copias que nunca se releen. Viven en src/escenario/ justamente por esto.
+    assert.ok(!existsSync(join(dir, 'escenario')), 'demo init no debe copiar el escenario del motor');
+    assert.ok(!existsSync(join(dir, 'marco.html')));
+    assert.ok(!existsSync(join(dir, 'escena.html')));
 
     // Marcar el config para comprobar que la 2da corrida NO lo pisa.
     const marca = '// EDITADO POR EL USUARIO\n';
