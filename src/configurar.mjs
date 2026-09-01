@@ -64,6 +64,7 @@ const DEFECTOS = {
 // ausencia del bloque en "presentación con todo por defecto", que es justo lo contrario.
 const DEFECTOS_PRESENTACION = {
     fondo: null,        // null = gradiente derivado de marca.color
+    url: null,          // null = la barra rotula baseURL; declarar la URL pública para publicar
     padding: 80,
     radio: 16,
     sombra: true,

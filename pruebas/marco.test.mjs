@@ -99,3 +99,15 @@ test('sin marca no revienta: el fondo cae al color de marca por defecto', () => 
     // Y con fondo declarado, la marca no pinta nada.
     assert.equal(fondoDelMarco({ ...presentacion, fondo: '#123456' }, null), '#123456');
 });
+
+test('la barra rotula presentacion.url cuando se declara, en vez de baseURL', async () => {
+    // Se graba siempre contra localhost, pero el video se publica: sin esta opción la ventana
+    // mostraba el puerto interno de desarrollo en cada capítulo.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-marco-'));
+    const texto = await renderizarMarco({
+        salida: dir, presentacion: { ...presentacion, url: 'https://siredic.ejemplo.cl' },
+        marca: { color: '#1e3a8a' }, baseURL: 'http://localhost:8000', devolverTexto: true,
+    });
+    assert.match(texto, /siredic\.ejemplo\.cl/);
+    assert.doesNotMatch(texto, /localhost/);
+});

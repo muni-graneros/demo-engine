@@ -41,6 +41,11 @@ export function geometria({ salida, padding, barra }) {
 /**
  * Renderiza el PNG del marco una sola vez.
  *
+ * `presentacion.url`, opcional: lo que MUESTRA la barra. Por defecto es `baseURL`, que es la
+ * URL contra la que se graba —`http://localhost:8000` en cualquier equipo de desarrollo—, y en
+ * un video que se publica eso se ve mal y además delata el puerto interno. Declarando la URL
+ * pública, la barra la rotula sin tocar adónde navega el motor.
+ *
  * El marco NO se dibuja con filtros de ffmpeg por dos razones medidas: `drawtext` no está
  * compilado en el ffmpeg estático (así que la URL de la barra no se puede rotular), y el
  * alfa de `geq` es binario, con lo que las esquinas redondeadas salen con escalón. El
@@ -126,7 +131,7 @@ export async function renderizarMarco({ salida, presentacion, marca, baseURL, de
             document.getElementById('hueco').style.height = g.alto + 'px';
             document.getElementById('url').textContent = url;
             return document.getElementById('url').textContent;
-        }, { ancho, alto, g, fondo, url: baseURL, radio: presentacion.radio, sombra: presentacion.sombra });
+        }, { ancho, alto, g, fondo, url: presentacion.url ?? baseURL, radio: presentacion.radio, sombra: presentacion.sombra });
 
         if (devolverTexto) return texto;
         await page.screenshot({ path: png, omitBackground: true, type: 'png' });
