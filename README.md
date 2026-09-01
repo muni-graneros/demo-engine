@@ -248,7 +248,9 @@ fondo, y en `demo curso` cada cambio de capítulo puede hacer una transición 3D
 video: {
   ancho: 1600, alto: 1000,
   presentacion: {
-    fondo: null,                  // Ruta a una imagen, o null = gradiente derivado de marca.color
+    fondo: null,                  // Color o gradiente CSS ('#0f172a', 'linear-gradient(...)'),
+                                  // o null = gradiente 135° derivado de marca.color.
+                                  // No acepta imágenes: están fuera de alcance.
     padding: 80,                  // Margen entre el borde del fondo y la ventana (px)
     radio: 16,                    // Radio de las esquinas de la ventana (px)
     sombra: true,                 // Sombra proyectada bajo la ventana
@@ -259,10 +261,12 @@ video: {
 },
 ```
 
-**Costo de render:** las transiciones se calculan frame a frame, a ~94 ms por frame. Una
-transición de 900 ms (los ~22-23 frames que le corresponden a 25 fps) cuesta del orden de
-1 segundo de render — no se ve así en el video (dura los 900 ms declarados), pero sí se nota
-en cuánto tarda `demo curso` en terminar cuando tiene varios capítulos.
+**Costo de render:** las transiciones se calculan frame a frame. Medido en el equipo de
+referencia (ThinkPad E490, salida 1920x1080), una transición de 900 ms —los 23 frames que le
+corresponden a 25 fps— cuesta **entre 5 y 8 segundos de render**: los ~94 ms por frame de la
+captura más el arranque de un Chromium propio por transición, que es lo que domina el número.
+No se ve así en el video (dura los 900 ms declarados), pero un curso de seis capítulos son
+cinco transiciones, o sea del orden de medio minuto extra en `demo curso`.
 
 **`transicion3d.activa: false`** deja el marco (fondo + ventana con sombra) pero sin ningún
 movimiento entre capítulos: es la opción para material que necesita una versión sin
