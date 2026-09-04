@@ -50,6 +50,21 @@ test('con el entorno declarado como producción, el guardián protege', () => {
         /DEMO_ENTORNO="production"/);
 });
 
+test('una señal de producción NIEGA aunque la otra variable declare desarrollo', () => {
+    // La declaración autoriza, pero no borra lo que dice la otra variable. En una isla del
+    // VPS municipal el proceso tiene `APP_ENV=production` en su entorno y el sistema se ve
+    // desde adentro como `localhost` o como un 10.x: si un `DEMO_ENTORNO=local` heredado de
+    // la shell —el que el README pide exportar para trabajar en la máquina propia, y que
+    // termina en el .envrc o en el .bashrc de cualquiera— alcanzara para tapar ese
+    // `production`, el guardián dejaría grabar contra el sistema real. La versión anterior a
+    // la declaración explícita cortaba ese caso; al invertir la lógica se perdió, y esto lo
+    // vuelve a fijar: entre varias declaraciones, la que dice producción gana siempre.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://10.0.0.9:8000', { DEMO_ENTORNO: 'local', APP_ENV: 'production' }),
+        /APP_ENV="production"/);
+    assert.throws(() => exigirEntornoDeDesarrollo('http://localhost:8031', { DEMO_ENTORNO: 'testing', APP_ENV: 'staging' }),
+        /APP_ENV="staging"/);
+});
+
 test('contraprueba: con desarrollo declarado, el flujo local sigue funcionando', () => {
     // Sin esta contraprueba, un guardián que bloqueara TODO pasaría los tests de arriba en
     // verde y dejaría el motor inservible para grabar en la máquina propia.

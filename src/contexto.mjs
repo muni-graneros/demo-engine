@@ -1,6 +1,7 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
 
 /**
  * Captura el "pack de contexto" de un sistema: un screenshot por pantalla declarada, para
@@ -28,6 +29,14 @@ import { join, resolve } from 'node:path';
  * @param {string} args.salida carpeta del pack (se crea `pantallas/` dentro)
  */
 export async function capturarContexto({ config, sesiones, salida }) {
+    // Mismo guardián que `prepararSesiones` (commit 6d4dfec) y `sesionSigueViva`: esto abre
+    // un navegador contra `config.baseURL` con las sesiones reales de los actores y deja un
+    // PNG por pantalla en disco. Faltaba acá, y el camino del CLI solo lo tapaba de casualidad
+    // —`demo contexto` loguea justo antes, y ese login sí pasa por el guardián—; con las
+    // sesiones ya cacheadas en `.sesiones/`, o llamando a esta función desde la API del
+    // paquete, no quedaba nada que impidiera fotografiar el sistema real.
+    exigirEntornoDeDesarrollo(config.baseURL);
+
     const cfg = config.contexto ?? {};
     const pantallas = cfg.pantallas ?? [];
     const dir = resolve(salida, 'pantallas');

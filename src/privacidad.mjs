@@ -35,7 +35,8 @@ function hostNoPublico(host) {
  * `DEMO_ENTORNO` (la del motor) o, para quien ya exporta la del sistema PHP, con `APP_ENV`;
  * sin ninguna de las dos NO SE GRABA. El comportamiento por omisión es el seguro: quien no
  * dijo nada no autorizó nada. El host se sigue mirando, pero solo para NEGAR —un dominio
- * público no es desarrollo aunque alguien lo declare— nunca para permitir.
+ * público no es desarrollo aunque alguien lo declare— nunca para permitir, y lo mismo vale
+ * entre las dos variables: si CUALQUIERA de las dos dice producción, no se graba.
  *
  * `DEMO_FORZAR=1` sigue siendo el único escape, y hay que pedirlo a propósito.
  *
@@ -56,12 +57,25 @@ export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
         throw new Error(`"${host}" no es una dirección local ni de red privada: grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
     }
 
-    // `DEMO_ENTORNO` gana sobre `APP_ENV`: la del motor se pone a propósito para esta
-    // corrida, mientras que la de PHP puede venir heredada de la shell y no describir el
-    // destino que se está por grabar. Una variable presente pero vacía no es una declaración.
-    const variable = env.DEMO_ENTORNO?.trim() ? 'DEMO_ENTORNO' : (env.APP_ENV?.trim() ? 'APP_ENV' : null);
+    // Se miran las DOS variables, no solo la primera que esté puesta. Una presente pero
+    // vacía no dice nada, así que no cuenta como declaración.
+    const declaraciones = [['DEMO_ENTORNO', env.DEMO_ENTORNO], ['APP_ENV', env.APP_ENV]]
+        .map(([nombre, valor]) => [nombre, valor?.trim()])
+        .filter(([, valor]) => valor);
 
-    if (!variable) {
+    // Una señal de producción NIEGA aunque la otra variable diga desarrollo, igual que el
+    // host: acá las declaraciones se combinan como restricciones, no por precedencia. Si
+    // ganara la más específica, un `DEMO_ENTORNO=local` heredado de la shell —el que el
+    // README pide exportar para trabajar, y que termina en el .envrc o el .bashrc de
+    // cualquiera— taparía el `APP_ENV=production` que el proceso tiene en su entorno DENTRO
+    // de una isla del VPS municipal, donde además el sistema real se ve como `localhost`.
+    // Ahí el guardián dejaría grabar contra producción, que es justo lo que no puede pasar.
+    const produccion = declaraciones.find(([, valor]) => !ENTORNOS_DE_DESARROLLO.includes(valor.toLowerCase()));
+    if (produccion) {
+        throw new Error(`${produccion[0]}="${produccion[1]}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
+    }
+
+    if (!declaraciones.length) {
         throw new Error(
             `el entorno está sin declarar y "${host}" podría ser producción: en la red municipal ` +
             'la VPN y los sistemas en producción usan los mismos rangos privados que el ' +
@@ -69,11 +83,6 @@ export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
             `DEMO_ENTORNO=${ENTORNOS_DE_DESARROLLO[0]} si de verdad es tu máquina de desarrollo ` +
             '(o DEMO_FORZAR=1 si sabes lo que haces)',
         );
-    }
-
-    const declarado = env[variable].trim().toLowerCase();
-    if (!ENTORNOS_DE_DESARROLLO.includes(declarado)) {
-        throw new Error(`${variable}="${env[variable].trim()}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
     }
 }
 

@@ -11,6 +11,47 @@ import { declararEntornoDePruebas } from './entorno.mjs';
 // El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
 declararEntornoDePruebas();
 
+test('pasa por el guardián de entorno antes de abrir el navegador', async () => {
+    // El hueco que fija este test: `capturarContexto` navegaba a `config.baseURL` con las
+    // sesiones reales de los actores y dejaba los screenshots en disco sin pasar nunca por
+    // `exigirEntornoDeDesarrollo`. Es la misma familia que ya se cerró en `prepararSesiones`
+    // (commit 6d4dfec) y en `sesionSigueViva`, y acá duele igual o más: el pack de contexto
+    // es justamente una captura de pantalla POR PANTALLA del sistema, sesión iniciada, y
+    // queda en archivos PNG que después viajan a un generador de manuales.
+    //
+    // Las sesiones se preparan con el entorno declarado (que es lo que hace la suite) y
+    // recién después se quita la declaración: eso reproduce el caso real, el de las sesiones
+    // ya cacheadas en `.sesiones/` de una corrida anterior, donde nada vuelve a loguear y
+    // por lo tanto nada volvía a pasar por el guardián.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    const declarado = process.env.DEMO_ENTORNO;
+    const appEnv = process.env.APP_ENV;
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar', comprobar: null },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600 },
+            contexto: { salida, pantallas: [{ id: 'panel', url: '/panel', actor: 'funcionario' }] },
+        };
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        delete process.env.DEMO_ENTORNO;
+        delete process.env.APP_ENV;
+        await assert.rejects(() => capturarContexto({ config, sesiones, salida }), /sin declarar/);
+        assert.ok(!existsSync(join(salida, 'pantallas', 'panel.png')),
+            'no debe quedar ninguna captura del sistema en disco');
+        assert.ok(!existsSync(join(salida, 'pantallas.json')),
+            'ni el manifiesto: el guardián corta antes de tocar el disco');
+    } finally {
+        if (declarado === undefined) delete process.env.DEMO_ENTORNO; else process.env.DEMO_ENTORNO = declarado;
+        if (appEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = appEnv;
+        await juguete.cerrar();
+    }
+});
+
 test('captura el pack: público + con sesión + interacción, y anota las que fallan', async () => {
     const juguete = await iniciarJuguete({ puerto: 0 });
     const salida = mkdtempSync(join(tmpdir(), 'demo-ctx-'));

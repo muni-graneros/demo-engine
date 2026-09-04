@@ -605,10 +605,12 @@ import { cubrir, descubrir } from 'demo-engine';
 exigirEntornoDeDesarrollo(config.baseURL, process.env);
 // Falla si:
 // - No hay entorno declarado           ← el defecto, y el caso más común
-// - DEMO_ENTORNO (o APP_ENV) dice 'production', 'staging', etc.
+// - CUALQUIERA de las dos, DEMO_ENTORNO o APP_ENV, dice 'production', 'staging', etc.
+//   (declarar desarrollo en la otra NO lo tapa: la señal de producción manda)
 // - El host es público (aunque el entorno diga 'local')
 // Solo continúa si:
-// - DEMO_ENTORNO (o, si no está, APP_ENV) es 'local', 'testing' o 'development'
+// - Al menos una de las dos está declarada, y NINGUNA de las declaradas dice otra cosa
+//   que 'local', 'testing' o 'development'
 //   Y el host es 127.x, 192.168.x, 10.x, 172.16-31.x, ::1, localhost, *.local, *.lan, *.test
 // - O DEMO_FORZAR=1 (pero no lo hagas en producción)
 ```

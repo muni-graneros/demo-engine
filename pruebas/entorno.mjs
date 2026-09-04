@@ -8,11 +8,14 @@
  * Que la suite tenga que declararlo es justamente la contraprueba de que el flujo de
  * desarrollo sigue entero cuando se lo declara.
  *
- * Se fija sin condición (no con `??=`): la suite tiene que dar lo mismo corra donde corra, y
- * un `DEMO_ENTORNO=production` heredado de la shell de quien la lanza la pondría roja por un
- * motivo que no tiene nada que ver con el código. Los tests del CLI lanzan el binario como
- * proceso hijo sin `env` propio, así que heredan esto.
+ * Se fijan las DOS variables sin condición (no con `??=`): la suite tiene que dar lo mismo
+ * corra donde corra, y como el guardián niega en cuanto CUALQUIERA de las dos dice
+ * producción, un `APP_ENV=production` heredado de la shell de quien la lanza —o del .envrc
+ * del proyecto— la pondría roja entera por un motivo que no tiene nada que ver con el
+ * código. Los tests del CLI lanzan el binario como proceso hijo sin `env` propio, así que
+ * heredan esto.
  */
 export function declararEntornoDePruebas() {
     process.env.DEMO_ENTORNO = 'testing';
+    process.env.APP_ENV = 'testing';
 }
