@@ -112,6 +112,117 @@ test('falla si un actor no trae email o password', async () => {
     await assert.rejects(() => cargarConfig(dir), /funcionario.*password/);
 });
 
+// ── El aviso de contraseñas en claro ───────────────────────────────────────────
+//
+// La plantilla enseñaba `password: 'lo-que-sea'` y cuatro sistemas lo copiaron, así
+// que la clave del actor terminaba versionada en git. Se arregló en los cinco, pero
+// el arreglo no se sostiene solo: el próximo `demo init` copia la plantilla y el
+// siguiente que agregue un actor escribe la clave en claro otra vez.
+//
+// Por eso el aviso vive acá, en la carga: es el único punto por el que pasan TODOS
+// los consumidores. La comprobación es sobre el TEXTO del archivo y no sobre el
+// valor cargado, que es la distinción que hace que esto sirva: en tiempo de
+// ejecución `process.env.DEMO_CLAVE ?? 'password'` y un literal son indistinguibles
+// —los dos son un string—, y lo que importa no es qué clave se usa sino si quedó
+// escrita en el repositorio.
+
+/** Escribe un demo.config.mjs con el TEXTO dado, sin pasar por JSON.stringify. */
+function proyectoCrudo(fuente) {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-cfg-'));
+    mkdirSync(join(dir, 'guiones'));
+    writeFileSync(join(dir, 'demo.config.mjs'), fuente);
+    return dir;
+}
+
+/** Corre `fn` capturando lo que se avise por console.warn. */
+async function avisos(fn) {
+    const original = console.warn;
+    const capturado = [];
+    console.warn = (...args) => capturado.push(args.join(' '));
+    try {
+        await fn();
+    } finally {
+        console.warn = original;
+    }
+    return capturado;
+}
+
+const fuenteCon = (linea) => `export default {
+    baseURL: 'http://localhost:8031',
+    marca: { nombre: 'Sistema' },
+    guiones: './guiones',
+    salida: './salida',
+    actores: {
+        funcionario: { email: 'f@x.cl', ${linea} },
+    },
+};
+`;
+
+test('avisa cuando la contraseña de un actor está escrita en claro en el archivo', async () => {
+    const dir = proyectoCrudo(fuenteCon("password: 'Clave-Real-2026'"));
+
+    const capturado = await avisos(() => cargarConfig(dir));
+
+    assert.equal(capturado.length, 1, 'debía avisar exactamente una vez');
+    assert.match(capturado[0], /demo\.config\.mjs:7/, 'el aviso debe decir dónde está');
+    assert.match(capturado[0], /DEMO_CLAVE/, 'y debe decir cómo arreglarlo');
+    assert.ok(
+        !capturado[0].includes('Clave-Real-2026'),
+        'el aviso NO puede imprimir la contraseña: sería filtrarla al log que se quería evitar',
+    );
+});
+
+test('no avisa cuando la contraseña viene del entorno', async () => {
+    const dir = proyectoCrudo(fuenteCon("password: process.env.DEMO_CLAVE ?? 'password'"));
+
+    const capturado = await avisos(() => cargarConfig(dir));
+
+    assert.deepEqual(capturado, [], 'el respaldo `password` del seeder no es una filtración');
+});
+
+test('no avisa por la contraseña del seeder ni por una línea comentada', async () => {
+    // `'password'` es el valor que deja el seeder de demo en todos los sistemas: es
+    // público, está en el repo del scaffold y no identifica ninguna cuenta real.
+    // Avisar por él sería ruido, y el ruido es lo que hace que se ignore el aviso.
+    const dir = proyectoCrudo(`export default {
+    baseURL: 'http://localhost:8031',
+    marca: { nombre: 'Sistema' },
+    guiones: './guiones',
+    salida: './salida',
+    // Ejemplo para quien copie esto:
+    //   password: 'la-que-sea',
+    actores: {
+        funcionario: { email: 'f@x.cl', password: 'password' },
+    },
+};
+`);
+
+    const capturado = await avisos(() => cargarConfig(dir));
+
+    assert.deepEqual(capturado, []);
+});
+
+test('un selector CSS que menciona password no dispara el aviso', async () => {
+    // El scaffold tiene `clave: 'input[wire\\:model="data.password"]'` para el
+    // formulario de login. Confundirlo con una contraseña haría que el aviso saliera
+    // en todos los sistemas siempre, que es la forma más rápida de que deje de leerse.
+    const dir = proyectoCrudo(`export default {
+    baseURL: 'http://localhost:8031',
+    marca: { nombre: 'Sistema' },
+    guiones: './guiones',
+    salida: './salida',
+    selectores: { clave: 'input[wire\\\\:model="data.password"]' },
+    actores: {
+        funcionario: { email: 'f@x.cl', password: process.env.DEMO_CLAVE ?? 'password' },
+    },
+};
+`);
+
+    const capturado = await avisos(() => cargarConfig(dir));
+
+    assert.deepEqual(capturado, []);
+});
+
 test('falla si la carpeta de guiones no existe', async () => {
     const dir = proyecto({ ...minima, guiones: './no-existe' });
     await assert.rejects(() => cargarConfig(dir), /guiones/);

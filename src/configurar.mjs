@@ -1,4 +1,4 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -95,6 +95,61 @@ function fusionarVideo(defectos, cruda = {}) {
 }
 
 /**
+ * Una contraseña escrita como literal: `password: 'algo'` o `"password": "algo"`.
+ *
+ * Deja fuera cualquier cosa que no sea una comilla justo después de los dos puntos,
+ * que es lo que descarta `password: process.env.DEMO_CLAVE ?? 'password'` — ahí el
+ * valor lo pone el entorno y el `'password'` final es solo el respaldo del seeder.
+ */
+const CLAVE_LITERAL = /\bpassword["']?\s*:\s*(["'])(.*?)\1/;
+
+/** El valor que deja el seeder de demo en todos los sistemas: público, no identifica a nadie. */
+const CLAVE_DEL_SEEDER = 'password';
+
+/**
+ * Avisa por consola cuando el archivo trae la contraseña de un actor escrita en claro.
+ *
+ * Cuatro sistemas la tenían versionada porque la plantilla lo enseñaba así. Se
+ * corrigió en los cinco, pero eso no impide que vuelva: el próximo `demo init` copia
+ * la plantilla y quien agregue un actor escribe la clave a mano. Este aviso es lo que
+ * hace que el arreglo se sostenga, y va acá porque la carga de la config es el único
+ * punto por el que pasan todos los consumidores.
+ *
+ * Se mira el TEXTO del archivo y no el valor ya cargado a propósito: en ejecución un
+ * literal y `process.env.DEMO_CLAVE` son los dos un string y no se distinguen. Lo que
+ * importa no es qué clave se usa, sino si quedó escrita en el repositorio.
+ *
+ * Avisa, no falla: romper la carga dejaría sin videos a cualquiera que actualice el
+ * motor, y el riesgo real de una clave de seeder no justifica ese costo.
+ *
+ * @param {string} archivo ruta del demo.config.mjs, para nombrarla en el aviso
+ * @param {string} texto contenido del archivo
+ */
+function avisarClavesEnClaro(archivo, texto) {
+    const nombre = archivo.split('/').slice(-1)[0];
+
+    texto.split('\n').forEach((linea, i) => {
+        const sinComentario = linea.trim();
+        if (sinComentario.startsWith('//') || sinComentario.startsWith('*')) {
+            return;
+        }
+
+        const hallazgo = CLAVE_LITERAL.exec(linea);
+        if (!hallazgo || hallazgo[2] === CLAVE_DEL_SEEDER) {
+            return;
+        }
+
+        // Se nombra la línea, nunca el valor: imprimirlo filtraría al log justo lo
+        // que este aviso existe para sacar del repositorio.
+        console.warn(
+            `[demo-engine] ${nombre}:${i + 1} trae la contraseña de un actor escrita en claro, ` +
+                'y este archivo está versionado.\n' +
+                "              Usá `password: process.env.DEMO_CLAVE ?? 'password'` y pasá la clave por el entorno.",
+        );
+    });
+}
+
+/**
  * Carga y valida el contrato del sistema consumidor.
  * @param {string} rutaProyecto carpeta que contiene demo.config.mjs
  * @returns {Promise<object>} configuración con los valores por defecto aplicados
@@ -102,6 +157,8 @@ function fusionarVideo(defectos, cruda = {}) {
 export async function cargarConfig(rutaProyecto) {
     const archivo = resolve(rutaProyecto, 'demo.config.mjs');
     exigir(existsSync(archivo), `no se encontró el archivo en ${rutaProyecto}`);
+
+    avisarClavesEnClaro(archivo, readFileSync(archivo, 'utf8'));
 
     const { default: cruda } = await import(pathToFileURL(archivo).href);
     exigir(cruda && typeof cruda === 'object', 'debe exportar por defecto un objeto');
