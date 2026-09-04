@@ -1,14 +1,20 @@
 name: CI
 
 on:
-  # Manual, push a main (gate final) y PRs hacia main. Repo público: los minutos de
-  # Actions son gratis, así que el ahorro acá no es de plata sino de ruido — no correr
-  # en cada rama, solo cuando algo va a integrarse.
+  # Manual, push a main y develop, y PRs hacia cualquiera de las dos.
+  #
+  # `develop` estaba fuera, y en este ecosistema el trabajo diario va justamente
+  # ahí: cada push a la rama donde se desarrolla pasaba sin correr una sola
+  # prueba, y el CI solo avisaba al integrar, cuando el cambio ya está mezclado
+  # con otros y cuesta más saber cuál lo rompió.
+  #
+  # El argumento de «no correr en cada rama para no hacer ruido» sigue valiendo
+  # para las ramas de trabajo sueltas: éstas son las dos ramas que importan.
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.ref }}
