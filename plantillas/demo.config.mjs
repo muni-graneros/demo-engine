@@ -22,8 +22,21 @@ export default {
     },
 
     // Actores (usuarios) que graban. La clave es el nombre que usan los guiones (`actor: 'funcionario'`).
+    //
+    // La contraseña sale de DEMO_CLAVE. El literal que queda de respaldo es la del
+    // seeder de demo en local, y está acá a propósito para que `demo grabar` funcione
+    // recién clonado el repo — pero NO escribas otra en claro:
+    //
+    //   * queda en git para siempre, aunque después la cambies;
+    //   * es la misma que crea el seeder, así que si ese seeder llegara a correr en
+    //     producción (ya está bloqueado en los sistemas, pero el bloqueo es una línea
+    //     que alguien puede borrar) la contraseña de las cuentas reales estaría
+    //     publicada en el repositorio.
+    //
+    // Para una demo contra datos que no sean de juguete: exporta DEMO_CLAVE y no toques
+    // este archivo.
     actores: {
-        funcionario: { email: 'admin@ejemplo.cl', password: 'password' },
+        funcionario: { email: 'admin@ejemplo.cl', password: process.env.DEMO_CLAVE ?? 'password' },
     },
 
     // Datos de demo antes de CADA grabación (opcional). Un comando de tu sistema.
