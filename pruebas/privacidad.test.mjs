@@ -381,7 +381,15 @@ test('exigirUnaSolaPersona: falla cerrado y cubre la pantalla si hay más de un 
             () => exigirUnaSolaPersona(page, { patron: PATRON_RUT }),
             (error) => {
                 assert.match(error.message, /3 identificadores distintos/);
-                assert.match(error.message, /11111111-1/);
+                // El identificador va ENMASCARADO: este error sube hasta la
+                // consola y, en CI, hasta el log — y el portero salta justamente
+                // cuando hay datos reales a la vista. Queda lo justo para
+                // reconocerlo (ver privacidad-enmascarado.test.mjs).
+                assert.match(error.message, /11111\*\*\*-\*/);
+                assert.ok(
+                    !error.message.includes('11111111-1'),
+                    'el identificador completo sigue saliendo en el mensaje del error',
+                );
                 return true;
             },
         );

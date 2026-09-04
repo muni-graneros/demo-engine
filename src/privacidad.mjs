@@ -323,10 +323,75 @@ export async function exigirUnaSolaPersona(page, auditoria) {
         // la pantalla real a la vista ni un instante más de lo necesario mientras el error se
         // propaga hacia arriba.
         await cubrir(page);
+        // Enmascarados: este error sube hasta la consola y, en CI, hasta el log.
+        // El portero salta justamente cuando hay datos reales a la vista, que es
+        // el peor momento para copiarlos a otro sitio. Con DEMO_DEPURAR=1 salen
+        // completos, para poder investigar un falso positivo.
         throw new Error(
             `la pantalla muestra ${identificadores.length} identificadores distintos ` +
-            `(${identificadores.join(', ')}): sin abrirFiltrado/abrirVerificado ni ` +
+            `(${listaEnmascarada(identificadores)}): sin abrirFiltrado/abrirVerificado ni ` +
             'paso.variasPersonas = true, no se graba (falla cerrado)',
         );
     }
+}
+
+/**
+ * Deja de un identificador lo justo para reconocerlo, sin escribirlo entero.
+ *
+ * El portero se dispara justamente cuando algo salió mal y hay datos reales a la
+ * vista. Escribir los RUT completos en ese momento —a stdout, al mensaje del
+ * error, y de ahí al log de CI o a un `tee`— es copiarlos a otro sitio en el peor
+ * instante posible.
+ *
+ * Se conservan los primeros dos tercios porque lo que hace falta para depurar es
+ * saber CUÁNTOS eran y poder distinguirlos entre sí: enmascarar de más volvería
+ * el portero inútil, porque dos personas distintas se verían iguales en el log.
+ *
+ * @param {string} identificador
+ * @returns {string}
+ */
+export function enmascararIdentificador(identificador) {
+    const texto = String(identificador ?? '');
+    if (!texto) return '';
+
+    // Se tapan los CUATRO ÚLTIMOS alfanuméricos: en un RUT chileno eso es el
+    // dígito verificador y los tres anteriores, o sea `12.345.678-5` sale como
+    // `12.345.***-*`. Los separadores se dejan para que siga leyéndose como un
+    // RUT y no como una cadena cualquiera.
+    //
+    // Cuatro y no más: lo que hace falta para depurar es saber cuántos eran y
+    // poder distinguirlos entre sí. Tapando más, dos personas distintas se verían
+    // iguales en el log y el portero dejaría de servir para lo que existe.
+    const esAlfanumerico = (c) => /[0-9a-zA-Z]/.test(c);
+    const total = texto.split('').filter(esAlfanumerico).length;
+    const visibles = Math.max(total - 4, 0);
+
+    let vistos = 0;
+
+    return texto
+        .split('')
+        .map((caracter) => {
+            if (!esAlfanumerico(caracter)) return caracter;
+            vistos += 1;
+            return vistos <= visibles ? caracter : '*';
+        })
+        .join('');
+}
+
+/**
+ * Los identificadores listos para escribir en un log o en un mensaje de error.
+ *
+ * Con `DEMO_DEPURAR=1` salen completos: depurar un falso positivo del portero
+ * exige ver qué encontró, pero eso se pide a propósito y no es lo que pasa por
+ * omisión.
+ *
+ * @param {string[]} identificadores
+ * @returns {string}
+ */
+export function listaEnmascarada(identificadores) {
+    const lista = identificadores ?? [];
+
+    if (process.env.DEMO_DEPURAR === '1') return lista.join(', ');
+
+    return lista.map(enmascararIdentificador).join(', ');
 }

@@ -12,6 +12,7 @@ import { generarManual } from './src/manual.mjs';
 import { capturarContexto } from './src/contexto.mjs';
 import { crearVoz } from './src/voz/index.mjs';
 import { auditarVideo, auditarCapturas } from './src/auditoria.mjs';
+import { listaEnmascarada } from './src/privacidad.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -274,10 +275,10 @@ async function ejecutarOrden(config, voz) {
             await auditarCapturas(join(config.salida, 'capturas'), config);
 
         for (const s of sospechosos) {
-            console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — frame guardado en: ${s.archivo}`);
+            console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${listaEnmascarada(s.identificadores)}) — frame guardado en: ${s.archivo}`);
         }
         for (const s of sospechososCapturas) {
-            console.log(`[SOSPECHOSO CAPTURA] ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — imagen: ${s.archivo}`);
+            console.log(`[SOSPECHOSO CAPTURA] ${s.identificadores.length} identificadores distintos (${listaEnmascarada(s.identificadores)}) — imagen: ${s.archivo}`);
         }
         console.log(`\n${video}: ${sospechosos.length} de ${total} frames sospechosos.`);
         console.log(`${join(config.salida, 'capturas')}: ${sospechososCapturas.length} de ${totalCapturas} capturas sospechosas.`);

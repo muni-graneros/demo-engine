@@ -21,15 +21,36 @@ function escudoDePrueba() {
 }
 after(() => rmSync(RUTA_ESCUDO, { force: true }));
 
+// Una página "con datos" para comprobar que la portada la reemplaza.
+//
+// Antes esto era `https://example.com`, y el test se caía con
+// ERR_INTERNET_DISCONNECTED en cualquier entorno sin salida a internet — que es
+// el caso de un CI aislado y el de este equipo. Un test de PRIVACIDAD que no
+// puede correr no protege nada.
+//
+// Una `data:` URL sirve igual y mejor: no depende de la red, es determinista, y
+// puede traer texto que se parezca a lo que de verdad habría en pantalla, así el
+// test puede comprobar que ese texto DESAPARECE y no solo que cambió la URL.
+const DATOS_A_LA_VISTA = 'Ana Soto Pérez — 12.345.678-5 — Solicitud 4211';
+const PAGINA_CON_DATOS =
+    'data:text/html,' + encodeURIComponent(`<body>${DATOS_A_LA_VISTA}</body>`);
+
 test('la portada se dibuja sobre about:blank, nunca sobre datos', async () => {
     const navegador = await chromium.launch();
     const page = await navegador.newPage();
     try {
-        await page.goto('https://example.com');
+        await page.goto(PAGINA_CON_DATOS);
+        assert.match(await page.textContent('body'), /12\.345\.678-5/,
+            'la página de partida tiene que traer los datos, o el test no prueba nada');
+
         await portada(page, { titulo: 'Capítulo 2', subtitulo: 'El municipio revisa',
             capitulo: '2', marca: { nombre: 'Sistema', color: '#1e3a8a' }, esperaMs: 10 });
+
         assert.equal(page.url(), 'about:blank', 'la portada debe navegar a about:blank primero');
-        assert.match(await page.textContent('body'), /El municipio revisa/);
+        const cuerpo = await page.textContent('body');
+        assert.match(cuerpo, /El municipio revisa/);
+        assert.ok(!cuerpo.includes(DATOS_A_LA_VISTA),
+            'los datos de la pantalla anterior siguen ahí debajo de la portada');
     } finally {
         await navegador.close();
     }
@@ -39,12 +60,19 @@ test('el cierre se dibuja sobre about:blank, nunca sobre datos, simétrico a la 
     const navegador = await chromium.launch();
     const page = await navegador.newPage();
     try {
-        await page.goto('https://example.com');
+        await page.goto(PAGINA_CON_DATOS);
+        assert.match(await page.textContent('body'), /12\.345\.678-5/,
+            'la página de partida tiene que traer los datos, o el test no prueba nada');
+
         await cierre(page, { mensaje: 'Gracias por ver el recorrido',
             marca: { nombre: 'Sistema', color: '#1e3a8a' }, esperaMs: 10 });
+
         assert.equal(page.url(), 'about:blank', 'el cierre debe navegar a about:blank primero');
-        assert.match(await page.textContent('body'), /Gracias por ver el recorrido/);
-        assert.match(await page.textContent('body'), /Sistema/);
+        const cuerpo = await page.textContent('body');
+        assert.match(cuerpo, /Gracias por ver el recorrido/);
+        assert.match(cuerpo, /Sistema/);
+        assert.ok(!cuerpo.includes(DATOS_A_LA_VISTA),
+            'los datos de la pantalla anterior siguen ahí debajo del cierre');
     } finally {
         await navegador.close();
     }
