@@ -7,6 +7,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { RUTA_FFMPEG } from '../src/ffmpeg.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 // cli.mjs es el punto de entrada de todo el motor y hasta ahora solo se había verificado a
 // mano. No hace falta una suite exhaustiva (cada comando ya tiene su lógica de fondo probada

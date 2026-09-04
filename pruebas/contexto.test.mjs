@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { prepararSesiones } from '../src/sesiones.mjs';
 import { capturarContexto } from '../src/contexto.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 test('captura el pack: público + con sesión + interacción, y anota las que fallan', async () => {
     const juguete = await iniciarJuguete({ puerto: 0 });

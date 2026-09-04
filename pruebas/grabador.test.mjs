@@ -7,6 +7,10 @@ import { iniciarJuguete } from './juguete/servidor.mjs';
 import { grabar } from '../src/grabador.mjs';
 
 import { ff, duracion } from '../src/ffmpeg.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 // Voz de mentira que devuelve un .wav REAL de la duración pedida: así el grabador ejercita
 // el mismo camino que en producción (sintetizar → medir → esperar), sin depender de que

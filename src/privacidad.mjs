@@ -5,23 +5,45 @@
 
 import { contarIdentificadores } from './auditoria.mjs';
 
+/** Los únicos valores que se aceptan como «esto es una máquina de desarrollo». */
+const ENTORNOS_DE_DESARROLLO = ['local', 'testing', 'development'];
+
 /**
- * Aborta si hay cualquier señal de que esto no es un entorno de desarrollo.
+ * Un host que NO puede ser el sistema real publicado en internet. Ojo: esto NO dice
+ * «es desarrollo» —eso lo decide la declaración explícita, ver abajo—, solo descarta lo
+ * que con certeza es público. Se usa únicamente para NEGAR, nunca para permitir.
+ */
+function hostNoPublico(host) {
+    return host === 'localhost' || host === '::1' || host.endsWith('.lan') ||
+        host.endsWith('.local') || host.endsWith('.test') ||
+        /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+}
+
+/**
+ * Aborta si el entorno no está DECLARADO como de desarrollo.
  *
- * Falla CERRADO a propósito. `APP_ENV` casi nunca está en el entorno del proceso Node —lo
- * lee PHP de su .env, no nosotros—, así que confiar en su ausencia sería permitir grabar
- * contra producción por omisión. Por eso la señal principal es el HOST de baseURL, que el
- * motor sí conoce siempre: solo se graba contra la máquina propia o la red privada.
+ * Antes esto se deducía del host: cualquier dirección de red privada —10.x, 192.168.x,
+ * 172.16-31.x, `.lan`, y también el loopback— se daba por «desarrollo» y con eso el
+ * guardián se relajaba solo. Está mal justamente acá: en el despliegue municipal la VPN
+ * interna Y LOS SISTEMAS EN PRODUCCIÓN viven en esos mismos rangos privados (VPS por islas,
+ * cada sistema tras su propio Docker rootless), así que la inferencia bajaba la guardia
+ * exactamente donde había datos reales de vecinos. Y el loopback no es mejor señal: parado
+ * dentro de la isla, `http://localhost:8031` ES el sistema en producción.
+ *
+ * Por eso la IP dejó de ser una señal de permiso. El entorno se declara a mano, con
+ * `DEMO_ENTORNO` (la del motor) o, para quien ya exporta la del sistema PHP, con `APP_ENV`;
+ * sin ninguna de las dos NO SE GRABA. El comportamiento por omisión es el seguro: quien no
+ * dijo nada no autorizó nada. El host se sigue mirando, pero solo para NEGAR —un dominio
+ * público no es desarrollo aunque alguien lo declare— nunca para permitir.
+ *
+ * `DEMO_FORZAR=1` sigue siendo el único escape, y hay que pedirlo a propósito.
  *
  * @param {string} baseURL destino de la grabación
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
     if (env.DEMO_FORZAR === '1') return;
-
-    if (env.APP_ENV && !['local', 'testing', 'development'].includes(env.APP_ENV)) {
-        throw new Error(`APP_ENV="${env.APP_ENV}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
-    }
 
     let host;
     try {
@@ -30,13 +52,28 @@ export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
         throw new Error(`baseURL inválida para decidir si el entorno es seguro: "${baseURL}"`);
     }
 
-    const local = host === 'localhost' || host === '::1' || host.endsWith('.lan') ||
-        host.endsWith('.local') || host.endsWith('.test') ||
-        /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-
-    if (!local) {
+    if (!hostNoPublico(host)) {
         throw new Error(`"${host}" no es una dirección local ni de red privada: grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
+    }
+
+    // `DEMO_ENTORNO` gana sobre `APP_ENV`: la del motor se pone a propósito para esta
+    // corrida, mientras que la de PHP puede venir heredada de la shell y no describir el
+    // destino que se está por grabar. Una variable presente pero vacía no es una declaración.
+    const variable = env.DEMO_ENTORNO?.trim() ? 'DEMO_ENTORNO' : (env.APP_ENV?.trim() ? 'APP_ENV' : null);
+
+    if (!variable) {
+        throw new Error(
+            `el entorno está sin declarar y "${host}" podría ser producción: en la red municipal ` +
+            'la VPN y los sistemas en producción usan los mismos rangos privados que el ' +
+            'desarrollo, así que la dirección no alcanza para saberlo. Declara ' +
+            `DEMO_ENTORNO=${ENTORNOS_DE_DESARROLLO[0]} si de verdad es tu máquina de desarrollo ` +
+            '(o DEMO_FORZAR=1 si sabes lo que haces)',
+        );
+    }
+
+    const declarado = env[variable].trim().toLowerCase();
+    if (!ENTORNOS_DE_DESARROLLO.includes(declarado)) {
+        throw new Error(`${variable}="${env[variable].trim()}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
     }
 }
 

@@ -29,9 +29,14 @@ de referencia (idempotente, con seguro para restaurar): pídeselo a Claude con l
 
 ## 4. Genera todo
 ```
+export DEMO_ENTORNO=local   # declara que ESTA máquina es de desarrollo; sin esto no graba
 demo preparar     # inicia sesión de los actores (una vez)
 demo todo         # aislar → pack de contexto → curso (video) → manual (PDF) → restaurar PII
 ```
+El motor no deduce el entorno de la dirección: un `10.x`, un `192.168.x` o un `localhost`
+pueden ser producción igual que cualquier otro host, así que sin `DEMO_ENTORNO` declarado se
+niega a grabar. Es a propósito: el defecto es no grabar.
+
 Salidas en `config.salida` y `config.contexto.salida`. **No versiones** los videos ni el pack
 (son binarios grandes y data sensible): agrégalos a `.gitignore`.
 

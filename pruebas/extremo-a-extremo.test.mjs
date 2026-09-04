@@ -10,6 +10,10 @@ import { grabar } from '../src/grabador.mjs';
 import { montar } from '../src/montaje.mjs';
 import { crearVoz } from '../src/voz/index.mjs';
 import { duracion } from '../src/ffmpeg.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 test('del guion al mp4 con subtítulos, sin tocar Laravel', async () => {
     const juguete = await iniciarJuguete({ puerto: 0 });

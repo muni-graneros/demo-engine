@@ -24,7 +24,11 @@ npx demo init
 # 3. Editar demo.config.mjs (baseURL, login, marca, actores) y los guiones de demo/guiones/.
 #    Leer demo/CONTEXTO-Y-SEEDER.md para el dataset determinista (sin PII).
 
-# 4. Generar TODO en un comando: pack de contexto + curso (video) + manual (PDF)
+# 4. Declarar que ESTA máquina es de desarrollo (si no, el motor se niega a grabar).
+#    Ver "Invariante de privacidad": la dirección IP ya no basta como prueba.
+export DEMO_ENTORNO=local
+
+# 5. Generar TODO en un comando: pack de contexto + curso (video) + manual (PDF)
 npx demo preparar          # inicia sesión de los actores (una vez)
 npx demo todo              # aislar PII → pack → curso → manual → restaurar PII
 ```
@@ -493,7 +497,13 @@ El motor protege datos sensibles **durante la grabación** tapando la pantalla d
 
 **Jamás se graba un dato sensible sin protección.** Dos niveles:
 
-1. **Verificación de host:** `exigirEntornoDeDesarrollo(config.baseURL)` falla si no es `localhost`, `127.0.0.1`, o red privada.
+1. **Entorno declarado a mano:** `exigirEntornoDeDesarrollo(config.baseURL)` exige
+   `DEMO_ENTORNO=local|testing|development` (o `APP_ENV` con uno de esos valores) y, además,
+   que el host no sea público. **Sin declaración no se graba**: el defecto es negar.
+   Antes esto se deducía de la IP —cualquier `10.x`, `192.168.x` o loopback se daba por
+   desarrollo— y eso es exactamente lo que había que sacar: en la red municipal la VPN
+   interna y **los sistemas en producción** viven en esos mismos rangos privados, así que la
+   inferencia relajaba el guardián justo donde hay datos reales de vecinos.
 2. **Pantalla tapada hasta que se cumple una condición:** `abrirFiltrado`/`abrirVerificado` cubren la pantalla, abren la URL, esperan a que una condición se cumpla **de forma estable**, y solo entonces destapan. Si la condición no se cumple, **la pantalla se queda tapada y la función lanza** — nunca se graba "por las dudas".
 
 ### Cuál usar: `abrirFiltrado` vs `abrirVerificado`
@@ -594,13 +604,19 @@ import { cubrir, descubrir } from 'demo-engine';
 // Esto aborta ANTES de grabar:
 exigirEntornoDeDesarrollo(config.baseURL, process.env);
 // Falla si:
-// - APP_ENV es 'production', 'staging', etc.
-// - El host no es localhost ni red privada
+// - No hay entorno declarado           ← el defecto, y el caso más común
+// - DEMO_ENTORNO (o APP_ENV) dice 'production', 'staging', etc.
+// - El host es público (aunque el entorno diga 'local')
 // Solo continúa si:
-// - Host es 127.x, 192.168.x, 10.x, ::1, *.local, *.lan, *.test
-// - O APP_ENV es 'local', 'testing', 'development'
+// - DEMO_ENTORNO (o, si no está, APP_ENV) es 'local', 'testing' o 'development'
+//   Y el host es 127.x, 192.168.x, 10.x, 172.16-31.x, ::1, localhost, *.local, *.lan, *.test
 // - O DEMO_FORZAR=1 (pero no lo hagas en producción)
 ```
+
+La dirección **nunca autoriza**, solo puede negar: un `10.x` o un `localhost` pueden ser
+producción perfectamente (en el despliegue por islas, dentro de la isla, `localhost:8031` ES
+el sistema real). Por eso el permiso viene de una variable que alguien puso a propósito y el
+comportamiento por omisión es no grabar.
 
 ## Auditoría: `demo auditar`
 
@@ -893,7 +909,8 @@ Todas estas funciones se reexportan desde `demo-engine`:
     `stderr` (no lanza excepción: sigue degradando a subtítulos-sin-locución)
 
 ### Privacidad
-- `exigirEntornoDeDesarrollo(baseURL, env?) → void` (falla si no es dev)
+- `exigirEntornoDeDesarrollo(baseURL, env?) → void` (falla si el entorno no está DECLARADO
+  como dev en `DEMO_ENTORNO`/`APP_ENV`, o si el host es público; sin declaración no graba)
 - `cubrir(page) → Promise<void>` (cubre toda la pantalla con panel opaco)
 - `descubrir(page) → Promise<void>` (destapa la pantalla)
 - `abrirFiltrado(page, url, { filtro, valor, selectorFilas, alPintar?, esperaMs? }) → Promise<void>`
@@ -931,7 +948,10 @@ Todas estas funciones se reexportan desde `demo-engine`:
 1. **Offline**: sin llamadas de red en tiempo de ejecución para grabar/montar. La única
    excepción es `demo auditar`, que por definición necesita hablar con un servicio OCR
    externo — por eso es un comando aparte, explícito, y nunca corre como parte de `grabar`.
-2. **Privacidad**: jamás registra datos de sistemas reales. Solo `localhost`, `127.0.0.1`, red privada (10.x, 192.168.x, etc.).
+2. **Privacidad**: jamás registra datos de sistemas reales. Hace falta declarar el entorno
+   (`DEMO_ENTORNO=local|testing|development`) y que el host no sea público; sin
+   declaración no graba. La IP no es prueba de nada: la producción municipal vive en los
+   mismos rangos privados que el desarrollo.
 3. **Subtítulos**: pista `mov_text` dentro del MP4 + sidecar `.vtt`.
 4. **Reproducibilidad**: mismo guion + misma config = mismo MP4.
 5. **Genérico**: el motor no conoce RUT chilenos, puertos ni hosts concretos de ningún

@@ -12,23 +12,68 @@ const PATRON_RUT = '\\d{7,8}-[\\dkK]';
 /** Solo los "Turno Demo N" están permitidos en la cola de atención de juguete. */
 const esPermitido = (nombre) => /^Turno Demo \d+$/.test(nombre);
 
-test('aborta si el entorno no es de desarrollo', () => {
-    // Falla CERRADO: sin APP_ENV, manda el host de baseURL.
-    assert.throws(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', {}), /no es una dirección local/);
-    assert.throws(() => exigirEntornoDeDesarrollo('http://localhost:8031', { APP_ENV: 'production' }), /APP_ENV/);
+// El guardián de entorno. Lo que fijan estos tests es un defecto concreto de la versión
+// vieja: daba por «desarrollo» cualquier host de red privada (10.x, 192.168.x, 172.16-31.x,
+// .lan) y con eso se relajaba. En el despliegue municipal la VPN interna Y la producción
+// viven exactamente en esos rangos, así que la inferencia bajaba la guardia justo donde más
+// hacía falta. Ahora el entorno se DECLARA; sin declaración no se graba nada.
 
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://localhost:8031', {}));
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://127.0.0.1:9000', {}));
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://192.168.1.40:8443', {}));
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias-graneros.lan', {}));
+test('sin entorno declarado no se graba, aunque el host sea de red privada', () => {
+    // El caso del defecto: en la muni, un 10.x es tan producción como cualquier otra cosa.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://10.20.30.40:8000', {}), /sin declarar/);
+    assert.throws(() => exigirEntornoDeDesarrollo('https://192.168.1.40:8443', {}), /sin declarar/);
+    assert.throws(() => exigirEntornoDeDesarrollo('http://172.20.0.5:9000', {}), /sin declarar/);
 
-    // El escape explícito sigue existiendo, pero hay que pedirlo.
-    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', { DEMO_FORZAR: '1' }));
+    // Tampoco el loopback: en el VPS por islas, `localhost:8031` ES el sistema en producción
+    // visto desde adentro de su propia isla.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://localhost:8031', {}), /sin declarar/);
+    assert.throws(() => exigirEntornoDeDesarrollo('http://127.0.0.1:9000', {}), /sin declarar/);
+    assert.throws(() => exigirEntornoDeDesarrollo('https://licencias-graneros.lan', {}), /sin declarar/);
+
+    // Una variable puesta pero vacía no es una declaración.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://10.0.0.9', { DEMO_ENTORNO: '   ' }), /sin declarar/);
 });
 
-test('sin APP_ENV y contra un host público, NO graba (falla cerrado)', () => {
+test('con el entorno declarado como producción, el guardián protege', () => {
+    assert.throws(() => exigirEntornoDeDesarrollo('http://10.20.30.40:8000', { DEMO_ENTORNO: 'production' }),
+        /DEMO_ENTORNO="production"/);
+    assert.throws(() => exigirEntornoDeDesarrollo('https://192.168.1.40:8443', { DEMO_ENTORNO: 'staging' }),
+        /DEMO_ENTORNO="staging"/);
+
+    // APP_ENV (la del .env de PHP) sigue valiendo como declaración cuando alguien la exporta.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://127.0.0.1:8000', { APP_ENV: 'production' }),
+        /APP_ENV="production"/);
+
+    // Y la del motor manda sobre la heredada: declarar producción a propósito no se deshace
+    // con un APP_ENV=local que ande dando vueltas en la shell.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://10.0.0.9', { DEMO_ENTORNO: 'production', APP_ENV: 'local' }),
+        /DEMO_ENTORNO="production"/);
+});
+
+test('contraprueba: con desarrollo declarado, el flujo local sigue funcionando', () => {
+    // Sin esta contraprueba, un guardián que bloqueara TODO pasaría los tests de arriba en
+    // verde y dejaría el motor inservible para grabar en la máquina propia.
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://localhost:8031', { DEMO_ENTORNO: 'local' }));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://127.0.0.1:9000', { DEMO_ENTORNO: 'testing' }));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://192.168.1.40:8443', { DEMO_ENTORNO: 'local' }));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://10.20.30.40:8000', { APP_ENV: 'local' }));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias-graneros.lan', { DEMO_ENTORNO: 'Development' }));
+});
+
+test('un host público es un NO incluso con desarrollo declarado', () => {
+    assert.throws(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', { DEMO_ENTORNO: 'local' }),
+        /no es una dirección local/);
     assert.throws(() => exigirEntornoDeDesarrollo('https://ejemplo.cl', { HOME: '/home/x' }),
         /no es una dirección local/);
+});
+
+test('el escape explícito sigue existiendo, pero hay que pedirlo', () => {
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', { DEMO_FORZAR: '1' }));
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://10.0.0.1', { DEMO_FORZAR: '1', DEMO_ENTORNO: 'production' }));
+});
+
+test('una baseURL que ni siquiera es una URL no pasa', () => {
+    assert.throws(() => exigirEntornoDeDesarrollo('no-soy-una-url', { DEMO_ENTORNO: 'local' }), /baseURL inválida/);
 });
 
 test('la tabla nunca queda visible sin filtrar: el cubridor está desde el primer frame', async () => {

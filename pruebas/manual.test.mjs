@@ -8,6 +8,10 @@ import { iniciarJuguete } from './juguete/servidor.mjs';
 import { prepararSesiones } from '../src/sesiones.mjs';
 import { grabar } from '../src/grabador.mjs';
 import { crearVoz } from '../src/voz/index.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 test('escribe md, html y pdf desde los pasos grabados', async () => {
     const salida = mkdtempSync(join(tmpdir(), 'demo-man-'));
