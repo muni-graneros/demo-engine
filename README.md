@@ -90,16 +90,24 @@ Antes de grabar, instala los motores de voz (Kokoro + Piper de respaldo, ambos e
 bash node_modules/demo-engine/herramientas/instalar-voces.sh
 ```
 
-Esto crea un venv de Python (`.venv`) y descarga los modelos (`.voces`) **en el directorio
-donde corras el script** — normalmente eso es la raíz del paquete `demo-engine` dentro de
-`node_modules` (por ejemplo si lo corrés como parte de un `postinstall`), y así es como lo
-encuentra por defecto el paso 3 de abajo.
+Esto crea un venv de Python y descarga los modelos en **`~/.cache/demo-engine/`**
+(`venv/` y `voces/`; se respeta `XDG_CACHE_HOME`). Son ~670 MB: van a la caché del usuario
+y no al árbol de trabajo, así se bajan una vez por máquina en vez de una vez por repo,
+por worktree y por proyecto que instale `demo-engine` como dependencia — y sobreviven a un
+`rm -rf node_modules`.
 
 **Dónde busca los modelos el motor de voz, en orden:**
 1. lo que declares en `demo.config.mjs` (`voz.venv` / `voz.voces`, ver más abajo)
 2. las variables de entorno `DEMO_VENV` / `DEMO_VOCES`
-3. el directorio del propio paquete `demo-engine` (donde los deja el instalador de arriba)
-4. el cwd del proceso, como último recurso
+3. el directorio del propio paquete `demo-engine` (donde los dejaban las instalaciones
+   anteriores a este cambio)
+4. `~/.cache/demo-engine/{venv,voces}` — donde los deja el instalador de arriba
+5. el cwd del proceso, como último recurso
+
+El paso 3 va antes que el 4 a propósito: **si ya tenías las voces dentro del repo, siguen
+funcionando y no hay nada que migrar.** Si igual las querés mover para recuperar el espacio,
+las instrucciones están en la cabecera de `herramientas/instalar-voces.sh` (los modelos se
+mueven; el venv se rehace, porque guarda rutas absolutas).
 
 Si instalaste los modelos en otra carpeta (por ejemplo, una compartida entre varios
 sistemas), apuntá `DEMO_VENV`/`DEMO_VOCES` ahí, o declará `voz.venv`/`voz.voces` en la
@@ -905,8 +913,9 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `crearVoz(config: {motor?, voz?, respaldo?, venv?, voces?}) → vozEngine`
   - `.disponible() → bool`
   - `.sintetizar(texto) → rutaWav | null`
-  - `venv`/`voces` son opcionales; sin ellos, resuelve por `DEMO_VENV`/`DEMO_VOCES` y después
-    por el directorio del propio paquete (ver "Instalación" para el orden completo)
+  - `venv`/`voces` son opcionales; sin ellos, resuelve por `DEMO_VENV`/`DEMO_VOCES`, después
+    por el directorio del propio paquete y después por `~/.cache/demo-engine`
+    (ver "Instalación" para el orden completo)
   - si `motor !== 'ninguno'` y no encuentra ningún motor disponible, escribe un aviso por
     `stderr` (no lanza excepción: sigue degradando a subtítulos-sin-locución)
 
