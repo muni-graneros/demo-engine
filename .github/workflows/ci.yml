@@ -47,7 +47,16 @@ jobs:
       # saltan solas sin DEMO_CON_VOZ: no se instalan acá, y eso es lo correcto (queda
       # 1 prueba SKIP, no una prueba roja por un modelo ausente).
       - name: Instalar navegador (Chromium) para Playwright
-        run: npx playwright install --with-deps chromium
+        # `--with-deps` hace un `apt-get update` que arrastra TODAS las fuentes del
+        # runner, incluida la de Google Chrome que la imagen trae de fábrica. Ese
+        # índice falla a ratos con «Hash Sum mismatch» (Google lo republica sin
+        # sincronizar sus réplicas) y tumba el job aunque no usemos ese Chrome:
+        # Playwright trae su propio Chromium. Sacar la fuente antes de instalar
+        # deja el job dependiendo solo de los espejos de Ubuntu. Mismo fix que en
+        # discapacidad-graneros (commit 65e8a9b).
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/google-chrome*
+          npx playwright install --with-deps chromium
 
       # Concurrencia serializada a propósito, NO reintento. La suite tiene una
       # intermitencia MEDIDA (ver pruebas/voz-motores.test.mjs y src/voz/proceso.mjs):
