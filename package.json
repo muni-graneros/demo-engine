@@ -14,7 +14,8 @@
     "src",
     "plantillas",
     "skill",
-    "README.md"
+    "README.md",
+    "docs/*.md"
   ],
   "scripts": {
     "test": "node --test pruebas/"
