@@ -20,25 +20,27 @@ export function lienzoDe({ presentacion, video }) {
  * aspecto no calza exacto con su hueco (el hueco se redondea a par, o el dispositivo cambió)
  * saldría estirado. Con relleno negro las franjas leen como pantalla apagada.
  *
- * El largo lo fija la PRIMERA entrada (el actor del segmento, que es quien manda en el
- * relato) a través del fondo `color` de esa duración. Las demás entradas pueden venir un
- * poco más cortas —el otro actor de un tramo dividido se recorta a su pista—: por eso sus
- * overlays NO usan `shortest=1` sino `eof_action=repeat`, que congela su último cuadro. Con
- * `shortest=1` ese recorte acortaba el tramo entero y el reloj del video se corría respecto
- * de la voz y los subtítulos.
+ * El largo es `duracion`, EXPLÍCITO: el del segmento del relato, que es de donde salen la
+ * voz, los subtítulos y los clics. No se deduce de ninguna entrada porque el actor del paso
+ * no siempre es la primera —un `dividir` sigue vigente en los pasos siguientes de la escena,
+ * y el par conserva su orden— y el otro actor puede venir recortado a su pista. Lo fija el
+ * fondo `color` de esa duración más el `-t` de salida; los overlays de las entradas NO usan
+ * `shortest=1` sino `eof_action=repeat`, que congela el último cuadro de una entrada corta.
+ * Con `shortest=1` ese recorte acortaba el tramo entero y el reloj del video se corría.
  *
  * `fps=25` en cada entrada: el concat posterior copia los trozos sin reencodear, y exige
  * que todos compartan tamaño, códec y cadencia.
  *
  * @param {Array<{mp4:string, desdeSeg:number, hastaSeg:number}>} entradas
- * @param {{png:string, huecos:Array<{x:number,y:number,ancho:number,alto:number}>, lienzo:{ancho:number,alto:number}, salida:string}} destino
+ * @param {{png:string, huecos:Array<{x:number,y:number,ancho:number,alto:number}>, lienzo:{ancho:number,alto:number}, salida:string, duracion:number}} destino
  * @returns {string} la ruta de `salida`
  */
-export function componerEnLienzo(entradas, { png, huecos, lienzo, salida }) {
+export function componerEnLienzo(entradas, { png, huecos, lienzo, salida, duracion }) {
+    if (!(duracion > 0)) throw new Error(`componerEnLienzo: falta la duracion del tramo (llegó ${duracion})`);
     if (entradas.length !== huecos.length) {
         throw new Error(`componerEnLienzo: ${entradas.length} entradas para ${huecos.length} huecos`);
     }
-    const dura = entradas[0].hastaSeg - entradas[0].desdeSeg;
+    const dura = duracion;
     const args = ['-y'];
     for (const e of entradas) args.push('-ss', String(e.desdeSeg), '-t', String(e.hastaSeg - e.desdeSeg), '-i', e.mp4);
     args.push('-i', png);

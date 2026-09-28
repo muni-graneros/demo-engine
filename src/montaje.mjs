@@ -90,6 +90,35 @@ export async function montar({
         if (!largos.has(actor)) largos.set(actor, duracion(pista));
         return largos.get(actor);
     };
+
+    /**
+     * El tramo del OTRO actor de una pantalla dividida: el mismo intervalo del reloj global,
+     * llevado al reloj de su pista con su origen (cada pista arranca cuando su actor abrió el
+     * navegador, no en el cero global). Se recorta con la misma tolerancia que el tramo
+     * principal y por la misma razón: la pista del otro puede cerrarse unos milisegundos
+     * antes; composicion.mjs congela su último cuadro para no acortar el tramo.
+     */
+    function tramoDelOtro(actor, seg, dura) {
+        const largo = largoDe(actor);
+        // Sin origen no hay forma de ubicar el tramo en su pista: suponer 0 cortaría otro
+        // momento de la grabación y el panel mostraría algo que no pasó en ese instante.
+        if (typeof origenes[actor] !== 'number') {
+            throw new Error(`falta origenes["${actor}"]: sin el origen de su pista el panel dividido saldría desfasado`);
+        }
+        const desde = (seg.tGlobal - origenes[actor]) / 1000;
+        if (desde < 0) {
+            throw new Error(`el actor ${actor} empezó a grabar después del tramo dividido "${seg.escena}" (le faltan ${(-desde).toFixed(2)}s de pista)`);
+        }
+        if (desde >= largo) {
+            throw new Error(`el tramo dividido "${seg.escena}" empieza en ${desde.toFixed(2)}s de la pista de ${actor}, fuera de ella (${largo}s)`);
+        }
+        const desborde = desde + dura - largo;
+        if (desborde > TOLERANCIA_SEG) {
+            throw new Error(`el tramo dividido "${seg.escena}" termina en ${(desde + dura).toFixed(2)}s y la pista de ${actor} dura ${largo}s: se perderían ${desborde.toFixed(2)}s de su panel`);
+        }
+        return { mp4: pistas[actor], desdeSeg: desde, hastaSeg: Math.min(desde + dura, largo) };
+    }
+
     for (const [i, seg] of linea.entries()) {
         const pista = pistas[seg.actor];
         const largo = largoDe(seg.actor);
@@ -112,36 +141,13 @@ export async function montar({
                 return tramoDelOtro(actor, seg, hasta - seg.desdeSeg);
             });
             const { png, huecos } = await lienzoPara(actoresDelTramo.map(panelDe));
-            componerEnLienzo(entradas, { png, huecos, lienzo, salida: trozo });
+            componerEnLienzo(entradas, { png, huecos, lienzo, salida: trozo, duracion: hasta - seg.desdeSeg });
         } else {
             ff(['-y', '-i', pista, '-ss', String(seg.desdeSeg), '-to', String(hasta),
                 '-vf', `scale=${video.ancho}:${video.alto},setsar=1`,
                 '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-an', trozo]);
         }
         trozos.push(trozo);
-    }
-
-    /**
-     * El tramo del OTRO actor de una pantalla dividida: el mismo intervalo del reloj global,
-     * llevado al reloj de su pista con su origen (cada pista arranca cuando su actor abrió el
-     * navegador, no en el cero global). Se recorta con la misma tolerancia que el tramo
-     * principal y por la misma razón: la pista del otro puede cerrarse unos milisegundos
-     * antes; composicion.mjs congela su último cuadro para no acortar el tramo.
-     */
-    function tramoDelOtro(actor, seg, dura) {
-        const largo = largoDe(actor);
-        const desde = (seg.tGlobal - (origenes[actor] ?? 0)) / 1000;
-        if (desde < 0) {
-            throw new Error(`el actor ${actor} empezó a grabar después del tramo dividido "${seg.escena}" (le faltan ${(-desde).toFixed(2)}s de pista)`);
-        }
-        if (desde >= largo) {
-            throw new Error(`el tramo dividido "${seg.escena}" empieza en ${desde}s de la pista de ${actor}, fuera de ella (${largo}s)`);
-        }
-        const desborde = desde + dura - largo;
-        if (desborde > TOLERANCIA_SEG) {
-            throw new Error(`el tramo dividido "${seg.escena}" termina en ${desde + dura}s y la pista de ${actor} dura ${largo}s: se perderían ${desborde.toFixed(2)}s de su panel`);
-        }
-        return { mp4: pistas[actor], desdeSeg: desde, hastaSeg: Math.min(desde + dura, largo) };
     }
 
     // 2. Pegar en orden narrativo.

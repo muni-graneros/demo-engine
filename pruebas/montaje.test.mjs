@@ -371,3 +371,34 @@ test('dividir sin superficies declaradas también compone las dos pistas (sin ch
     const [r2, , b2] = px(b.x + b.ancho / 2, b.y + b.alto / 2);
     assert.ok(r1 > 180 && b1 < 80 && b2 > 180 && r2 < 80, `teléfono ${[r1, b1]} / ventana ${[r2, b2]}`);
 });
+
+test('dividir con el actor del paso en SEGUNDO lugar: el trozo dura lo del segmento aunque el otro se recorte', async () => {
+    // dividir sigue vigente en los pasos siguientes de la escena, así que el actor del paso
+    // puede ser el segundo del par. La pista de la vecina se acaba 0,2 s antes (dentro de la
+    // tolerancia): su panel se congela, pero el tramo no puede acortarse.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = {
+        vecina: pistaDe(dir, 'vecina.mp4', 'color=c=red:s=412x840:d=1.8'),
+        operador: pistaDe(dir, 'operador.mp4', 'color=c=blue:s=1280x800:d=3'),
+    };
+    const pasos = [{ escena: 'b', actor: 'operador', tLocal: 0, tGlobal: 0, duracionMs: 2000, dividir: ['vecina', 'operador'] }];
+    const { mp4, segmentos } = await montar({
+        pistas, pasos, voz: vozMuda, video: VIDEO, superficies: SUPERFICIES, actores: ACTORES,
+        dimensiones: DIMENSIONES, origenes: { vecina: 0, operador: 0 },
+    }, { salida: dir, nombre: 'segundo.mp4' });
+    assert.equal(segmentos[0].finSeg, 2);
+    assert.ok(Math.abs(duracion(mp4) - 2) < 0.1, `duración ${duracion(mp4)}: el trozo se acortó y desfasa voz y subtítulos`);
+});
+
+test('dividir sin el origen del otro actor falla, en vez de suponer 0 y desfasar su panel', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = {
+        vecina: pistaDe(dir, 'vecina.mp4', 'color=c=red:s=412x840:d=2'),
+        operador: pistaDe(dir, 'operador.mp4', 'color=c=blue:s=1280x800:d=2'),
+    };
+    const pasos = [{ escena: 'b', actor: 'vecina', tLocal: 0, tGlobal: 0, duracionMs: 1000, dividir: ['vecina', 'operador'] }];
+    await assert.rejects(() => montar({
+        pistas, pasos, voz: vozMuda, video: VIDEO, superficies: SUPERFICIES, actores: ACTORES,
+        dimensiones: DIMENSIONES, origenes: { vecina: 0 },
+    }, { salida: dir, nombre: 'x.mp4' }), /falta origenes\["operador"\]: sin el origen de su pista el panel dividido saldría desfasado/);
+});

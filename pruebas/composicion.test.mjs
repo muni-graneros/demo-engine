@@ -50,7 +50,7 @@ for (const [caso, aspecto] of [['mismo aspecto que la pista', 412 / 840], ['huec
         // Lienzo de 1280×720: el hueco queda más chico que la pista, así que hay escalado real.
         const lienzo = { ancho: 1280, alto: 720 };
         const { png, huecos } = await renderizarLienzo({ lienzo, paneles: [{ tipo: 'telefono', aspecto }], marca: null, salida: dir });
-        const salida = componerEnLienzo([{ mp4, desdeSeg: 0, hastaSeg: 1 }], { png, huecos, lienzo, salida: join(dir, 'compuesto.mp4') });
+        const salida = componerEnLienzo([{ mp4, desdeSeg: 0, hastaSeg: 1 }], { png, huecos, lienzo, salida: join(dir, 'compuesto.mp4'), duracion: 1 });
 
         assert.ok(Math.abs(duracion(salida) - 1) < 0.1, `duración ${duracion(salida)}`);
         const px = frame(salida, lienzo.ancho, lienzo.alto);
@@ -73,7 +73,7 @@ test('dos entradas: cada hueco muestra su propia pista', async (t) => {
     const { png, huecos } = await renderizarLienzo({ lienzo, paneles, marca: null, salida: dir });
     const salida = componerEnLienzo(
         [{ mp4: rojo, desdeSeg: 0.5, hastaSeg: 1.5 }, { mp4: azul, desdeSeg: 1, hastaSeg: 2 }],
-        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4') });
+        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4'), duracion: 1 });
 
     assert.ok(Math.abs(duracion(salida) - 1) < 0.1, `duración ${duracion(salida)}`);
     const px = frame(salida, lienzo.ancho, lienzo.alto, 0.5);
@@ -96,6 +96,27 @@ test('una entrada que se acaba antes congela su último cuadro sin acortar el tr
     const { png, huecos } = await renderizarLienzo({ lienzo, paneles, marca: null, salida: dir });
     const salida = componerEnLienzo(
         [{ mp4: largo, desdeSeg: 0, hastaSeg: 2 }, { mp4: corto, desdeSeg: 0.2, hastaSeg: 1 }],
-        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4') });
+        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4'), duracion: 2 });
     assert.ok(Math.abs(duracion(salida) - 2) < 0.1, `duración ${duracion(salida)}: el tramo se acortó`);
+});
+
+test('la duración es la explícita, aunque la PRIMERA entrada venga recortada', async (t) => {
+    // Con dividir ['vecina','operador'] y el paso del operador, la entrada 0 es la vecina: si
+    // su pista se recortó, el largo no puede salir de ella sino del segmento.
+    const dir = temporal(t);
+    const corto = join(dir, 'corto.mp4'), largo = join(dir, 'largo.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=412x840:d=1', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', corto]);
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x800:d=3', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', largo]);
+    const lienzo = { ancho: 1280, alto: 720 };
+    const paneles = [{ tipo: 'telefono', aspecto: 412 / 840 }, { tipo: 'ventana', aspecto: 1.6 }];
+    const { png, huecos } = await renderizarLienzo({ lienzo, paneles, marca: null, salida: dir });
+    const salida = componerEnLienzo(
+        [{ mp4: corto, desdeSeg: 0.2, hastaSeg: 1 }, { mp4: largo, desdeSeg: 0, hastaSeg: 2 }],
+        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4'), duracion: 2 });
+    assert.ok(Math.abs(duracion(salida) - 2) < 0.1, `duración ${duracion(salida)}: manda la primera entrada, no el segmento`);
+});
+
+test('sin duración explícita, componerEnLienzo falla en vez de adivinarla', () => {
+    assert.throws(() => componerEnLienzo([{ mp4: 'x.mp4', desdeSeg: 0, hastaSeg: 1 }],
+        { png: 'x.png', huecos: [{ x: 0, y: 0, ancho: 2, alto: 2 }], lienzo: { ancho: 4, alto: 4 }, salida: 'y.mp4' }), /duracion/);
 });
