@@ -21,20 +21,25 @@ export function cadenaDeMezcla({ total, locuciones, musica, clics, clic }) {
     const voces = [];
     for (const { wav, inicioSeg } of locuciones) {
         entradas.push('-i', wav);
-        const ms = Math.round(inicioSeg * 1000);
+        const ms = Math.round(Math.max(0, inicioSeg) * 1000);   // adelay rechaza negativos
         filtros.push(`[${idx}:a]aresample=48000,aformat=channel_layouts=stereo,adelay=${ms}|${ms}[v${idx}]`);
         voces.push(`[v${idx}]`);
         idx++;
     }
     const efectos = [];
-    if (clic?.activo) {
-        for (const t of clics) {
-            entradas.push('-f', 'lavfi', '-t', '0.06', '-i', `aevalsrc=(random(0)*2-1)*exp(-t*90):s=48000:c=stereo`);
-            const ms = Math.round(t * 1000);
-            filtros.push(`[${idx}:a]volume=${clic.volumen},adelay=${ms}|${ms}[c${idx}]`);
-            efectos.push(`[c${idx}]`);
-            idx++;
-        }
+    if (clic?.activo && clics.length) {
+        // UNA sola entrada de clic, repartida con asplit: así `entradas` no crece con la
+        // cantidad de pulsaciones y los índices que usa el montaje (subtítulos) son estables.
+        entradas.push('-f', 'lavfi', '-t', '0.06', '-i', `aevalsrc=(random(0)*2-1)*exp(-t*90):s=48000:c=stereo`);
+        const volumen = clic.volumen ?? 0.5;           // sin volumen, ffmpeg recibiría "undefined"
+        const copias = clics.map((_, i) => `[cs${i}]`);
+        filtros.push(`[${idx}:a]volume=${volumen},asplit=${clics.length}${copias.join('')}`);
+        clics.forEach((t, i) => {
+            const ms = Math.round(Math.max(0, t) * 1000);
+            filtros.push(`[cs${i}]adelay=${ms}|${ms}[c${i}]`);
+            efectos.push(`[c${i}]`);
+        });
+        idx++;
     }
     let vozMezclada = null;
     if (voces.length) {
@@ -66,6 +71,10 @@ export function cadenaDeMezcla({ total, locuciones, musica, clics, clic }) {
     }
     const partes = [base, ...(vozMezclada ? [vozMezclada] : []), ...(musicaFinal ? [musicaFinal] : []), ...efectos];
     // duration=first: el silencio base mide exactamente `total` y fija el largo de todo.
-    filtros.push(`${partes.join('')}amix=inputs=${partes.length}:normalize=0:duration=first[a]`);
+    // amix con normalize=0 suma sin bajar nada: voz + música alta + clic llegaban a 0 dBFS y
+    // el AAC saturaba. El limitador corta a -1 dBFS; level=disabled porque su auto-nivel en
+    // ffmpeg 7 volvería a actuar como control de ganancia sobre toda la mezcla.
+    filtros.push(`${partes.join('')}amix=inputs=${partes.length}:normalize=0:duration=first,` +
+        `alimiter=limit=0.891:level=disabled,aresample=48000[a]`);
     return { entradas, filtro: filtros.join(';'), salida: '[a]' };
 }
