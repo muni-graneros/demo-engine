@@ -168,7 +168,9 @@ const { mp4, vtt } = await montar({
   pistas, pasos, voz, video: config.video,
   // Multi-superficie (opcional): sin superficies ni dividir, el montaje es el de siempre.
   superficies: config.superficies, actores: config.actores, origenes, clics, dimensiones,
-  audio: config.audio,   // o null para la cadena mono de siempre
+  // Sin música ni clic activos (los defectos de cargarConfig), montar() usa la cadena mono
+  // de siempre; con alguno de los dos, la mezcla estéreo 48 kHz.
+  audio: config.audio,
 }, { salida: config.salida, nombre: 'mi-video.mp4' });
 ```
 
@@ -215,12 +217,26 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `totp(secreto: string, segundos?: number) → código6Digitos`
 
 ### Grabación
-- `grabar(guion, { config, sesiones, salida, voz }) → Promise<{pistas, pasos}>`
+- `grabar(guion, { config, sesiones, salida, voz }) → Promise<{pistas, pasos, origenes, clics, dimensiones}>`
+  - `pistas`: `{actor: rutaMp4}`, una pista por actor
+  - `pasos`: los pasos con sus tiempos (`tLocal`, `tGlobal`, `duracionMs`), locución y `dividir`
+  - `origenes`: `{actor: ms}`, en qué instante del reloj global arrancó la pista de cada actor
+  - `clics`: ms del reloj global en que hubo un clic (para el sonido de clic)
+  - `dimensiones`: `{actor: {ancho, alto}}`, el tamaño real de la pista de cada actor
 
 ### Montaje
-- `montar({ pistas, pasos, voz, video }, { salida, nombre }) → Promise<{mp4, vtt, segmentos}>`
-- `pegarCapitulos(partes, { salida, nombre, titulo, video }) → Promise<{mp4, md, capitulos, vtt}>`
-  - `partes`: array de `{id, titulo, archivo}`
+- `montar({ pistas, pasos, voz, video, presentacion?, marca?, baseURL?, superficies?, actores?, origenes?, clics?, dimensiones?, audio? }, { salida, nombre }) → Promise<{mp4, vtt, segmentos}>`
+  - Sin `superficies` y sin pasos con `dividir`, el montaje es el de siempre (mismo video).
+  - `superficies`/`actores`: `config.superficies` y `config.actores`; cada tramo se compone
+    en el marco (teléfono o ventana) de la superficie de su actor, con su chip.
+  - `origenes`, `clics`, `dimensiones`: tal como los devuelve `grabar()`; `origenes` es
+    obligatorio para un tramo con `dividir`.
+  - `audio`: `config.audio`. Solo con `musica` o `clic.activo` se usa la mezcla estéreo
+    48 kHz; con los defectos (o `null`), la cadena mono de siempre.
+- `pegarCapitulos(partes, { salida, nombre, titulo, video, presentacion?, marca? }) → Promise<{mp4, md, capitulos, vtt}>`
+  - `partes`: array de `{id, titulo, archivo, tarjeta?}`; `tarjeta` es un mp4 mudo (la
+    tarjeta de superficies, «usted está aquí») que entra después de la transición 3D y
+    antes del clip de ese capítulo
   - `vtt`: ruta al `.vtt` combinado del curso, o `null` si ningún capítulo traía subtítulos
 
 ### Salida

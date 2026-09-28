@@ -32,6 +32,16 @@ export function clicsEnVideo(segmentos, clics) {
 }
 
 /**
+ * El marco de un panel: lo decide el tipo de la superficie del actor. El `dispositivo` solo
+ * decide cuando no hay superficie —una superficie `escritorio` puede grabarse con un
+ * dispositivo de Playwright de escritorio ('Desktop Chrome') y no por eso es un teléfono—.
+ */
+export function tipoDePanel(superficie, actor) {
+    if (superficie) return superficie.tipo === 'telefono' ? 'telefono' : 'ventana';
+    return actor?.dispositivo ? 'telefono' : 'ventana';
+}
+
+/**
  * Corta cada pista en los tramos que le corresponden, los ordena por tiempo global,
  * los pega, y le suma la voz y los subtítulos.
  */
@@ -55,7 +65,7 @@ export async function montar({
         const superficie = superficieDe(config, actor);
         const dim = dimensiones[actor] ?? video;
         return {
-            tipo: superficie?.tipo === 'telefono' || actores[actor]?.dispositivo ? 'telefono' : 'ventana',
+            tipo: tipoDePanel(superficie, actores[actor]),
             aspecto: dim.ancho / dim.alto,
             chip: superficie ? { nombre: superficie.nombre, icono: superficie.icono, color: superficie.color } : null,
             url: presentacion?.url ?? actores[actor]?.baseURL ?? baseURL,
@@ -208,14 +218,17 @@ export async function montar({
         }
     }
 
-    // Con `audio` declarado, la mezcla nueva (estéreo 48 kHz, música y clics); sin él, la
-    // cadena mono de siempre, tal cual: un proyecto que no pidió audio nuevo no cambia ni
-    // un byte de su pista de sonido.
+    // Con música o clic pedidos, la mezcla nueva (estéreo 48 kHz); si no, la cadena mono de
+    // siempre, tal cual: un proyecto que no pidió audio nuevo no cambia ni un byte de su
+    // pista de sonido. La decisión vive ACÁ y no en quien llama: cargarConfig siempre trae
+    // el bloque `audio` con sus defectos (música null, clic inactivo), y pasar
+    // `audio: config.audio` —como muestra la guía— no puede cambiar el sonido.
+    const audioActivo = (audio?.musica || audio?.clic?.activo) ? audio : null;
     let entradas, cadena, idx;
-    if (audio) {
+    if (audioActivo) {
         const mezcla = cadenaDeMezcla({
-            total, locuciones, musica: audio.musica ?? null,
-            clics: clicsEnVideo(segmentos, clics), clic: audio.clic ?? { activo: false },
+            total, locuciones, musica: audioActivo.musica ?? null,
+            clics: clicsEnVideo(segmentos, clics), clic: audioActivo.clic ?? { activo: false },
         });
         entradas = ['-y', '-i', baseVideo, ...mezcla.entradas];
         cadena = mezcla.filtro;

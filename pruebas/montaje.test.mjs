@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ff, duracion, RUTA_FFMPEG } from '../src/ffmpeg.mjs';
-import { montar, clicsEnVideo } from '../src/montaje.mjs';
+import { montar, clicsEnVideo, tipoDePanel } from '../src/montaje.mjs';
 
 /** Fabrica una pista de color sólido de N segundos, como sustituto de una grabación. */
 function pista(dir, nombre, segundos, color) {
@@ -401,4 +401,29 @@ test('dividir sin el origen del otro actor falla, en vez de suponer 0 y desfasar
         pistas, pasos, voz: vozMuda, video: VIDEO, superficies: SUPERFICIES, actores: ACTORES,
         dimensiones: DIMENSIONES, origenes: { vecina: 0 },
     }, { salida: dir, nombre: 'x.mp4' }), /falta origenes\["operador"\]: sin el origen de su pista el panel dividido saldría desfasado/);
+});
+
+test('montar con config.audio por defecto produce el mismo audio mono que sin audio', async () => {
+    // cargarConfig SIEMPRE devuelve el bloque audio con sus defectos, y la guía le dice a
+    // quien usa la API que pase `audio: config.audio`: eso no puede cambiar el sonido.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-'));
+    const pistas = { uno: pista(dir, 'uno.mp4', 4, 'blue') };
+    const pasos = [{ escena: 'a', actor: 'uno', tLocal: 0, tGlobal: 0, duracionMs: 3000 }];
+    const { mp4 } = await montar({
+        pistas, pasos, voz: vozMuda, video: { ancho: 640, alto: 400 },
+        audio: { musica: null, clic: { activo: false, volumen: 0.5 } },
+    }, { salida: dir, nombre: 'defecto.mp4' });
+
+    const r = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' });
+    assert.match(r.stderr, /Audio: aac.*44100 Hz, mono/);
+});
+
+test('el marco del panel lo decide el tipo de la superficie; el dispositivo solo sin superficie', () => {
+    const escritorio = { id: 'sala', nombre: 'Sala', tipo: 'escritorio' };
+    const telefono = { id: 'app', nombre: 'App', tipo: 'telefono' };
+    assert.equal(tipoDePanel(escritorio, { dispositivo: 'Desktop Chrome' }), 'ventana');
+    assert.equal(tipoDePanel(telefono, {}), 'telefono');
+    assert.equal(tipoDePanel(null, { dispositivo: 'Pixel 7' }), 'telefono');
+    assert.equal(tipoDePanel(null, {}), 'ventana');
+    assert.equal(tipoDePanel(null, undefined), 'ventana');
 });

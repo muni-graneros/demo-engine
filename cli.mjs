@@ -71,14 +71,6 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
     return { id: guion.id, titulo: guion.titulo, pasos };
 }
 
-/**
- * El `audio` que recibe `montar()`: solo si el proyecto pidió algo (música o clic). La config
- * siempre trae el bloque con sus defectos, y pasarlo tal cual metía la mezcla nueva en
- * proyectos que no la pidieron — y la compatibilidad es estricta: sin claves nuevas, el mismo
- * video (y el mismo audio) que v1.13.0.
- */
-const audioDeclarado = (config) => (config.audio?.musica || config.audio?.clic?.activo ? config.audio : null);
-
 /** Lo que `grabar()` devuelve y `montar()` necesita, más lo que la config aporta. */
 async function grabarYMontar(config, voz, sesionesDe, guion, nombre) {
     const { pistas, pasos, origenes, clics, dimensiones } = await grabar(guion,
@@ -87,7 +79,7 @@ async function grabarYMontar(config, voz, sesionesDe, guion, nombre) {
         pistas, pasos, voz, video: config.video,
         presentacion: config.video.presentacion, marca: config.marca, baseURL: config.baseURL,
         superficies: config.superficies, actores: config.actores,
-        origenes, clics, dimensiones, audio: audioDeclarado(config),
+        origenes, clics, dimensiones, audio: config.audio,
     }, { salida: config.salida, nombre });
     return { mp4, pasos };
 }
