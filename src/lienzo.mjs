@@ -20,33 +20,74 @@ const RADIO_VENTANA = 12;
 // que el overlay corra el video medio píxel respecto del hueco.
 const par = (n) => Math.floor(n / 2) * 2;
 
-/** Mayor hueco del aspecto pedido que cabe en `caja`, con el panel (y su chip) centrados. */
-function huecoEnCaja(caja, panel) {
-    const extraAncho = panel.tipo === 'telefono' ? BISEL.lado * 2 : 0;
-    const extraAlto = (panel.tipo === 'telefono' ? BISEL.arriba + BISEL.abajo : ALTO_BARRA) + (panel.chip ? ALTO_CHIP : 0);
-    const maxAncho = caja.ancho - extraAncho;
-    const maxAlto = caja.alto - extraAlto;
-    let ancho = maxAncho, alto = ancho / panel.aspecto;
-    if (alto > maxAlto) { alto = maxAlto; ancho = alto * panel.aspecto; }
-    ancho = par(ancho); alto = par(alto);
-    const altoTotal = alto + extraAlto;
+const TIPOS = ['ventana', 'telefono'];
+
+/** Lo que el panel agrega alrededor de su hueco: bisel o barra, y el chip encima. */
+function extras(panel) {
+    return {
+        ancho: panel.tipo === 'telefono' ? BISEL.lado * 2 : 0,
+        alto: (panel.tipo === 'telefono' ? BISEL.arriba + BISEL.abajo : ALTO_BARRA) + (panel.chip ? ALTO_CHIP : 0),
+    };
+}
+
+/**
+ * Posiciona un hueco de `ancho`×`alto` ya decidido: centrado en horizontal en `caja` y con el
+ * panel completo (chip + bisel/barra + hueco) centrado en vertical.
+ */
+function ubicar(caja, panel, ancho, alto) {
+    const altoTotal = alto + extras(panel).alto;
     const x = par(caja.x + (caja.ancho - ancho) / 2);
     const arribaPanel = caja.y + (caja.alto - altoTotal) / 2 + (panel.chip ? ALTO_CHIP : 0);
     const y = par(arribaPanel + (panel.tipo === 'telefono' ? BISEL.arriba : ALTO_BARRA));
     return { x, y, ancho, alto };
 }
 
+/** Mayor hueco del aspecto pedido que cabe en `caja`, con el panel (y su chip) centrados. */
+function huecoEnCaja(caja, panel) {
+    const e = extras(panel);
+    const maxAncho = caja.ancho - e.ancho;
+    const maxAlto = caja.alto - e.alto;
+    let ancho = maxAncho, alto = ancho / panel.aspecto;
+    if (alto > maxAlto) { alto = maxAlto; ancho = alto * panel.aspecto; }
+    return ubicar(caja, panel, par(ancho), par(alto));
+}
+
 /**
  * Dónde queda la "pantalla" (el hueco donde ffmpeg pega el video) de cada panel. Es PURA y
  * es la única fuente de verdad de esa geometría: el render del PNG y el compuesto la leen de
  * acá, así que no pueden desalinearse.
+ *
+ * Con dos paneles el ancho se reparte EN PROPORCIÓN al aspecto y ambas pantallas comparten
+ * alto. Con columnas iguales, un teléfono angosto desperdiciaba media pantalla y la ventana
+ * quedaba encogida a ~864 px; así el grupo llena el ancho útil y queda centrado.
  */
 export function geometriaLienzo({ lienzo, paneles, padding = 64 }) {
+    if (!Array.isArray(paneles) || paneles.length < 1 || paneles.length > 2) {
+        throw new Error(`geometriaLienzo: se esperan 1 o 2 paneles, llegaron ${paneles?.length}`);
+    }
+    for (const p of paneles) {
+        if (!TIPOS.includes(p.tipo)) throw new Error(`geometriaLienzo: tipo de panel desconocido «${p.tipo}» (válidos: ${TIPOS.join(', ')})`);
+    }
     const util = { x: padding, y: padding, ancho: lienzo.ancho - padding * 2, alto: lienzo.alto - padding * 2 };
     if (paneles.length === 1) return [huecoEnCaja(util, paneles[0])];
+
     const sep = padding / 2;
-    const col = (util.ancho - sep) / 2;
-    return paneles.map((p, i) => huecoEnCaja({ x: util.x + i * (col + sep), y: util.y, ancho: col, alto: util.alto }, p));
+    const e = paneles.map(extras);
+    const sumaExtrasAncho = e.reduce((s, x) => s + x.ancho, 0);
+    const sumaAspectos = paneles.reduce((s, p) => s + p.aspecto, 0);
+    const H = Math.min(
+        Math.min(...e.map((x) => util.alto - x.alto)),
+        (util.ancho - sep - sumaExtrasAncho) / sumaAspectos,
+    );
+    const alto = par(H);
+    const anchos = paneles.map((p) => par(H * p.aspecto));
+    const resto = util.ancho - sep - anchos.reduce((s, a, i) => s + a + e[i].ancho, 0);
+    let cursor = util.x + resto / 2;
+    return paneles.map((p, i) => {
+        const caja = { x: cursor, y: util.y, ancho: anchos[i] + e[i].ancho, alto: util.alto };
+        cursor += caja.ancho + sep;
+        return ubicar(caja, p, anchos[i], alto);
+    });
 }
 
 /**
@@ -62,17 +103,20 @@ export function geometriaLienzo({ lienzo, paneles, padding = 64 }) {
  * El chip lleva ícono y texto (el color nunca es el único portador de la superficie) y el
  * texto elige #fff o #0f172a según cuál contraste más con `chip.color`. `devolverContraste`
  * devuelve el peor ratio WCAG entre los chips, medido sobre los colores ya computados por el
- * navegador —es lo que realmente se pinta, no lo que el JS creyó elegir—.
+ * navegador —es lo que realmente se pinta, no lo que el JS creyó elegir—. Si ningún panel
+ * lleva chip, `contraste` es `null`. Con `devolverContraste` también vuelve `chips`: el
+ * rectángulo de cada chip junto al de su panel y si el texto quedó recortado, para poder
+ * comprobar que un nombre largo no se sale del panel.
  */
 export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre = 'lienzo.png', padding = 64, devolverContraste = false }) {
     const huecos = geometriaLienzo({ lienzo, paneles, padding });
     const fondo = fondoDelMarco({}, marca);
     const png = join(salida, nombre);
 
-    const contraste = await conPagina({ '/lienzo.html': PLANTILLA }, async (page, baseUrl) => {
+    const medido = await conPagina({ '/lienzo.html': PLANTILLA }, async (page, baseUrl) => {
         await page.setViewportSize({ width: lienzo.ancho, height: lienzo.alto });
         await page.goto(baseUrl + '/lienzo.html');
-        const ratio = await page.evaluate(({ lienzo, paneles, huecos, fondo, K }) => {
+        const medido = await page.evaluate(({ lienzo, paneles, huecos, fondo, padding, K }) => {
             const raiz = document.getElementById('raiz');
             const crear = (padre, estilos = {}, etiqueta = 'div') => {
                 const el = document.createElement(etiqueta);
@@ -158,12 +202,16 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
                     position: 'fixed', left: px(caja.x), top: px(caja.y - K.ALTO_CHIP), height: '44px',
                     boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', gap: '10px', padding: '0 18px',
                     borderRadius: '22px', background: p.chip.color, whiteSpace: 'nowrap',
+                    // Un nombre largo no puede salirse del panel ni del lienzo: se recorta con
+                    // elipsis dentro del ancho de la carcasa o de la ventana.
+                    maxWidth: px(Math.min(caja.ancho, lienzo.ancho - caja.x - padding)),
                     font: '600 20px/1 system-ui,sans-serif', boxShadow: '0 4px 12px rgba(0,0,0,.25)',
                 });
                 chip.className = 'chip';
+                chip.dataset.panel = JSON.stringify(caja);
                 chip.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"`
-                    + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${iconos[p.chip.icono] ?? iconos.monitor}</svg>`;
-                crear(chip, {}, 'span').textContent = p.chip.nombre;
+                    + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none">${iconos[p.chip.icono] ?? iconos.monitor}</svg>`;
+                crear(chip, { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' }, 'span').textContent = p.chip.nombre;
             });
 
             // Contraste WCAG 2.x a partir de los colores computados (rgb(...)), no del string
@@ -178,20 +226,24 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
             };
             const ratio = (a, b) => { const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x); return (l1 + 0.05) / (l2 + 0.05); };
             let peor = Infinity;
+            const chips = [];
             for (const chip of document.querySelectorAll('.chip')) {
                 const fondoChip = getComputedStyle(chip).backgroundColor;
                 chip.style.color = ratio('rgb(255,255,255)', fondoChip) >= ratio('rgb(15,23,42)', fondoChip) ? '#fff' : '#0f172a';
                 peor = Math.min(peor, ratio(getComputedStyle(chip).color, fondoChip));
+                const r = chip.getBoundingClientRect();
+                const texto = chip.querySelector('span');
+                chips.push({ x: r.x, ancho: r.width, panel: JSON.parse(chip.dataset.panel), recortado: texto.scrollWidth > texto.clientWidth });
             }
-            return Number.isFinite(peor) ? peor : null;
-        }, { lienzo, paneles, huecos, fondo, K: { ALTO_BARRA, BISEL, ALTO_CHIP, RADIO_TELEFONO, RADIO_PANTALLA, RADIO_VENTANA } });
+            return { contraste: Number.isFinite(peor) ? peor : null, chips };
+        }, { lienzo, paneles, huecos, fondo, padding, K: { ALTO_BARRA, BISEL, ALTO_CHIP, RADIO_TELEFONO, RADIO_PANTALLA, RADIO_VENTANA } });
 
         // Que la fuente del sistema esté cargada antes de la foto: si no, el chip puede salir
         // con la métrica del fallback y el texto corrido.
         await page.evaluate(() => document.fonts.ready);
         await page.screenshot({ path: png, omitBackground: true, type: 'png' });
-        return ratio;
+        return medido;
     });
 
-    return devolverContraste ? { png, huecos, contraste } : { png, huecos };
+    return devolverContraste ? { png, huecos, ...medido } : { png, huecos };
 }
