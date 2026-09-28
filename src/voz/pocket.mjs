@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { resolverVenvYVoces, RUTA_CACHE } from './resolver.mjs';
-import { crearMotorProceso, despuesConVelocidad } from './proceso.mjs';
+import { crearMotorProceso, despuesConVelocidad, OFFLINE } from './proceso.mjs';
 
 // Pocket TTS (Kyutai): código MIT, pesos CC-BY-4.0 → exige atribución en los créditos del
 // video. Corre en CPU con 2 núcleos. `voz` es "<idioma>:<voz>": el idioma elige el modelo
@@ -32,6 +32,11 @@ export function crear({ voz = 'spanish:alba', venv, voces, velocidad = 1, ejecut
         comando: (destino) => ({ PY, args: ['-c', GUION, idioma, nombreVoz, destino] }),
         // Pocket no trae control de velocidad: se aplica `atempo` sobre el .wav ya escrito.
         despues: despuesConVelocidad(velocidad),
+        // Grabar nunca sale a internet: los pesos se bajan UNA vez en instalar-voces.sh
+        // (que hace una síntesis de calentamiento) y acá Hugging Face queda en modo offline.
+        // Sin los pesos en la caché, la sonda falla y dice cómo remediarlo.
+        env: OFFLINE,
+        ayudaArranque: 'si el error es de pesos que no están en la caché de Hugging Face, bajarlos una vez (con red) con: bash node_modules/demo-engine/herramientas/instalar-voces.sh --pocket',
         ...(ejecutarProceso ? { ejecutarProceso } : {}),
     });
 }

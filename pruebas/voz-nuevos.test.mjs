@@ -149,3 +149,36 @@ test('crearVoz conoce los motores pocket y chatterbox', () => {
     assert.equal(typeof MOTORES.chatterbox?.crear, 'function');
     assert.ok(MOTORES.kokoro && MOTORES.piper);
 });
+
+test('pocket y chatterbox graban sin red: HF_HUB_OFFLINE y sin telemetría', () => {
+    const ref = join(mkdtempSync(join(tmpdir(), 'ref-')), 'ref.wav');
+    ff(['-y', '-f', 'lavfi', '-t', '1', '-i', 'anullsrc=r=24000:cl=mono', ref]);
+    for (const crear of [
+        (e) => crearPocket({ venv: venvFalso(), voces: tmpdir(), ejecutarProceso: e }),
+        (e) => crearChatterbox({ venv: venvFalso(), voces: tmpdir(), voz: ref, ejecutarProceso: e }),
+    ]) {
+        const llamadas = [];
+        const m = crear(ejecutorQueEscribe(llamadas));
+        assert.equal(m.disponible(), true);
+        const { env } = llamadas.at(-1).opciones;
+        assert.equal(env.HF_HUB_OFFLINE, '1');
+        assert.equal(env.HF_HUB_DISABLE_TELEMETRY, '1');
+    }
+});
+
+test('pocket sin los pesos en caché: la sonda falla y apunta a instalar-voces.sh', () => {
+    const m = crearPocket({ venv: venvFalso(), voces: tmpdir(),
+        ejecutarProceso: () => ({ status: 1, stderr: 'OSError: We have no connection or you passed local_files_only' }) });
+    assert.equal(m.disponible(), false);
+    assert.match(m.error(), /no connection/);
+    assert.match(m.error(), /instalar-voces\.sh --pocket/);
+});
+
+test('chatterbox sin los pesos en caché: la sonda falla y apunta a instalar-voces.sh', () => {
+    const ref = join(mkdtempSync(join(tmpdir(), 'ref-')), 'ref.wav');
+    ff(['-y', '-f', 'lavfi', '-t', '1', '-i', 'anullsrc=r=24000:cl=mono', ref]);
+    const m = crearChatterbox({ venv: venvFalso(), voces: tmpdir(), voz: ref,
+        ejecutarProceso: () => ({ status: 1, stderr: 'LocalEntryNotFoundError' }) });
+    assert.equal(m.disponible(), false);
+    assert.match(m.error(), /instalar-voces\.sh --chatterbox/);
+});

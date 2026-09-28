@@ -244,6 +244,11 @@ voz: { motor: 'chatterbox', voz: './demo/voz-consentida.wav' }, // SIEMPRE una v
 
 Se instalan aparte, cada uno en su propio venv dentro de la caché:
 `bash node_modules/demo-engine/herramientas/instalar-voces.sh --pocket` (o `--chatterbox`).
+Ese paso necesita red: además de instalar, baja los pesos de Hugging Face con una síntesis de
+calentamiento (`POCKET_IDIOMA=spanish_24l` para el modelo de 24 capas; `CHATTERBOX_REF=<wav>`
+para que el calentamiento de Chatterbox sea una síntesis completa). Al grabar, los dos corren
+con `HF_HUB_OFFLINE=1`: si faltan los pesos, el motor no queda disponible y el aviso remite a
+ese script, en vez de salir a internet a mitad de una grabación.
 
 - **Pocket** (Kyutai): el código es MIT y los pesos son CC-BY-4.0, así que el video lleva
   una línea de **atribución en los créditos**.

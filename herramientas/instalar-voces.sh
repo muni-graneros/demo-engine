@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Descarga (una vez) los modelos de voz. Todo queda en disco: nada sale a internet al grabar.
+# Descarga (una vez) los modelos de voz. Todo queda en disco: nada sale a internet al grabar
+# (Pocket y Chatterbox se invocan con HF_HUB_OFFLINE=1: sus pesos tienen que estar ya en la
+# caché de Hugging Face, y por eso este script los baja con una síntesis de calentamiento).
 #
 # El destino por omisión es la caché del usuario, NO el directorio del paquete. Son ~670 MB
 # (venv ~270 + modelos ~400): dentro del repo ensucian el árbol de trabajo, se duplican en
@@ -9,11 +11,14 @@
 #   bash herramientas/instalar-voces.sh
 #   bash herramientas/instalar-voces.sh --pocket        # además, Pocket TTS (venv-pocket)
 #   bash herramientas/instalar-voces.sh --chatterbox    # además, Chatterbox (venv-chatterbox)
+#   POCKET_IDIOMA=spanish_24l bash herramientas/instalar-voces.sh --pocket   # otro modelo de Pocket
+#   CHATTERBOX_REF=/ruta/voz.wav bash herramientas/instalar-voces.sh --chatterbox  # calentamiento completo
 #
 # Pocket y Chatterbox van en venvs PROPIOS, hermanos de `venv`: los dos arrastran torch (CPU),
 # y mezclarlo con kokoro-onnx en un solo venv obliga a rehacer todo si una pila se rompe.
 # Son opcionales: sin flags el script hace exactamente lo mismo de siempre. Sus pesos se bajan
-# de Hugging Face la primera vez que el motor sintetiza, no acá.
+# de Hugging Face ACÁ, con una síntesis de calentamiento después de instalar (necesita red):
+# al grabar el motor corre con HF_HUB_OFFLINE=1 y, si faltan, la sonda falla y remite acá.
 #
 # Se puede forzar otro destino con DEMO_VENV / DEMO_VOCES, que son las mismas variables que
 # lee el motor (src/voz/resolver.mjs). También se respeta XDG_CACHE_HOME.
@@ -91,7 +96,17 @@ if [ "$POCKET" = 1 ]; then
   "$V/bin/pip" install -q --upgrade pip
   "$V/bin/pip" install --extra-index-url https://download.pytorch.org/whl/cpu pocket-tts scipy
   verificar_torch_cpu "$V"
-  echo "Pocket TTS instalado en $V"
+  # Calentamiento: carga el modelo y sintetiza una frase para que los pesos (y la voz por
+  # omisión) queden en la caché de Hugging Face. Al grabar el motor corre sin red.
+  IDIOMA="${POCKET_IDIOMA:-spanish}"
+  echo "Bajando los pesos de Pocket TTS ($IDIOMA) con una síntesis de calentamiento..."
+  echo "Prueba." | "$V/bin/python" -c "
+import sys
+from pocket_tts import TTSModel
+m = TTSModel.load_model(language=sys.argv[1])
+m.generate_audio(m.get_state_for_audio_prompt(sys.argv[2]), sys.stdin.read())
+" "$IDIOMA" alba
+  echo "Pocket TTS instalado en $V (pesos de $IDIOMA en caché; otro modelo: POCKET_IDIOMA=spanish_24l)"
   echo "  AVISO: los pesos de Pocket TTS (Kyutai) son CC-BY-4.0: todo video que use esta voz"
   echo "  tiene que atribuirlo en los créditos (p. ej. «Voz sintética: Pocket TTS, Kyutai, CC-BY-4.0»)."
   echo "  Clonar una voz a partir de un .wav exige el consentimiento escrito de esa persona (Ley 21.719)."
@@ -103,6 +118,26 @@ if [ "$CHATTERBOX" = 1 ]; then
   "$V/bin/pip" install -q --upgrade pip
   "$V/bin/pip" install --extra-index-url https://download.pytorch.org/whl/cpu chatterbox-tts torchaudio
   verificar_torch_cpu "$V"
+  # Calentamiento: from_pretrained baja todos los pesos a la caché de Hugging Face. Una
+  # síntesis completa exige una voz de referencia (Chatterbox siempre clona): solo se hace si
+  # CHATTERBOX_REF apunta a un .wav. Al grabar el motor corre sin red.
+  echo "Bajando los pesos de Chatterbox..."
+  if [ -n "${CHATTERBOX_REF:-}" ] && [ -f "$CHATTERBOX_REF" ]; then
+    echo "Prueba." | "$V/bin/python" -c "
+import sys
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+m = ChatterboxMultilingualTTS.from_pretrained(device='cpu')
+m.generate(sys.stdin.read(), language_id='es', audio_prompt_path=sys.argv[1])
+" "$CHATTERBOX_REF"
+  else
+    "$V/bin/python" -c "
+from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+ChatterboxMultilingualTTS.from_pretrained(device='cpu')
+"
+    echo "  AVISO: sin CHATTERBOX_REF (ruta a un .wav de referencia) se bajaron los pesos pero NO se"
+    echo "  probó una síntesis completa. Si la primera grabación falla por un archivo que no está en"
+    echo "  la caché, repetir CON RED: CHATTERBOX_REF=/ruta/voz.wav bash $0 --chatterbox"
+  fi
   echo "Chatterbox instalado en $V"
   echo "  AVISO: Chatterbox siempre clona una voz de referencia (voz: ruta a un .wav). Usar solo la"
   echo "  voz de una persona que dio su consentimiento por escrito (Ley 21.719: la voz es dato personal)."

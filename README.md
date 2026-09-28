@@ -52,6 +52,11 @@ intencional, que pase desapercibida no: así fue como un curso entero salió mud
 lo notara hasta después de publicarlo. El orden completo en que busca los modelos está en
 [docs/CONFIGURACION.md](docs/CONFIGURACION.md).
 
+Los motores opcionales Pocket TTS y Chatterbox se instalan con `--pocket` / `--chatterbox`
+(con red: el script baja sus pesos de Hugging Face con una síntesis de calentamiento); al
+grabar corren con `HF_HUB_OFFLINE=1`, así que nada sale a internet. Detalle en
+[docs/CONFIGURACION.md](docs/CONFIGURACION.md).
+
 ## Empezar en un sistema nuevo
 
 ```bash

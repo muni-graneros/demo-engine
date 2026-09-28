@@ -7,15 +7,16 @@
 Motor Node/ESM (sin TypeScript) que graba, monta y publica videos-tutorial de los
 sistemas municipales: lanza Chromium real vía Playwright, navega y simula clics/escritura,
 aplica un **portero de privacidad** que cubre datos sensibles en pantalla, sintetiza voz
-(Kokoro + Piper) sin servidor externo, y monta el MP4 final con ffmpeg (`ffmpeg-static`,
-local, sin tocar ningún servidor de los sistemas grabados).
+(Kokoro + Piper; opcionales Pocket TTS y Chatterbox, cada uno en su venv) sin servidor
+externo, y monta el MP4 final con ffmpeg (`ffmpeg-static`, local, sin tocar ningún servidor
+de los sistemas grabados).
 
 Se instala como dependencia (`npm install github:muni-graneros/demo-engine`) **en la raíz
 del proyecto que se va a grabar**, no en una subcarpeta separada — Node resuelve los
 imports ESM del paquete desde la ubicación del script hacia arriba, y `NODE_PATH` no ayuda.
 
-Está terminado. Tiene 8 commits locales en `develop` sin pushear — pushear solo si César
-lo pide.
+Está terminado; se trabaja en `develop` y se pushea solo si César lo pide (mirar
+`git status -sb` para saber si hay commits locales pendientes).
 
 ## El «portero de privacidad»
 
@@ -55,10 +56,13 @@ node cli.mjs manual [guion]
 node cli.mjs contexto
 node cli.mjs todo [maestro] # pipeline completo: aislar → pack → curso → manual → restaurar
 node cli.mjs auditar <guion|video>
+node cli.mjs formatos <video.mp4> [--vertical] [--cuadrado]  # 9:16 y 1:1, sin config
 ```
 
 Voces: `bash node_modules/demo-engine/herramientas/instalar-voces.sh` (descarga ~670 MB a
-`~/.cache/demo-engine/`, no al árbol de trabajo — no lo repitas por worktree).
+`~/.cache/demo-engine/`, no al árbol de trabajo — no lo repitas por worktree). `--pocket` /
+`--chatterbox` agregan esos motores y, con red, bajan sus pesos de Hugging Face con una
+síntesis de calentamiento: al grabar corren con `HF_HUB_OFFLINE=1` y nada sale a internet.
 
 ## Cómo se prueba
 

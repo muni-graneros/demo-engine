@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { resolverVenvYVoces, RUTA_CACHE } from './resolver.mjs';
-import { crearMotorProceso, despuesConVelocidad } from './proceso.mjs';
+import { crearMotorProceso, despuesConVelocidad, OFFLINE } from './proceso.mjs';
 
 // Chatterbox multilingüe (Resemble AI): MIT; el audio lleva la marca de agua Perth de
 // Resemble (transparenta que es voz sintética). No trae voces predefinidas en español: SIEMPRE
@@ -34,6 +34,11 @@ export function crear({ voz, venv, voces, velocidad = 1, ejecutarProceso } = {})
         comando: (destino) => ({ PY, args: ['-c', GUION, REF, destino] }),
         // Chatterbox tampoco trae control de velocidad: mismo `atempo` que pocket.
         despues: despuesConVelocidad(velocidad),
+        // Grabar nunca sale a internet: los pesos se bajan UNA vez en instalar-voces.sh
+        // (que hace una síntesis de calentamiento) y acá Hugging Face queda en modo offline.
+        // Sin los pesos en la caché, la sonda falla y dice cómo remediarlo.
+        env: OFFLINE,
+        ayudaArranque: 'si el error es de pesos que no están en la caché de Hugging Face, bajarlos una vez (con red) con: bash node_modules/demo-engine/herramientas/instalar-voces.sh --chatterbox',
         ...(ejecutarProceso ? { ejecutarProceso } : {}),
     });
 }

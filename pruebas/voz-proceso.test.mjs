@@ -66,3 +66,26 @@ test('comprobar() (disponible()) también resiste EPIPE sin perder el stderr rea
     assert.match(instancia.error(), /sonda: memoria insuficiente de verdad/,
         'el motivo de indisponibilidad debe traer el stderr real, no el mensaje genérico de Node');
 });
+
+test('env opcional: se suma al entorno del proceso y llega al ejecutor', () => {
+    const vistas = [];
+    const m = crearMotorProceso({
+        motor: 'prueba', archivosListos: () => null, env: { DEMO_PRUEBA_ENV: '1' },
+        comando: (destino) => ({ PY: 'py', args: [destino] }),
+        ejecutarProceso: (PY, args, opciones) => { vistas.push(opciones); return { status: 1, stderr: 'x' }; },
+    });
+    m.disponible();
+    assert.equal(vistas[0].env.DEMO_PRUEBA_ENV, '1');
+    assert.equal(vistas[0].env.PATH, process.env.PATH, 'se SUMA al entorno, no lo reemplaza');
+});
+
+test('sin env declarado, las opciones del proceso quedan como siempre', () => {
+    const vistas = [];
+    const m = crearMotorProceso({
+        motor: 'prueba', archivosListos: () => null,
+        comando: (destino) => ({ PY: 'py', args: [destino] }),
+        ejecutarProceso: (PY, args, opciones) => { vistas.push(opciones); return { status: 1, stderr: 'x' }; },
+    });
+    m.disponible();
+    assert.equal('env' in vistas[0], false);
+});
