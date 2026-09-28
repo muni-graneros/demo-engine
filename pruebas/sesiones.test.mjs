@@ -311,3 +311,20 @@ test('prepararSesionesParaGuion reutiliza el storageState que ya está en disco,
         await juguete.cerrar();
     }
 });
+
+test('prepararSesionesParaGuion no intenta loguear a un actor sesion:false', async () => {
+    // El vecino anónimo y el APK (que pide su token dentro del guion) no tienen cuenta que
+    // loguear: un baseURL inalcanzable demuestra que ni siquiera se intenta.
+    const guion = { escenas: [{ pasos: [{ actor: 'vecina' }] }] };
+    const config = { baseURL: 'http://127.0.0.1:1', actores: { vecina: { sesion: false } }, login: {} };
+    const sesiones = await prepararSesionesParaGuion(guion, config, { dirSesiones: mkdtempSync(join(tmpdir(), 's-')) });
+    assert.equal(sesiones.vecina, null);
+});
+
+test('prepararSesiones salta al actor sesion:false y lo deja en null', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 's-'));
+    const config = { baseURL: 'http://127.0.0.1:1', actores: { vecina: { sesion: false } }, login: {} };
+    const sesiones = await prepararSesiones(config, { dirSesiones: dir });
+    assert.deepEqual(sesiones, { vecina: null });
+    assert.equal(existsSync(join(dir, 'vecina.json')), false);
+});

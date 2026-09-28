@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { devices } from 'playwright';
 
 export class ErrorConfig extends Error {}
 
@@ -56,7 +57,14 @@ const DEFECTOS = {
     auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
     sembrar: null,
     limpiar: null,
+    // Audio opt-in: sin música y sin clic, un video de 1.13 suena igual que antes. El
+    // volumen del clic tiene defecto aunque esté apagado para que activarlo sea un solo
+    // `activo: true`, sin tener que adivinar un nivel razonable.
+    audio: { musica: null, clic: { activo: false, volumen: 0.5 } },
 };
+
+const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
+const ICONO_POR_TIPO = { escritorio: 'monitor', telefono: 'phone' };
 
 // `presentacion` queda en null a propósito: es OPT-IN. Hay más de diez proyectos usando el
 // motor y ninguno debe cambiar de aspecto sin declararlo. Los defectos de adentro viven
@@ -71,6 +79,9 @@ const DEFECTOS_PRESENTACION = {
     barra: true,
     salida: { ancho: 1920, alto: 1080 },
     transicion3d: { activa: true, ms: 900, gradosMax: 12 },
+    // Cuánto dura en pantalla el mapa de superficies antes de la primera escena: lo
+    // bastante para leer los rótulos, no tanto como para que parezca una diapositiva.
+    mapaMs: 2500,
 };
 
 function exigir(condicion, mensaje) {
@@ -174,13 +185,6 @@ export async function cargarConfig(rutaProyecto) {
 
     exigir(cruda.marca?.nombre, 'marca.nombre es obligatorio (sale en las portadas)');
 
-    const actores = cruda.actores ?? {};
-    exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');
-    for (const [nombre, datos] of Object.entries(actores)) {
-        exigir(datos?.email, `el actor "${nombre}" no trae email`);
-        exigir(datos?.password, `el actor "${nombre}" no trae password`);
-    }
-
     const absoluta = (p) => (isAbsolute(p) ? p : resolve(rutaProyecto, p));
     const guiones = absoluta(cruda.guiones ?? './demo/guiones');
     exigir(existsSync(guiones), `la carpeta de guiones no existe: ${guiones}`);
@@ -198,6 +202,51 @@ export async function cargarConfig(rutaProyecto) {
     const marca = { ...DEFECTOS.marca, ...cruda.marca };
     if (marca.escudo) marca.escudo = absoluta(marca.escudo);
 
+    // Un actor `sesion:false` es el vecino anónimo, o la app que se loguea DENTRO del guion
+    // (el APK pide su propio token). Exigirle email/password obligaba a inventar credenciales
+    // que nadie usa, y `preparar` intentaba loguearlo contra /login y fallaba.
+    const actores = {};
+    for (const [nombre, datos] of Object.entries(cruda.actores ?? {})) {
+        const actor = { sesion: true, ...datos };
+        if (actor.sesion) {
+            exigir(actor.email, `el actor "${nombre}" no trae email`);
+            exigir(actor.password, `el actor "${nombre}" no trae password`);
+        }
+        // Se valida contra el catálogo de Playwright acá y no al grabar: un nombre mal
+        // escrito tiene que fallar antes de levantar el navegador, no a mitad del video.
+        if (actor.dispositivo) exigir(devices[actor.dispositivo], `el actor "${nombre}" pide el dispositivo "${actor.dispositivo}", que Playwright no conoce`);
+        if (actor.baseURL) exigir(/^https?:\/\//.test(actor.baseURL), `la baseURL del actor "${nombre}" debe ser http(s) (recibí "${actor.baseURL}")`);
+        actores[nombre] = actor;
+    }
+    exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');
+
+    // `superficies` queda en null si no se declara (y no en {}), para que el resto del motor
+    // distinga "tutorial de una sola superficie, como siempre" de "declaró superficies".
+    let superficies = null;
+    if (cruda.superficies) {
+        superficies = {};
+        for (const [id, s] of Object.entries(cruda.superficies)) {
+            exigir(s?.nombre, `la superficie "${id}" no trae nombre (sale rotulado en el video)`);
+            exigir(TIPOS_SUPERFICIE.includes(s.tipo), `la superficie "${id}" tiene tipo "${s.tipo}"; debe ser escritorio o telefono`);
+            superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], color: marca.color, ...s };
+        }
+    }
+    for (const [nombre, a] of Object.entries(actores)) {
+        if (a.superficie) exigir(superficies?.[a.superficie], `el actor "${nombre}" usa la superficie "${a.superficie}", que no está en superficies`);
+    }
+    const flujo = cruda.flujo ?? [];
+    for (const [desde, hasta] of flujo) {
+        for (const s of [desde, hasta]) exigir(superficies?.[s], `flujo menciona la superficie "${s}", que no está en superficies`);
+    }
+
+    // La música se comprueba al cargar: un archivo que no existe descubierto recién en la
+    // mezcla final tira a la basura una grabación entera.
+    const audio = { ...DEFECTOS.audio, ...cruda.audio, clic: { ...DEFECTOS.audio.clic, ...cruda.audio?.clic } };
+    if (audio.musica) {
+        audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo ?? '') };
+        exigir(existsSync(audio.musica.archivo), `audio.musica.archivo no existe: ${audio.musica.archivo}`);
+    }
+
     return {
         ...DEFECTOS,
         ...cruda,
@@ -209,5 +258,15 @@ export async function cargarConfig(rutaProyecto) {
         auditoria: { ...DEFECTOS.auditoria, ...cruda.auditoria },
         voz,
         actores,
+        superficies,
+        flujo,
+        audio,
     };
+}
+
+/** La superficie en la que vive `actor`, con su id, o null si la config no declara superficies. */
+export function superficieDe(config, actor) {
+    const id = config.actores?.[actor]?.superficie;
+    if (!id || !config.superficies?.[id]) return null;
+    return { id, ...config.superficies[id] };
 }

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { cargarConfig, ErrorConfig } from '../src/configurar.mjs';
+import { cargarConfig, ErrorConfig, superficieDe } from '../src/configurar.mjs';
 import { PATRON_POR_DEFECTO } from '../src/auditoria.mjs';
 
 function proyecto(config) {
@@ -307,4 +307,78 @@ test('presentacion respeta un sub-bloque parcial de transicion3d', async () => {
     }));
     assert.equal(cfg.video.presentacion.transicion3d.activa, false);
     assert.equal(cfg.video.presentacion.transicion3d.ms, 900);
+});
+
+// ---------------------------------------------------------------------------------
+// Superficies, actores con dispositivo y audio (tutoriales multi-superficie).
+//
+// Un tutorial que cruza escritorio, teléfono y APK necesita que la config diga en qué
+// superficie y dispositivo vive cada actor, y admitir actores sin cuenta (el vecino
+// anónimo o la app que se loguea dentro del guion). Todo es opt-in: una config de 1.13
+// debe cargar igual que antes.
+// ---------------------------------------------------------------------------------
+
+/** Config cruda con la carpeta de guiones del helper ya declarada. */
+const conGuiones = (cuerpo) => proyectoCrudo(`export default { guiones:'./guiones', ${cuerpo} };`);
+
+test('sin superficies ni audio, la config queda como en 1.13 (compatibilidad)', async () => {
+    const c = await cargarConfig(conGuiones(`baseURL:'http://localhost:8000',
+        marca:{nombre:'M'}, actores:{ a:{email:'a@x', password:'password'} }`));
+    assert.equal(c.superficies, null);
+    assert.deepEqual(c.flujo, []);
+    assert.deepEqual(c.audio, { musica: null, clic: { activo: false, volumen: 0.5 } });
+    assert.equal(c.actores.a.sesion, true);
+    assert.equal(superficieDe(c, 'a'), null);
+});
+
+test('actor sesion:false no exige email ni password', async () => {
+    const c = await cargarConfig(conGuiones(`baseURL:'http://localhost:8000',
+        marca:{nombre:'M'}, actores:{ vecina:{ sesion:false } }`));
+    assert.equal(c.actores.vecina.sesion, false);
+});
+
+test('superficie desconocida, dispositivo inexistente y baseURL inválida fallan con mensaje claro', async () => {
+    const base = (actor) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        superficies:{ sala:{ nombre:'Sala', tipo:'escritorio' } }, actores:{ x:${actor} }`);
+    await assert.rejects(cargarConfig(base(`{sesion:false, superficie:'nada'}`)), /superficie "nada"/);
+    await assert.rejects(cargarConfig(base(`{sesion:false, dispositivo:'Nokia 3310'}`)), /dispositivo "Nokia 3310"/);
+    await assert.rejects(cargarConfig(base(`{sesion:false, baseURL:'ftp://x'}`)), /baseURL del actor "x"/);
+});
+
+test('superficie con tipo inválido o sin nombre falla', async () => {
+    const con = (s) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        superficies:{ s:${s} }, actores:{ x:{sesion:false} }`);
+    await assert.rejects(cargarConfig(con(`{ nombre:'S', tipo:'tablet' }`)), /tipo "tablet"/);
+    await assert.rejects(cargarConfig(con(`{ tipo:'telefono' }`)), /superficie "s" no trae nombre/);
+});
+
+test('superficies reciben defectos de ícono y color, y superficieDe las resuelve por actor', async () => {
+    const c = await cargarConfig(conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M', color:'#123456'},
+        superficies:{ apk:{ nombre:'App del patrullero · Android', tipo:'telefono' } },
+        flujo:[['apk','apk']], actores:{ p:{ sesion:false, superficie:'apk', dispositivo:'Pixel 7' } }`));
+    assert.deepEqual(superficieDe(c, 'p'), { id:'apk', nombre:'App del patrullero · Android', tipo:'telefono', icono:'phone', color:'#123456' });
+});
+
+test('flujo con una superficie inexistente falla', async () => {
+    await assert.rejects(cargarConfig(conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        superficies:{ a:{nombre:'A', tipo:'escritorio'} }, flujo:[['a','b']], actores:{ x:{sesion:false} }`)), /flujo.*"b"/);
+});
+
+test('Review Focus #4: audio.musica.archivo inexistente es error de config', async () => {
+    await assert.rejects(cargarConfig(conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        actores:{ x:{sesion:false} }, audio:{ musica:{ archivo:'./no-existe.mp3' } }`)), /audio\.musica\.archivo/);
+});
+
+test('audio.musica existente recibe ruta absoluta y defectos de volumen y atenuación', async () => {
+    const dir = conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        actores:{ x:{sesion:false} }, audio:{ musica:{ archivo:'./fondo.mp3' }, clic:{ activo:true } }`);
+    writeFileSync(join(dir, 'fondo.mp3'), '');
+    const c = await cargarConfig(dir);
+    assert.deepEqual(c.audio, { musica: { archivo: join(dir, 'fondo.mp3'), volumen: 0.12, atenuar: true }, clic: { activo: true, volumen: 0.5 } });
+});
+
+test('presentacion recibe mapaMs por defecto', async () => {
+    const c = await cargarConfig(conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        actores:{ x:{sesion:false} }, video:{ presentacion:{} }`));
+    assert.equal(c.video.presentacion.mapaMs, 2500);
 });
