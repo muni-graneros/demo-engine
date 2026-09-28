@@ -15,6 +15,8 @@ wav = m.generate(sys.stdin.read(), language_id="es", audio_prompt_path=sys.argv[
 ta.save(sys.argv[2], wav, m.sr)
 `;
 
+// OJO: upstream `from_pretrained` puede aceptar un argumento de versión de modelo (t3_model);
+// confirmarlo en la primera instalación real antes de fijar un valor, no adivinarlo.
 // Venv propio (venv-chatterbox) por la misma razón que pocket: su pila de torch no se mezcla
 // con la de kokoro/piper ni con la de pocket, que fijan versiones distintas.
 export function crear({ voz, venv, voces, velocidad = 1, ejecutarProceso } = {}) {

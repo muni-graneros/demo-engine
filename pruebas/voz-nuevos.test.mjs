@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { crear as crearPocket } from '../src/voz/pocket.mjs';
 import { crear as crearChatterbox } from '../src/voz/chatterbox.mjs';
-import { MOTORES } from '../src/voz/index.mjs';
+import { MOTORES, crearVoz } from '../src/voz/index.mjs';
 import { crearMotorProceso } from '../src/voz/proceso.mjs';
 import { ff, duracion } from '../src/ffmpeg.mjs';
 
@@ -87,7 +87,59 @@ test('despues que falla convierte la síntesis en fallida (y avisa)', () => {
     const m = crearMotorProceso({ motor: 'x', archivosListos: () => null,
         comando: (d) => ({ PY: 'py', args: [d] }), ejecutarProceso: ejecutorQueEscribe([]),
         despues: () => { throw new Error('atempo roto'); } });
-    assert.equal(m.sintetizar('hola'), null);
+    const avisos = [];
+    const original = console.warn;
+    console.warn = (msg) => avisos.push(String(msg));
+    try {
+        assert.equal(m.sintetizar('hola'), null);
+    } finally {
+        console.warn = original;
+    }
+    assert.ok(avisos.some((a) => a.includes('atempo roto')), `avisos: ${avisos.join(' / ')}`);
+});
+
+test('pocket: voz null (sin declarar en la config) usa su voz por omisión', () => {
+    const llamadas = [];
+    const m = crearPocket({ venv: venvFalso(), voces: tmpdir(), voz: null, ejecutarProceso: ejecutorQueEscribe(llamadas) });
+    assert.ok(m.sintetizar('Hola'));
+    assert.ok(llamadas.at(-1).args.includes('spanish'));
+    assert.ok(llamadas.at(-1).args.includes('alba'));
+});
+
+// Corre crearVoz con una caché temporal y devuelve lo que escribió por stderr (el aviso de
+// avisarSinVoz lista el motivo concreto de cada motor, con la ruta que miró).
+function crearVozCapturando(opciones, prepararCache = () => {}) {
+    const anterior = process.env.XDG_CACHE_HOME;
+    const cache = mkdtempSync(join(tmpdir(), 'cache-'));
+    prepararCache(join(cache, 'demo-engine'));
+    process.env.XDG_CACHE_HOME = cache;
+    const salida = [];
+    const escribir = process.stderr.write;
+    process.stderr.write = (t) => { salida.push(String(t)); return true; };
+    try {
+        crearVoz(opciones);
+    } finally {
+        process.stderr.write = escribir;
+        if (anterior === undefined) delete process.env.XDG_CACHE_HOME;
+        else process.env.XDG_CACHE_HOME = anterior;
+    }
+    return { cache, texto: salida.join('') };
+}
+
+test('crearVoz no le pasa a pocket el voz.venv de kokoro: busca su propio venv-pocket', () => {
+    const { cache, texto } = crearVozCapturando({ motor: 'pocket', venv: '/x', respaldo: 'ninguno' });
+    assert.ok(texto.includes(join(cache, 'demo-engine', 'venv-pocket', 'bin', 'python')), texto);
+    assert.ok(!texto.includes('/x/bin/python'), texto);
+});
+
+test('crearVoz no le pasa a chatterbox la voz por omisión de kokoro (ef_dora)', () => {
+    const conPython = (raiz) => {
+        mkdirSync(join(raiz, 'venv-chatterbox', 'bin'), { recursive: true });
+        writeFileSync(join(raiz, 'venv-chatterbox', 'bin', 'python'), '');
+    };
+    const { texto } = crearVozCapturando({ motor: 'chatterbox', voz: 'ef_dora', venv: '/x', respaldo: 'ninguno' }, conPython);
+    assert.match(texto, /chatterbox necesita una voz de referencia/);
+    assert.doesNotMatch(texto, /voz de referencia en .*ef_dora/);
 });
 
 // crearVoz con un venv falso cae al stub "ninguno" (el python vacío no arranca), así que

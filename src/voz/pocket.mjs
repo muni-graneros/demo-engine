@@ -13,7 +13,7 @@ from pocket_tts import TTSModel
 m = TTSModel.load_model(language=sys.argv[1])
 estado = m.get_state_for_audio_prompt(sys.argv[2])
 audio = m.generate_audio(estado, sys.stdin.read())
-scipy.io.wavfile.write(sys.argv[3], m.sample_rate, audio.numpy())
+scipy.io.wavfile.write(sys.argv[3], m.sample_rate, audio.detach().cpu().numpy())
 `;
 
 // El venv propio (venv-pocket, hermano del `venv` de kokoro/piper) es a propósito: Pocket
@@ -23,7 +23,9 @@ scipy.io.wavfile.write(sys.argv[3], m.sample_rate, audio.numpy())
 export function crear({ voz = 'spanish:alba', venv, voces, velocidad = 1, ejecutarProceso } = {}) {
     const { venv: VENV } = resolverVenvYVoces({ venv: venv ?? join(RUTA_CACHE(), 'venv-pocket'), voces });
     const PY = join(VENV, 'bin', 'python');
-    const [idioma, nombreVoz] = voz.includes(':') ? voz.split(/:(.*)/s) : ['spanish', voz];
+    // `voz: null` llega desde la config cuando no se declaró: se trata igual que undefined.
+    const v = voz ?? 'spanish:alba';
+    const [idioma, nombreVoz] = v.includes(':') ? v.split(/:(.*)/s) : ['spanish', v];
     return crearMotorProceso({
         motor: 'pocket',
         archivosListos: () => (existsSync(PY) ? null : `no se encontró el intérprete de Python de Pocket TTS en ${PY} (instalar-voces.sh --pocket)`),

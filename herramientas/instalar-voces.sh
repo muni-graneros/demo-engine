@@ -71,21 +71,39 @@ echo "Voces instaladas en $VOCES"
 
 # Se usa $RAIZ y no $VENV: DEMO_VENV nombra el venv de kokoro/piper, y el motor busca estos
 # dos en <caché>/demo-engine/venv-{pocket,chatterbox} (src/voz/pocket.mjs, chatterbox.mjs).
+#
+# Cada paso va en su propia línea a propósito: con `a && b && c`, `set -e` NO aborta si falla
+# un comando que no es el último, y el script imprimía «instalado» y salía con 0 tras un pip roto.
+#
+# torch y el paquete se resuelven en UNA sola instalación con el índice de CPU como extra: si
+# se instala torch CPU primero, el paquete puede fijar otra versión y pip la reemplaza por una
+# build con CUDA de varios GB. Después se verifica que efectivamente quedó la de CPU.
+verificar_torch_cpu() {
+  "$1/bin/python" -c "import torch,sys; sys.exit(1 if torch.version.cuda else 0)" || {
+    echo "ERROR: en $1 quedó instalado torch con CUDA (varios GB, inútil en esta máquina): abortar." >&2
+    exit 1
+  }
+}
+
 if [ "$POCKET" = 1 ]; then
-  python3 -m venv "$RAIZ/venv-pocket" \
-    && "$RAIZ/venv-pocket/bin/pip" install --index-url https://download.pytorch.org/whl/cpu torch \
-    && "$RAIZ/venv-pocket/bin/pip" install pocket-tts scipy
-  echo "Pocket TTS instalado en $RAIZ/venv-pocket"
+  V="$RAIZ/venv-pocket"
+  python3 -m venv "$V"
+  "$V/bin/pip" install -q --upgrade pip
+  "$V/bin/pip" install --extra-index-url https://download.pytorch.org/whl/cpu pocket-tts scipy
+  verificar_torch_cpu "$V"
+  echo "Pocket TTS instalado en $V"
   echo "  AVISO: los pesos de Pocket TTS (Kyutai) son CC-BY-4.0: todo video que use esta voz"
   echo "  tiene que atribuirlo en los créditos (p. ej. «Voz sintética: Pocket TTS, Kyutai, CC-BY-4.0»)."
   echo "  Clonar una voz a partir de un .wav exige el consentimiento escrito de esa persona (Ley 21.719)."
 fi
 
 if [ "$CHATTERBOX" = 1 ]; then
-  python3 -m venv "$RAIZ/venv-chatterbox" \
-    && "$RAIZ/venv-chatterbox/bin/pip" install --index-url https://download.pytorch.org/whl/cpu torch \
-    && "$RAIZ/venv-chatterbox/bin/pip" install chatterbox-tts torchaudio
-  echo "Chatterbox instalado en $RAIZ/venv-chatterbox"
+  V="$RAIZ/venv-chatterbox"
+  python3 -m venv "$V"
+  "$V/bin/pip" install -q --upgrade pip
+  "$V/bin/pip" install --extra-index-url https://download.pytorch.org/whl/cpu chatterbox-tts torchaudio
+  verificar_torch_cpu "$V"
+  echo "Chatterbox instalado en $V"
   echo "  AVISO: Chatterbox siempre clona una voz de referencia (voz: ruta a un .wav). Usar solo la"
   echo "  voz de una persona que dio su consentimiento por escrito (Ley 21.719: la voz es dato personal)."
   echo "  El audio lleva la marca de agua Perth de Resemble, que lo identifica como voz sintética."
