@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
@@ -192,5 +192,9 @@ test('curso multi-superficie: mapa, teléfono, pantalla dividida, clic y transic
         assert.ok(quieta < 1, `la tarjeta es una imagen fija, difieren ${quieta.toFixed(1)}`);
     } finally {
         await juguete.cerrar();
+        // Un curso con pistas, trozos y capturas: sin borrarlo, cada corrida deja decenas de MB.
+        // DEMO_E2E_CONSERVAR=1 lo deja en disco para mirar los cuadros a mano.
+        if (!process.env.DEMO_E2E_CONSERVAR) rmSync(proyecto, { recursive: true, force: true });
+        else console.log(`proyecto conservado en ${proyecto}`);
     }
 });

@@ -92,12 +92,22 @@ async function grabarYMontar(config, voz, sesionesDe, guion, nombre) {
     return { mp4, pasos };
 }
 
-/** Ancho, alto y si trae audio, leídos del propio archivo (el binario estático no trae ffprobe). */
+/**
+ * Ancho, alto y si trae audio, leídos del propio archivo (el binario estático no trae ffprobe).
+ *
+ * Las dimensiones son las que se VEN, no las guardadas: scrcpy y los teléfonos graban a veces
+ * apaisado con una matriz de rotación (`displaymatrix: rotation of 90 degrees`), y ffmpeg
+ * endereza el cuadro al decodificar. Con ±90° se intercambian ancho y alto; si no, un clip
+ * vertical se compondría en un hueco apaisado, achicado entre bandas negras.
+ */
 function sondear(archivo) {
     const info = spawnSync(RUTA_FFMPEG, ['-i', archivo], { encoding: 'utf8' }).stderr ?? '';
     const m = info.match(/Stream #.*Video:.*?(\d{2,5})x(\d{2,5})(?=[\s,])/);
     if (!m) throw new ErrorConfig(`no pude leer las dimensiones del video ${archivo}`);
-    return { ancho: +m[1], alto: +m[2], audio: /Stream #.*Audio:/.test(info) };
+    const giro = Number(info.match(/displaymatrix: rotation of (-?[\d.]+) degrees/)?.[1]
+        ?? info.match(/^\s*rotate\s*:\s*(-?\d+)/m)?.[1] ?? 0);
+    const vertical = Math.abs(Math.round(giro / 90)) % 2 === 1;
+    return { ancho: vertical ? +m[2] : +m[1], alto: vertical ? +m[1] : +m[2], audio: /Stream #.*Audio:/.test(info) };
 }
 
 /**
@@ -185,9 +195,21 @@ async function videoEnLienzo(config, cap, superficie, archivo, { lienzo, tempora
  * cuenta dentro del capítulo que entra, igual que la transición 3D.
  */
 async function grabarCurso(config, voz, sesionesDe, idCurso) {
+    const maestro = await cargarGuion(config, idCurso);
+    // Todo el maestro se valida ANTES de grabar nada: un error de config en el último
+    // capítulo, descubierto recién al llegar a él, tiraba a la basura la grabación de todos
+    // los anteriores.
+    for (const cap of maestro.capitulos) {
+        if (cap.tipo === 'mapa' && !config.superficies) {
+            throw new ErrorConfig(`el capítulo "${cap.id}" es de tipo mapa, pero demo.config.mjs no declara superficies`);
+        }
+        superficieDeCapitulo(config, cap);
+        if (cap.fuente === 'video' && !existsSync(join(raiz, cap.archivo))) {
+            throw new ErrorConfig(`el capítulo "${cap.id}" apunta a un video que no existe: ${join(raiz, cap.archivo)}`);
+        }
+    }
     limpiarCapturas(config);
     if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
-    const maestro = await cargarGuion(config, idCurso);
     const presentacion = config.video.presentacion;
     const lienzo = lienzoDe({ presentacion, video: config.video });
     // Tarjetas y compuestos viven hasta que el curso está pegado: `.tmp-curso` no sirve,
@@ -246,9 +268,12 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
  */
 function ejecutarFormatos(args) {
     const USO = 'Uso: demo formatos <video.mp4> [--vertical] [--cuadrado]';
-    const archivo = args.find((a) => !a.startsWith('--'));
+    const posicionales = args.filter((a) => !a.startsWith('--'));
+    const archivo = posicionales[0];
     const desconocidas = args.filter((a) => a.startsWith('--') && !['--vertical', '--cuadrado'].includes(a));
-    if (!archivo || desconocidas.length) {
+    // Un solo video por llamada: dos posicionales son casi siempre un error de tipeo, y
+    // procesar el primero en silencio lo escondería.
+    if (posicionales.length !== 1 || desconocidas.length) {
         console.log(desconocidas.length ? `Bandera desconocida: ${desconocidas.join(' ')}\n${USO}` : USO);
         process.exitCode = 1;
         return;

@@ -122,7 +122,8 @@ capitulos: [
   { id: 'avisa', titulo: 'Marta avisa', guion: 'denuncia', superficie: 'denuncia' },
 
   // Clip nativo (scrcpy): con superficie se compone en su marco y con su chip. El aspecto se
-  // mide del archivo, y su audio se conserva.
+  // mide del archivo, ya enderezado si trae rotación en la metadata (±90° intercambia ancho y
+  // alto), y su audio se conserva.
   { id: 'terreno', titulo: 'En terreno', fuente: 'video', archivo: 'demo/clips/terreno.mp4', superficie: 'apk' },
 ]
 ```

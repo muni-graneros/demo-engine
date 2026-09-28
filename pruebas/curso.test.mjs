@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { ff, RUTA_FFMPEG } from '../src/ffmpeg.mjs';
+import { ff, RUTA_FFMPEG, duracion } from '../src/ffmpeg.mjs';
 import { pegarCapitulos } from '../src/curso.mjs';
 import { parseVtt } from '../src/subtitulos.mjs';
 
@@ -121,6 +121,11 @@ test('con transiciones, los marcadores de capítulo incluyen su transición', as
         `el capítulo 2 debe empezar en ~2 s (con su transición adentro), midió ${capitulos[1].inicioSeg}`);
     assert.ok(Math.abs((capitulos[1].finSeg - capitulos[1].inicioSeg) - 2.4) < 0.3,
         'el capítulo 2 dura su clip más su transición');
+    // La transición normalizada dura lo que su video (0,4 s), sin audio sobrante. Con
+    // `-shortest` el silencio salía 0,15 a 0,6 s más largo según la corrida, y una tolerancia
+    // de 0,3 s sobre el capítulo lo dejaba pasar a veces: por eso se mide el trozo mismo.
+    const trans = duracion(join(dir, '.tmp-curso', 'trans-01.mp4'));
+    assert.ok(Math.abs(trans - 0.4) <= 0.05, `la transición normalizada debe durar 0,40 s, midió ${trans}`);
 });
 
 test('con transiciones, los cues se desplazan por el inicio del CONTENIDO, no de la transición', async () => {
@@ -290,4 +295,9 @@ test('con transición y tarjeta, la cue cae después de ambas', async () => {
     const [cue] = parseVtt(readFileSync(vtt, 'utf8'));
     const esperado = capitulos[1].inicioSeg + 0.4 + 1 + 0.5;
     assert.ok(Math.abs(cue.inicioSeg - esperado) < 0.2, `esperaba ~${esperado}s, midió ${cue.inicioSeg}s`);
+    // Cada trozo mudo normalizado dura exactamente su video (ver el test de marcadores).
+    for (const [archivo, dura] of [['trans-01.mp4', 0.4], ['tarjeta-01.mp4', 1]]) {
+        const medida = duracion(join(dir, '.tmp-curso', archivo));
+        assert.ok(Math.abs(medida - dura) <= 0.05, `${archivo} debe durar ${dura} s, midió ${medida}`);
+    }
 });

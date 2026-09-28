@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { RUTA_FFMPEG } from '../src/ffmpeg.mjs';
+import { geometriaLienzo } from '../src/lienzo.mjs';
 import { declararEntornoDePruebas } from './entorno.mjs';
 
 // El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
@@ -441,6 +442,10 @@ test('demo formatos sin archivo imprime el uso y sale con código != 0', async (
     const r = await correrCli(dir, ['formatos']);
     assert.notEqual(r.status, 0);
     assert.match(r.stdout + r.stderr, /Uso: demo formatos <video\.mp4> \[--vertical\] \[--cuadrado\]/);
+    // Dos archivos no es «dos videos»: es un error de tipeo, y procesar solo uno lo escondería.
+    const dos = await correrCli(dir, ['formatos', 'a.mp4', 'b.mp4']);
+    assert.notEqual(dos.status, 0);
+    assert.match(dos.stdout + dos.stderr, /Uso: demo formatos/);
     const inexistente = await correrCli(dir, ['formatos', 'no-existe.mp4']);
     assert.notEqual(inexistente.status, 0);
     assert.match(inexistente.stderr, /no-existe\.mp4/);
@@ -499,14 +504,21 @@ test('demo curso: un capítulo con superficie sin superficies en la config falla
         const proyecto = proyectoDeJuguete(juguete);
         mkdirSync(join(proyecto, 'clips'));
         clipDeColor(join(proyecto, 'clips', 'nativo.mp4'), { segundos: 1 });
+        escribirGuionPanel(proyecto, 'cap1', '/panel');
         writeFileSync(join(proyecto, 'guiones', 'curso.mjs'), `export default {
             id: 'curso', titulo: 'Curso',
-            capitulos: [{ id: 'terreno', titulo: 'En terreno', fuente: 'video', archivo: 'clips/nativo.mp4', superficie: 'vecino' }],
+            capitulos: [
+                { id: 'uno', titulo: 'Uno', guion: 'cap1' },
+                { id: 'terreno', titulo: 'En terreno', fuente: 'video', archivo: 'clips/nativo.mp4', superficie: 'vecino' },
+            ],
         };`);
         const r = await correrCli(proyecto, ['curso']);
         assert.notEqual(r.status, 0);
         assert.match(r.stderr, /terreno/);
         assert.match(r.stderr, /superficies/);
+        // Se valida el maestro entero ANTES de grabar: descubrirlo en el último capítulo
+        // tiraba a la basura la grabación de todos los anteriores.
+        assert.ok(!existsSync(join(proyecto, 'salida', 'uno.mp4')), 'no debió grabar el capítulo 1 antes de fallar');
     } finally {
         await juguete.cerrar();
     }
@@ -564,6 +576,40 @@ test('demo manual con un capítulo mapa en el maestro no intenta grabarlo', asyn
         const texto = readFileSync(join(proyecto, 'salida', 'curso.md'), 'utf8');
         assert.match(texto, /Estas son las superficies\./);
         assert.match(texto, /Ver panel \(cap1\)/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo curso: un clip nativo con rotación en la metadata entra con su aspecto real', async () => {
+    // scrcpy y los teléfonos guardan a veces el video apaisado con una matriz de rotación.
+    // ffmpeg lo endereza al decodificar, así que el aspecto del panel tiene que salir de las
+    // dimensiones YA rotadas: si no, un teléfono vertical se compone en un hueco apaisado.
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete, SUPERFICIES);
+        mkdirSync(join(proyecto, 'clips'));
+        const apaisado = clipDeColor(join(proyecto, 'clips', 'apaisado.mp4'), { color: 'red', tamano: '840x412', segundos: 2 });
+        const rotado = join(proyecto, 'clips', 'nativo.mp4');
+        const r0 = spawnSync(RUTA_FFMPEG, ['-y', '-display_rotation', '90', '-i', apaisado, '-c', 'copy', rotado], { encoding: 'utf8' });
+        assert.equal(r0.status, 0, r0.stderr);
+        writeFileSync(join(proyecto, 'guiones', 'curso.mjs'), `export default {
+            id: 'curso', titulo: 'Curso',
+            capitulos: [{ id: 'nativo', titulo: 'En terreno', fuente: 'video', archivo: 'clips/nativo.mp4', superficie: 'vecino' }],
+        };`);
+        const r = await correrCli(proyecto, ['curso']);
+        assert.equal(r.status, 0, r.stderr);
+        const mp4 = join(proyecto, 'salida', 'curso.mp4');
+        const t = 2.5 + 1;
+        const [rr, gg, bb] = pixel(mp4, t, 320, 240);
+        assert.ok(rr > 150 && gg < 80 && bb < 80, `el centro debería ser el clip, salió rgb(${rr},${gg},${bb})`);
+        // Con el aspecto leído sin rotar (840/412) el panel sale apaisado: el clip enderezado
+        // queda igual de chico en el centro, pero rodeado de bandas NEGRAS dentro de una
+        // carcasa ancha. Con el aspecto real, 60 px a la derecha del hueco ya es el fondo de
+        // marca (azul), fuera del teléfono.
+        const [hueco] = geometriaLienzo({ lienzo: { ancho: 640, alto: 480 }, paneles: [{ tipo: 'telefono', aspecto: 412 / 840, chip: {} }] });
+        const [r2, g2, b2] = pixel(mp4, t, hueco.x + hueco.ancho + 60, hueco.y + hueco.alto / 2);
+        assert.ok(r2 + g2 + b2 > 60 && b2 > r2, `fuera del teléfono debería verse el fondo de marca, salió rgb(${r2},${g2},${b2})`);
     } finally {
         await juguete.cerrar();
     }

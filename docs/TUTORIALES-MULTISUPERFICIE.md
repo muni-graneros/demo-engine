@@ -72,7 +72,10 @@ El formato vertical para redes sale del video terminado con `demo formatos`.
 Chromium no tiene GPS en segundo plano, notificaciones de turno ni la grabación cifrada del
 APK. Esas partes se graban una vez en el emulador con `scrcpy --record` y entran como capítulo
 `fuente: 'video'` **con** `superficie`. El motor mide el aspecto del clip y lo compone en el
-marco de teléfono con su chip, así que queda indistinguible del resto.
+marco de teléfono con su chip, así que queda indistinguible del resto. Si el clip viene
+apaisado con una rotación en la metadata (`displaymatrix`), el motor la respeta y lo trata
+como vertical. Lo que no corrige es un clip grabado de costado **sin** metadata: ese hay que
+enderezarlo antes.
 
 ---
 

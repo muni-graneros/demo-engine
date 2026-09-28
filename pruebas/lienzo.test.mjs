@@ -56,13 +56,60 @@ test('geometriaLienzo rechaza cantidades de paneles y tipos que no sabe dibujar'
     assert.throws(() => geometriaLienzo({ lienzo: L, paneles: [{ tipo: 'tablet', aspecto: 1 }] }), /tipo/);
 });
 
-test('un nombre de chip largo se recorta con elipsis y no se sale de su panel', async (t) => {
+test('un nombre de chip larguísimo se recorta con elipsis dentro de la columna de su panel', async (t) => {
     const nombre = 'Aplicación móvil del patrullero municipal de seguridad ciudadana · Android 14 · v2';
-    const r = await renderizarLienzo({ lienzo: L, paneles: [{ tipo: 'telefono', aspecto: 412 / 839, chip: { nombre, icono: 'phone', color: '#166534' } }],
-        marca: { color: '#1e3a8a' }, salida: temporal(t), devolverContraste: true });
-    const [c] = r.chips;
-    assert.ok(c.x >= c.panel.x && c.x + c.ancho <= c.panel.x + c.panel.ancho + 0.5, JSON.stringify(c));
+    // En pantalla dividida la columna del teléfono termina donde empieza la ventana: ahí no
+    // cabe, y tiene que recortarse sin pisar al vecino.
+    const r = await renderizarLienzo({ lienzo: L, paneles: [
+        { tipo: 'telefono', aspecto: 412 / 839, chip: { nombre, icono: 'phone', color: '#166534' } },
+        { tipo: 'ventana', aspecto: 1.6, url: 'http://x', chip: { nombre: 'Sala', icono: 'monitor', color: '#1e3a8a' } },
+    ], marca: { color: '#1e3a8a' }, salida: temporal(t), devolverContraste: true });
+    const [c, ven] = r.chips;
+    assert.ok(c.x >= c.columna.x - 0.5 && c.x + c.ancho <= c.columna.x + c.columna.ancho + 0.5, JSON.stringify(c));
+    assert.ok(c.x >= PADDING - 0.5 && c.x + c.ancho <= ven.panel.x, JSON.stringify(c));
     assert.ok(c.recortado, 'el texto tiene que quedar recortado (elipsis), no desbordado');
+
+    // Un solo panel: la columna es todo el ancho útil, y el chip no se sale del padding.
+    const solo = await renderizarLienzo({ lienzo: L, paneles: [{ tipo: 'telefono', aspecto: 412 / 839, chip: { nombre: nombre.repeat(3), icono: 'phone', color: '#166534' } }],
+        marca: { color: '#1e3a8a' }, salida: temporal(t), devolverContraste: true });
+    const [s1] = solo.chips;
+    assert.ok(s1.x >= PADDING - 0.5 && s1.x + s1.ancho <= L.ancho - PADDING + 0.5, JSON.stringify(s1));
+    assert.ok(s1.recortado);
+});
+
+test('en pantalla dividida el chip del teléfono no se trunca ni pisa el panel vecino', async (t) => {
+    // El chip es lo que nombra la superficie (el color no puede ser lo único, WCAG 1.4.1):
+    // limitarlo al ancho de la carcasa lo dejaba en «App de…», ilegible.
+    const r = await renderizarLienzo({ lienzo: L,
+        paneles: [
+            { tipo: 'telefono', aspecto: 412 / 840, chip: { nombre: 'App del patrullero · Android', icono: 'phone', color: '#166534' } },
+            { tipo: 'ventana', aspecto: 1.6, url: 'http://x', chip: { nombre: 'Sala de operaciones', icono: 'monitor', color: '#1e3a8a' } },
+        ],
+        marca: { color: '#1e3a8a' }, salida: temporal(t), devolverContraste: true });
+    const [tel, ven] = r.chips;
+    assert.ok(!tel.recortado, `el chip del teléfono no debe recortarse: ${JSON.stringify(tel)}`);
+    // No pisa ni la ventana ni su chip.
+    assert.ok(tel.x + tel.ancho <= ven.panel.x, `chip ${tel.x + tel.ancho} vs ventana ${ven.panel.x}`);
+    assert.ok(tel.x + tel.ancho <= ven.x, 'no pisa el chip de la ventana');
+    assert.ok(tel.x >= PADDING - 0.5, 'no se sale por la izquierda del lienzo');
+    assert.ok(!ven.recortado);
+});
+
+test('en un lienzo chico el chip del teléfono crece más allá de la carcasa en vez de recortarse', async (t) => {
+    // Lo que se vio en el curso de 960×540: la carcasa medía ~156 px y el chip salía «App de…».
+    const chico = { ancho: 960, alto: 540 };
+    const r = await renderizarLienzo({ lienzo: chico,
+        paneles: [
+            { tipo: 'telefono', aspecto: 412 / 840, chip: { nombre: 'App del vecino', icono: 'phone', color: '#9a3412' } },
+            { tipo: 'ventana', aspecto: 800 / 600, url: 'http://x', chip: { nombre: 'Sala de operaciones', icono: 'monitor', color: '#1e3a8a' } },
+        ],
+        marca: { color: '#1e3a8a' }, salida: temporal(t), devolverContraste: true });
+    const [tel, ven] = r.chips;
+    assert.ok(!tel.recortado, `el chip del teléfono no debe recortarse: ${JSON.stringify(tel)}`);
+    assert.ok(tel.ancho > tel.panel.ancho, 'para no recortarse tiene que poder ser más ancho que la carcasa');
+    assert.ok(tel.x + tel.ancho <= ven.panel.x && tel.x + tel.ancho <= ven.x, 'no pisa la ventana ni su chip');
+    assert.ok(tel.x >= PADDING - 0.5);
+    assert.ok(!ven.recortado);
 });
 
 test('el PNG deja el hueco transparente y pinta el fondo fuera', async (t) => {

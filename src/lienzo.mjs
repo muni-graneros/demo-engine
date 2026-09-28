@@ -106,7 +106,7 @@ export function geometriaLienzo({ lienzo, paneles, padding = 64 }) {
  * navegador —es lo que realmente se pinta, no lo que el JS creyó elegir—. Si ningún panel
  * lleva chip, `contraste` es `null`. Con `devolverContraste` también vuelve `chips`: el
  * rectángulo de cada chip junto al de su panel y si el texto quedó recortado, para poder
- * comprobar que un nombre largo no se sale del panel.
+ * comprobar que un nombre largo no se sale de su columna (`columna`: el espacio libre del panel).
  */
 export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre = 'lienzo.png', padding = 64, devolverContraste = false }) {
     const huecos = geometriaLienzo({ lienzo, paneles, padding });
@@ -159,11 +159,27 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
                 phone: '<rect x="6" y="2" width="12" height="20" rx="3"/><path d="M11 18h2"/>',
             };
 
+            // Caja de cada panel (carcasa o ventana con su barra), calculada de antemano: la
+            // columna del chip de un panel depende de dónde empieza el panel vecino.
+            const cajaDe = (p, h) => (p.tipo === 'telefono'
+                ? { x: h.x - K.BISEL.lado, y: h.y - K.BISEL.arriba, ancho: h.ancho + K.BISEL.lado * 2, alto: h.alto + K.BISEL.arriba + K.BISEL.abajo }
+                : { x: h.x, y: h.y - K.ALTO_BARRA, ancho: h.ancho, alto: h.alto + K.ALTO_BARRA });
+            const cajas = paneles.map((p, i) => cajaDe(p, huecos[i]));
+            // Columna del chip: el espacio horizontal libre del panel, desde el borde útil del
+            // lienzo (o el final del panel anterior) hasta el comienzo del siguiente (o el borde
+            // útil). El chip nombra la superficie —el color no puede ser lo único, WCAG 1.4.1—, y
+            // limitarlo al ancho de la carcasa del teléfono lo dejaba en «App de…».
+            const AIRE = 16;
+            const columnas = cajas.map((c, i) => {
+                const izq = i === 0 ? padding : cajas[i - 1].x + cajas[i - 1].ancho + AIRE;
+                const der = i === cajas.length - 1 ? lienzo.ancho - padding : cajas[i + 1].x - AIRE;
+                return { x: izq, ancho: Math.max(0, der - izq) };
+            });
+
             paneles.forEach((p, i) => {
                 const h = huecos[i];
-                let caja;
+                const caja = cajas[i];
                 if (p.tipo === 'telefono') {
-                    caja = { x: h.x - K.BISEL.lado, y: h.y - K.BISEL.arriba, ancho: h.ancho + K.BISEL.lado * 2, alto: h.alto + K.BISEL.arriba + K.BISEL.abajo };
                     const cuerpo = crear(cuerpos, {
                         position: 'fixed', left: px(caja.x), top: px(caja.y), width: px(caja.ancho), height: px(caja.alto),
                         boxSizing: 'border-box', background: '#0b0b0f', borderRadius: px(K.RADIO_TELEFONO),
@@ -176,7 +192,6 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
                         transform: 'translateX(-50%)', background: '#000', borderRadius: '12px',
                     });
                 } else {
-                    caja = { x: h.x, y: h.y - K.ALTO_BARRA, ancho: h.ancho, alto: h.alto + K.ALTO_BARRA };
                     const ventana = crear(cuerpos, {
                         position: 'fixed', left: px(caja.x), top: px(caja.y), width: px(caja.ancho), height: px(caja.alto),
                         borderRadius: px(K.RADIO_VENTANA), boxShadow: sombra, overflow: 'hidden',
@@ -197,21 +212,30 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
                 }
 
                 if (!p.chip) return;
+                const columna = columnas[i];
                 // Fuera de la capa enmascarada: el chip nunca pisa un hueco (va 56 px arriba).
                 const chip = crear(raiz, {
                     position: 'fixed', left: px(caja.x), top: px(caja.y - K.ALTO_CHIP), height: '44px',
                     boxSizing: 'border-box', display: 'inline-flex', alignItems: 'center', gap: '10px', padding: '0 18px',
                     borderRadius: '22px', background: p.chip.color, whiteSpace: 'nowrap',
-                    // Un nombre largo no puede salirse del panel ni del lienzo: se recorta con
-                    // elipsis dentro del ancho de la carcasa o de la ventana.
-                    maxWidth: px(Math.min(caja.ancho, lienzo.ancho - caja.x - padding)),
+                    // Un nombre que no cabe ni en la columna se recorta con elipsis: nunca se
+                    // sale del lienzo ni se mete encima del panel vecino.
+                    maxWidth: px(columna.ancho),
                     font: '600 20px/1 system-ui,sans-serif', boxShadow: '0 4px 12px rgba(0,0,0,.25)',
                 });
                 chip.className = 'chip';
                 chip.dataset.panel = JSON.stringify(caja);
+                chip.dataset.columna = JSON.stringify(columna);
                 chip.innerHTML = `<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"`
                     + ` stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none">${iconos[p.chip.icono] ?? iconos.monitor}</svg>`;
                 crear(chip, { minWidth: '0', overflow: 'hidden', textOverflow: 'ellipsis' }, 'span').textContent = p.chip.nombre;
+                // Posición: la ventana lo alinea a su borde izquierdo, como una pestaña. Un chip
+                // más ancho que su panel (el teléfono, casi siempre) se centra sobre él, y se
+                // corre lo justo para quedar dentro de su columna.
+                const w = chip.getBoundingClientRect().width;
+                const deseada = w > caja.ancho ? caja.x + caja.ancho / 2 - w / 2 : caja.x;
+                const x = Math.min(Math.max(deseada, columna.x), columna.x + columna.ancho - w);
+                chip.style.left = px(x);
             });
 
             // Contraste WCAG 2.x a partir de los colores computados (rgb(...)), no del string
@@ -233,7 +257,7 @@ export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre 
                 peor = Math.min(peor, ratio(getComputedStyle(chip).color, fondoChip));
                 const r = chip.getBoundingClientRect();
                 const texto = chip.querySelector('span');
-                chips.push({ x: r.x, ancho: r.width, panel: JSON.parse(chip.dataset.panel), recortado: texto.scrollWidth > texto.clientWidth });
+                chips.push({ x: r.x, ancho: r.width, panel: JSON.parse(chip.dataset.panel), columna: JSON.parse(chip.dataset.columna), recortado: texto.scrollWidth > texto.clientWidth });
             }
             return { contraste: Number.isFinite(peor) ? peor : null, chips };
         }, { lienzo, paneles, huecos, fondo, padding, K: { ALTO_BARRA, BISEL, ALTO_CHIP, RADIO_TELEFONO, RADIO_PANTALLA, RADIO_VENTANA } });
