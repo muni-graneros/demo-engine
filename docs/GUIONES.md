@@ -85,6 +85,63 @@ export default {
 
 Cada capítulo es un guion (que se graba en vivo) o un video (que se incrusta tal cual).
 
+## Pantalla dividida: `dividir`
+
+Un paso puede mostrar a **dos** actores a la vez, lado a lado y en el mismo instante. Sirve
+para que un traspaso se vea: la vecina envía y la sala ve entrar el incidente.
+
+```js
+pasos: [
+  // El actor pasivo tiene que tener algo abierto ANTES de dividir; si no, su panel sale en blanco.
+  { actor: 'vecina', narrar: 'Marta envía la denuncia.', hacer: async (page) => { await page.goto('/denuncia'); } },
+  { actor: 'operador', dividir: ['vecina', 'operador'], narrar: 'Y la sala la ve entrar.',
+    hacer: async (page) => { await page.goto('/consola/sala'); } },
+  { actor: 'operador', dividir: null, narrar: 'El operador la abre.', hacer: async (page) => { /* … */ } },
+]
+```
+
+- `dividir` es un par de actores distintos que incluye al actor del paso. El orden del par es
+  el orden en pantalla, de izquierda a derecha.
+- Queda vigente en los pasos siguientes hasta un paso con `dividir: null`, y nunca pasa a la
+  escena siguiente.
+- El chequeo de privacidad revisa **los dos** paneles, porque los dos se ven en el video.
+
+## Capítulos de un curso multi-superficie
+
+Con `superficies` en la config ([CONFIGURACION.md](CONFIGURACION.md#tutorial-multi-superficie)),
+el guion maestro admite:
+
+```js
+capitulos: [
+  // Tarjeta de superficies a pantalla completa, sin resaltar, con su locución y su .vtt.
+  // Dura max(ms ?? 6000, voz + 600 ms).
+  { id: 'mapa', titulo: 'El mapa', tipo: 'mapa', narrar: 'Estas son las partes del sistema.', ms: 8000 },
+
+  // Antes del capítulo entra la tarjeta «usted está aquí»: `superficie` resaltada y la del
+  // capítulo previo que declaró una, atenuada. Dura `presentacion.mapaMs` (2500 ms).
+  { id: 'avisa', titulo: 'Marta avisa', guion: 'denuncia', superficie: 'denuncia' },
+
+  // Clip nativo (scrcpy): con superficie se compone en su marco y con su chip. El aspecto se
+  // mide del archivo, y su audio se conserva.
+  { id: 'terreno', titulo: 'En terreno', fuente: 'video', archivo: 'demo/clips/terreno.mp4', superficie: 'apk' },
+]
+```
+
+La tarjeta pertenece al capítulo que **entra**, igual que la transición 3D. El marcador del
+capítulo cae al inicio de la transición y sus subtítulos se corren por la transición más la
+tarjeta. Un capítulo con `superficie` en una config sin `superficies` es un error, y el
+mensaje nombra el capítulo.
+
+## Variantes para redes: `demo formatos`
+
+```bash
+demo formatos demo/salida/curso.mp4                # vertical (1080×1920) y cuadrado (1080×1080)
+demo formatos demo/salida/curso.mp4 --vertical     # solo uno
+```
+
+Escribe `curso-vertical.mp4` y `curso-cuadrado.mp4` al lado del video. No necesita
+`demo.config.mjs`.
+
 ## Uso programático (Node)
 
 Importa desde `demo-engine`:
@@ -104,9 +161,14 @@ import {
 const config = await cargarConfig(process.cwd());
 const sesiones = await prepararSesiones(config, { dirSesiones: './.sesiones' });
 const voz = crearVoz(config.voz);
-const { pistas, pasos } = await grabar(guion, { config, sesiones, salida: config.salida, voz });
-const { mp4, vtt } = await montar({ pistas, pasos, voz, video: config.video },
-  { salida: config.salida, nombre: 'mi-video.mp4' });
+const { pistas, pasos, origenes, clics, dimensiones } =
+  await grabar(guion, { config, sesiones, salida: config.salida, voz });
+const { mp4, vtt } = await montar({
+  pistas, pasos, voz, video: config.video,
+  // Multi-superficie (opcional): sin superficies ni dividir, el montaje es el de siempre.
+  superficies: config.superficies, actores: config.actores, origenes, clics, dimensiones,
+  audio: config.audio,   // o null para la cadena mono de siempre
+}, { salida: config.salida, nombre: 'mi-video.mp4' });
 ```
 
 ## Archivos de salida
@@ -122,7 +184,7 @@ Después de grabar, en `config.salida`:
 `demo curso` (o `pegarCapitulos` a mano) además combina los `.vtt` de cada capítulo en un
 único `curso.vtt`, desplazando los tiempos de cada uno por el inicio real de su capítulo, y
 lo adjunta al `curso.mp4` como pista `mov_text` en español — igual que hace `montar()` con
-cada capítulo individual. Un capítulo sin `.vtt` propio (por ejemplo un video pregrabado con
+cada capítulo individual. El audio del curso sale en estéreo 48 kHz. Un capítulo sin `.vtt` propio (por ejemplo un video pregrabado con
 `fuente: 'video'`) simplemente no aporta entradas; si NINGÚN capítulo trae subtítulos,
 `curso.vtt` no se genera y `pegarCapitulos` devuelve `vtt: null`.
 

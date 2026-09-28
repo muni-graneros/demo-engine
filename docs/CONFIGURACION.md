@@ -166,6 +166,7 @@ video: {
     barra: true,                  // Barra superior tipo navegador (con baseURL en la URL simulada)
     salida: { ancho: 1920, alto: 1080 }, // Resolución final del video (distinta de video.ancho/alto)
     transicion3d: { activa: true, ms: 900, gradosMax: 12 }, // Giro 3D al cambiar de capítulo
+    mapaMs: 2500,                 // Duración de la tarjeta de superficies antes de cada capítulo
   },
 },
 ```
@@ -181,6 +182,72 @@ cinco transiciones, o sea del orden de medio minuto extra en `demo curso`.
 movimiento entre capítulos: es la opción para material que necesita una versión sin
 animación — por ejemplo, para cumplir `prefers-reduced-motion` o por pedido explícito de
 quien va a mirar el video.
+
+## Tutorial multi-superficie
+
+Todo esto es opcional (desde la 1.14.0). Una config sin estas claves produce el mismo video
+que la 1.13.0. La guía de narrativa, con la receta de seguridad-graneros, está en
+[TUTORIALES-MULTISUPERFICIE.md](TUTORIALES-MULTISUPERFICIE.md).
+
+```js
+// Cada superficie sale con su marco y su chip, y aparece en la tarjeta «usted está aquí».
+superficies: {
+  sala:   { nombre: 'Sala de operaciones', tipo: 'escritorio', color: '#1e3a8a', quien: 'Operador' },
+  vecino: { nombre: 'App del vecino', tipo: 'telefono', color: '#9a3412', quien: 'Vecina' },
+  // icono: 'monitor' | 'phone' (defecto: según el tipo)
+},
+// Flechas de la tarjeta: pares [desde, hasta], ambos declarados en superficies.
+flujo: [['vecino', 'sala']],
+
+actores: {
+  operador: { email: 'op@x.cl', password: process.env.DEMO_CLAVE, superficie: 'sala' },
+  // sesion:false: no exige email/password y `demo preparar` lo salta (vecino anónimo, o
+  // una app que se loguea dentro del guion).
+  vecina: { sesion: false, dispositivo: 'Pixel 7', superficie: 'vecino' },
+  patrullero: {
+    sesion: false, superficie: 'apk',
+    dispositivo: 'Pixel 7',                   // nombre de playwright.devices: viewport, táctil, userAgent
+    baseURL: 'http://localhost:8072',         // propia: la app se sirve desde otro puerto
+    permisos: ['geolocation'],
+    geolocalizacion: { latitude: -34.065, longitude: -70.727 },
+  },
+},
+
+audio: {
+  // La música la aporta el proyecto con licencia compatible: el motor no trae ninguna.
+  // Se comprueba al cargar la config; `atenuar` la baja ~12 dB bajo la voz.
+  musica: { archivo: './demo/musica.mp3', volumen: 0.12, atenuar: true },
+  // Un clic corto (sintetizado, sin archivo) en cada `pulsar()`.
+  clic: { activo: false, volumen: 0.5 },
+},
+```
+
+- **`superficies.<id>`**: exige `nombre` y `tipo` (`escritorio` o `telefono`). El `color`
+  tiene que ir en hexadecimal (`#rgb` o `#rrggbb`), porque la tarjeta calcula con él el
+  contraste de la etiqueta. Si no se declara, se usa `marca.color`.
+- **Un actor con `dispositivo`** graba a su viewport CSS real: un `Pixel 7` graba a 412×840.
+  Sin `dispositivo`, graba a `video.ancho`×`video.alto` como siempre.
+- **Modo lienzo**: basta con declarar `superficies` o que algún paso use `dividir` para que
+  cada tramo se componga en el lienzo, con el marco de la superficie de su actor. El lienzo
+  mide `presentacion.salida` o, sin presentación, `video.ancho`×`video.alto`.
+- **`audio`** solo cambia la mezcla si trae música o `clic.activo`. En ese caso la mezcla
+  pasa a estéreo 48 kHz y la voz se normaliza a -16 LUFS. Sin nada de eso, `demo grabar`
+  mantiene la cadena mono de siempre. El curso (`demo curso`) sale siempre en estéreo 48 kHz.
+
+### Motores de voz opcionales: Pocket y Chatterbox
+
+```js
+voz: { motor: 'pocket', voz: 'spanish:alba' },               // "<idioma>:<voz>", idioma spanish | spanish_24l
+voz: { motor: 'chatterbox', voz: './demo/voz-consentida.wav' }, // SIEMPRE una voz de referencia
+```
+
+Se instalan aparte, cada uno en su propio venv dentro de la caché:
+`bash node_modules/demo-engine/herramientas/instalar-voces.sh --pocket` (o `--chatterbox`).
+
+- **Pocket** (Kyutai): el código es MIT y los pesos son CC-BY-4.0, así que el video lleva
+  una línea de **atribución en los créditos**.
+- **Chatterbox** clona la voz del `.wav`. Clonar una voz exige el **consentimiento escrito**
+  de la persona (Ley 21.719). Sin `voz`, el motor queda no disponible y lo dice.
 
 ## Ritmo: por qué el video sale fluido
 

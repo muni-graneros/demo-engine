@@ -11,6 +11,11 @@ genera MP4 con subtítulos y PDF **sin tocar ningún servidor**.
   **niega a grabar** un paso donde haya más de una persona a la vista.
 - **Voz local**: sintetiza la locución con Kokoro (Piper de respaldo), sin servicio externo.
 - **Montaje offline**: ffmpeg local pega los videos, dibuja subtítulos, normaliza audio.
+- **Multi-superficie** (1.14.0): cada actor graba en su dispositivo (escritorio o teléfono), sale
+  con su marco y su chip, dos actores pueden verse a la vez en pantalla dividida, y el curso
+  pone la tarjeta «usted está aquí» antes de cada capítulo. También suma música atenuada bajo
+  la voz, un clic sonoro y variantes vertical y cuadrada para redes. Guía en
+  [docs/TUTORIALES-MULTISUPERFICIE.md](docs/TUTORIALES-MULTISUPERFICIE.md).
 - **Genérico**: el motor no conoce ningún sistema; todo vive en `demo.config.mjs`.
 
 ## Requisitos
@@ -68,7 +73,7 @@ npx demo todo              # aislar PII → pack de contexto → curso → manua
 `demo init` deja también un `demo/.gitignore` que **ignora todo lo generado** (`contexto/`,
 `salida/`, `*.mp4`): no versiones videos ni el pack — son binarios grandes y datos sensibles.
 
-## Los ocho comandos
+## Los nueve comandos
 
 | Comando | Qué hace |
 |---|---|
@@ -80,6 +85,7 @@ npx demo todo              # aislar PII → pack de contexto → curso → manua
 | `demo contexto` | Pack de contexto: un screenshot por pantalla declarada |
 | `demo todo [maestro]` | Pipeline completo: aislar PII → pack → curso → manual → restaurar |
 | `demo auditar <guion\|video>` | Revisa por OCR si quedó PII en el MP4 y en las capturas |
+| `demo formatos <video> [--vertical] [--cuadrado]` | Variantes 1080×1920 y 1080×1080 al lado del video (sin banderas, las dos) |
 
 `grabar`, `curso` y `todo` ejecutan `config.sembrar` en **cada** corrida: tiene que ser
 idempotente. Sin siembra por corrida la segunda toma graba sobre lo que dejó la primera —
@@ -137,6 +143,7 @@ Detalle completo en [docs/PRIVACIDAD.md](docs/PRIVACIDAD.md) y
 | Documento | Qué contiene |
 |---|---|
 | [docs/CONFIGURACION.md](docs/CONFIGURACION.md) | `demo.config.mjs` completo con sus valores por defecto reales, marco de presentación y transición 3D, por qué el ritmo sale ágil, selectores que sí funcionan en Filament, resolución de los modelos de voz |
+| [docs/TUTORIALES-MULTISUPERFICIE.md](docs/TUTORIALES-MULTISUPERFICIE.md) | Cómo contar un caso que pasa por varias superficies: las cinco reglas, la receta de seguridad-graneros y los avisos legales (atribución de Pocket TTS, consentimiento para clonar voces, licencia de la música) |
 | [docs/GUIONES.md](docs/GUIONES.md) | Estructura de un guion y del guion maestro, uso programático desde Node y la API completa |
 | [docs/PRIVACIDAD.md](docs/PRIVACIDAD.md) | El portero: entorno, chequeo en vivo, `abrirFiltrado`/`abrirVerificado`, `cubrir`/`descubrir` |
 | [docs/AUDITORIA.md](docs/AUDITORIA.md) | `demo auditar`: cómo muestrea, el patrón anclado, `auditoria.validar` y sus límites honestos |
