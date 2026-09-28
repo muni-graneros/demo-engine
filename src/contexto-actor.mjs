@@ -50,15 +50,17 @@ export function opcionesDeContexto(config, nombre, sesiones, { ancho, alto }) {
         ...(datosActor.geolocalizacion ? { geolocation: datosActor.geolocalizacion } : {}),
     };
 
-    // Un teléfono se graba a su tamaño lógico × densidad (tope 2): a 412 px de ancho, el
-    // texto de la app se deshace al escalarlo dentro del marco del teléfono en 1080p. El
-    // tope evita pistas de 1080×2200 (Pixel 7 a 2,625) que pesan sin ganar nitidez visible
-    // una vez escaladas al marco. Redondeado a par porque yuv420p no admite lados impares.
+    // Un teléfono se graba a su viewport CSS (Pixel 7: 412×839 → 412×840), sin multiplicar
+    // por la densidad. El screencast de Chromium headless entrega los frames en píxeles CSS
+    // aunque el dispositivo declare `deviceScaleFactor` 2,625 (`maxWidth`/`maxHeight` solo
+    // ponen un techo, no agrandan), así que una pista más grande era ffmpeg estirando esos
+    // frames: más peso y nitidez falsa. Y no hace falta más: en el lienzo de 1080p el hueco
+    // del teléfono mide ≤ ~384 px de ancho, menos que la resolución nativa. Redondeado a par
+    // porque yuv420p no admite lados impares.
     let pista = { ancho, alto };
     if (disp) {
-        const escala = Math.min(disp.deviceScaleFactor ?? 1, 2);
         const par = (n) => Math.round(n / 2) * 2;
-        pista = { ancho: par(disp.viewport.width * escala), alto: par(disp.viewport.height * escala) };
+        pista = { ancho: par(disp.viewport.width), alto: par(disp.viewport.height) };
     }
 
     return { opciones, pista, baseURL };

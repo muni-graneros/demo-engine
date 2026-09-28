@@ -94,6 +94,8 @@ const AVISOS_CLIC = new WeakMap();
  * `pulsar(page, selector)` a secas, y obligarlos a pasar un callback rompería todos. Así el
  * aviso viaja pegado a la página que el grabador creó, y muere con ella. */
 export function alClicar(page, fn) { AVISOS_CLIC.set(page, fn); }
+// Solo se registra la página que el grabador abre por actor. Una ventana emergente (popup,
+// `target=_blank`) es otra página: sus clics no avisan, y tampoco se graba como pista.
 
 export async function pulsar(page, selector, { alPintar, dentro } = {}) {
     await moverCursorA(page, selector, dentro);

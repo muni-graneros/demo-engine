@@ -96,9 +96,9 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         // sobre el audio del video final, que corre en tiempo de relato.
         alClicar(page, (t) => clics.push(t - t0Global));
         const archivoPista = join(salida, `pista-${nombre}.mp4`);
-        // La pista se graba al tamaño del actor, no al de `config.video`: el screencast toma
-        // `maxWidth`/`maxHeight` de `ancho`/`alto` (pantalla.mjs), así que pasar acá el
-        // tamaño del teléfono basta para que CDP entregue los frames a esa resolución.
+        // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide su
+        // viewport CSS (ver `opcionesDeContexto`), que es lo que el screencast entrega de
+        // verdad; con el tamaño de escritorio, ffmpeg lo encajonaría entre bandas negras.
         const grabacion = await iniciarGrabacion(page, { ...pista, salida: archivoPista, calidad, fps });
         const datos = { ctx, page, t0: Date.now(), grabacion, dim: pista };
         contextos.set(nombre, datos);
@@ -128,8 +128,11 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
             let dividirVigente = null;
             for (const [indice, paso] of escena.pasos.entries()) {
                 try {
-                    if ('dividir' in paso) dividirVigente = paso.dividir ?? null;
-                    if (dividirVigente) {
+                    // Solo `null`/`undefined` apagan el tramo: cualquier otro valor (`false`,
+                    // `''`, `0`) se valida y revienta, en vez de colarse como «sin dividir» y
+                    // esconder un guion mal escrito.
+                    if ('dividir' in paso) dividirVigente = paso.dividir == null ? null : paso.dividir;
+                    if (dividirVigente !== null) {
                         validarDividir(dividirVigente, paso.actor);
                         // Los dos contextos se abren ANTES de actuar: si el otro actor recién
                         // se abriera en un paso posterior, su pista no cubriría este tramo y
@@ -199,6 +202,14 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                     // la excepción, no al revés.
                     if (!paso.variasPersonas) {
                         await exigirUnaSolaPersona(page, config.auditoria);
+                        // En un tramo dividido el panel del OTRO actor está igual de a la vista
+                        // en el video (Ley 21.719): sin auditarlo, un listado completo abierto
+                        // en un paso anterior —con su propia excepción `variasPersonas`— salía
+                        // al lado de este paso sin ningún control. Se revisan los dos; repetir
+                        // el del actor del paso cuesta unos ms y deja el bucle simple.
+                        for (const actor of dividirVigente ?? []) {
+                            await exigirUnaSolaPersona(contextos.get(actor).page, config.auditoria);
+                        }
                     }
 
                     // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
