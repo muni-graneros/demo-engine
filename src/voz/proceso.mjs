@@ -1,7 +1,23 @@
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { ff } from '../ffmpeg.mjs';
+
+/**
+ * Post-proceso `despues` que aplica la velocidad con `atempo` sobre el .wav ya escrito, para
+ * los motores que no la traen de fábrica (pocket, chatterbox). A velocidad 1 no hace nada:
+ * pasar el audio por ffmpeg sin necesidad solo agrega un proceso por frase.
+ * La velocidad es del VIDEO (ver voz/index.mjs), así que tiene que valer igual en todo motor.
+ */
+export function despuesConVelocidad(velocidad) {
+    if (velocidad === 1) return undefined;
+    return (destino) => {
+        const tmp = destino.replace(/\.wav$/, '.rapido.wav');
+        ff(['-y', '-i', destino, '-filter:a', `atempo=${velocidad}`, tmp]);
+        renameSync(tmp, destino);
+    };
+}
 
 /**
  * Ciclo de vida común a los motores de voz que invocan un intérprete de Python por
@@ -31,10 +47,16 @@ import { join } from 'node:path';
  * kokoro), así que la inyección no tapa un bug de plomería de argumentos: eso lo cubren, por
  * separado, un puñado de pruebas de extremo a extremo con un proceso real (ver
  * voz-motores.test.mjs).
+ *
+ * `despues(destino)` es un post-proceso opcional del .wav ya escrito, p. ej. aplicar la
+ * velocidad en motores que no la traen (pocket, chatterbox). Si tira un error, esa síntesis
+ * cuenta como fallida: devolver un .wav a medio procesar (a velocidad 1 cuando se pidió 1.25)
+ * cambiaría la cadencia del tutorial en silencio.
  */
 export function crearMotorProceso({
     motor, archivosListos, comando, textoSonda = 'Prueba de disponibilidad del motor de voz.',
     ejecutarProceso = (PY, args, opciones) => spawnSync(PY, args, opciones),
+    despues,
 }) {
     let dirCorrida = null;
     let contador = 0;
@@ -59,6 +81,9 @@ export function crearMotorProceso({
             return { ok: false, error: detalle || `${motor} terminó con código de salida ${r.status}` };
         }
         if (!existsSync(destino)) return { ok: false, error: `${motor} no escribió el archivo de salida esperado` };
+        if (despues) {
+            try { despues(destino); } catch (e) { return { ok: false, error: `${motor}: ${e.message}` }; }
+        }
         return { ok: true, ruta: destino };
     }
 

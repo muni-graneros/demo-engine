@@ -7,6 +7,13 @@
 # con cada `rm -rf node_modules`. En la caché se bajan una vez por máquina y se comparten.
 #
 #   bash herramientas/instalar-voces.sh
+#   bash herramientas/instalar-voces.sh --pocket        # además, Pocket TTS (venv-pocket)
+#   bash herramientas/instalar-voces.sh --chatterbox    # además, Chatterbox (venv-chatterbox)
+#
+# Pocket y Chatterbox van en venvs PROPIOS, hermanos de `venv`: los dos arrastran torch (CPU),
+# y mezclarlo con kokoro-onnx en un solo venv obliga a rehacer todo si una pila se rompe.
+# Son opcionales: sin flags el script hace exactamente lo mismo de siempre. Sus pesos se bajan
+# de Hugging Face la primera vez que el motor sintetiza, no acá.
 #
 # Se puede forzar otro destino con DEMO_VENV / DEMO_VOCES, que son las mismas variables que
 # lee el motor (src/voz/resolver.mjs). También se respeta XDG_CACHE_HOME.
@@ -31,6 +38,16 @@
 # ---------------------------------------------------------------------------------------
 set -euo pipefail
 
+POCKET=0
+CHATTERBOX=0
+for arg in "$@"; do
+  case "$arg" in
+    --pocket) POCKET=1 ;;
+    --chatterbox) CHATTERBOX=1 ;;
+    *) echo "Flag desconocido: $arg (válidos: --pocket, --chatterbox)" >&2; exit 2 ;;
+  esac
+done
+
 RAIZ="${XDG_CACHE_HOME:-$HOME/.cache}/demo-engine"
 VENV="${DEMO_VENV:-$RAIZ/venv}"
 VOCES="${DEMO_VOCES:-$RAIZ/voces}"
@@ -51,3 +68,25 @@ for ext in onnx onnx.json; do
 done
 echo "Venv instalado en  $VENV"
 echo "Voces instaladas en $VOCES"
+
+# Se usa $RAIZ y no $VENV: DEMO_VENV nombra el venv de kokoro/piper, y el motor busca estos
+# dos en <caché>/demo-engine/venv-{pocket,chatterbox} (src/voz/pocket.mjs, chatterbox.mjs).
+if [ "$POCKET" = 1 ]; then
+  python3 -m venv "$RAIZ/venv-pocket" \
+    && "$RAIZ/venv-pocket/bin/pip" install --index-url https://download.pytorch.org/whl/cpu torch \
+    && "$RAIZ/venv-pocket/bin/pip" install pocket-tts scipy
+  echo "Pocket TTS instalado en $RAIZ/venv-pocket"
+  echo "  AVISO: los pesos de Pocket TTS (Kyutai) son CC-BY-4.0: todo video que use esta voz"
+  echo "  tiene que atribuirlo en los créditos (p. ej. «Voz sintética: Pocket TTS, Kyutai, CC-BY-4.0»)."
+  echo "  Clonar una voz a partir de un .wav exige el consentimiento escrito de esa persona (Ley 21.719)."
+fi
+
+if [ "$CHATTERBOX" = 1 ]; then
+  python3 -m venv "$RAIZ/venv-chatterbox" \
+    && "$RAIZ/venv-chatterbox/bin/pip" install --index-url https://download.pytorch.org/whl/cpu torch \
+    && "$RAIZ/venv-chatterbox/bin/pip" install chatterbox-tts torchaudio
+  echo "Chatterbox instalado en $RAIZ/venv-chatterbox"
+  echo "  AVISO: Chatterbox siempre clona una voz de referencia (voz: ruta a un .wav). Usar solo la"
+  echo "  voz de una persona que dio su consentimiento por escrito (Ley 21.719: la voz es dato personal)."
+  echo "  El audio lleva la marca de agua Perth de Resemble, que lo identifica como voz sintética."
+fi

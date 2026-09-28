@@ -1,8 +1,11 @@
 import * as piper from './piper.mjs';
 import * as kokoro from './kokoro.mjs';
+import * as pocket from './pocket.mjs';
+import * as chatterbox from './chatterbox.mjs';
 import { resolverVenvYVoces } from './resolver.mjs';
 
-const MOTORES = { piper, kokoro };
+// Se exporta para que las pruebas comprueben el registro sin tener que instalar cada motor.
+export const MOTORES = { piper, kokoro, pocket, chatterbox };
 
 /**
  * Avisa por stderr que se pidió voz pero no se encontró ningún motor instalado. No es un
