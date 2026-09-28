@@ -40,7 +40,8 @@ export default {
         // Actor SIN sesión previa (el vecino anónimo, o una app que se loguea dentro del
         // guion): no lleva email/password y `demo preparar` lo salta. `dispositivo` es un
         // nombre de `playwright.devices` (viewport, táctil, userAgent); `baseURL` propia si la
-        // app se sirve desde otro puerto. `superficie` lo ubica en el mapa (abajo).
+        // app se sirve desde otro puerto (solo con sesion:false). `superficie` lo ubica en
+        // el mapa (abajo).
         // vecina: { sesion: false, dispositivo: 'Pixel 7', superficie: 'vecino' },
         // patrullero: { sesion: false, dispositivo: 'Pixel 7', superficie: 'apk',
         //     baseURL: 'http://localhost:8072', permisos: ['geolocation'],

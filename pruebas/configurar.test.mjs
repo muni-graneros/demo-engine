@@ -398,3 +398,20 @@ test('flujo que no es una lista de pares falla con mensaje claro', async () => {
     await assert.rejects(cargarConfig(con(`'a>b'`)), /flujo debe ser una lista de pares/);
     await assert.rejects(cargarConfig(con(`[['a']]`)), /flujo debe ser una lista de pares/);
 });
+
+test('baseURL por actor solo con sesion:false: la sesión se prepara contra la baseURL global', async () => {
+    const con = (actor) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'}, actores:{ x:${actor} }`);
+    await assert.rejects(cargarConfig(con(`{ email:'a@b.cl', password:process.env.X ?? 'p', baseURL:'http://localhost:9000' }`)),
+        /baseURL por actor solo se admite con sesion:false/);
+    const c = await cargarConfig(con(`{ sesion:false, baseURL:'http://localhost:9000' }`));
+    assert.equal(c.actores.x.baseURL, 'http://localhost:9000');
+});
+
+test('el color de una superficie se valida como hexadecimal al cargar la config', async () => {
+    const con = (color) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        superficies:{ s:{ nombre:'S', tipo:'escritorio', color:${JSON.stringify(color)} } }, actores:{ x:{sesion:false} }`);
+    await assert.rejects(cargarConfig(con('rgb(1,2,3)')), (e) => e instanceof ErrorConfig && /superficies\.s\.color debe ser hexadecimal/.test(e.message));
+    await assert.rejects(cargarConfig(con('red')), /hexadecimal/);
+    const c = await cargarConfig(con('#ABC'));
+    assert.equal(c.superficies.s.color, '#aabbcc');
+});

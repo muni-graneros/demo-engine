@@ -207,7 +207,8 @@ actores: {
   patrullero: {
     sesion: false, superficie: 'apk',
     dispositivo: 'Pixel 7',                   // nombre de playwright.devices: viewport, táctil, userAgent
-    baseURL: 'http://localhost:8072',         // propia: la app se sirve desde otro puerto
+    baseURL: 'http://localhost:8072',         // propia: la app se sirve desde otro puerto.
+                                              // Solo con sesion:false: `preparar` loguea contra la baseURL global.
     permisos: ['geolocation'],
     geolocalizacion: { latitude: -34.065, longitude: -70.727 },
   },

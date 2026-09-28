@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { conPagina } from './render-web.mjs';
 import { ff } from './ffmpeg.mjs';
 import { fondoDelMarco } from './marco.mjs';
+import { normalizarColor } from './configurar.mjs';
 
 const AQUI = dirname(fileURLToPath(import.meta.url));
 // Igual que marco.html: interno del motor, vive en src/ para que `demo init` no lo copie.
@@ -21,17 +22,9 @@ const ICONOS = {
     globo: '<circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/>',
 };
 
-/**
- * Normaliza un color de superficie a `#rrggbb`. El cálculo de contraste de la etiqueta solo
- * sabe leer hexadecimal; aceptar `rgb()` o nombres CSS en silencio producía un NaN y la
- * etiqueta caía en tinta oscura sin avisar. Mejor un error claro al configurar.
- */
-export function normalizarColor(color, id) {
-    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color).trim());
-    if (!m) throw new Error(`superficies.${id}.color debe ser hexadecimal (#rgb o #rrggbb), llegó "${color}"`);
-    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
-    return '#' + h.toLowerCase();
-}
+// normalizarColor vive en configurar.mjs (se valida al cargar la config); se reexporta acá
+// porque el mapa lo sigue aplicando a superficies que no pasaron por cargarConfig.
+export { normalizarColor };
 
 /**
  * Renderiza la tarjeta «usted está aquí» y la convierte en un clip de `ms` milisegundos.

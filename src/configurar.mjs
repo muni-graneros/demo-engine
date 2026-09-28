@@ -84,6 +84,19 @@ const DEFECTOS_PRESENTACION = {
     mapaMs: 2500,
 };
 
+/**
+ * Normaliza un color de superficie a `#rrggbb`. El cálculo de contraste de la etiqueta solo
+ * sabe leer hexadecimal; aceptar `rgb()` o nombres CSS en silencio producía un NaN y la
+ * etiqueta caía en tinta oscura sin avisar. Se valida al cargar la config (y no recién al
+ * renderizar el mapa, a mitad del curso) para fallar antes de levantar un navegador.
+ */
+export function normalizarColor(color, id) {
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color).trim());
+    if (!m) throw new ErrorConfig(`demo.config.mjs: superficies.${id}.color debe ser hexadecimal (#rgb o #rrggbb), llegó "${color}"`);
+    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+    return '#' + h.toLowerCase();
+}
+
 function exigir(condicion, mensaje) {
     if (!condicion) throw new ErrorConfig(`demo.config.mjs: ${mensaje}`);
 }
@@ -216,6 +229,9 @@ export async function cargarConfig(rutaProyecto) {
         // escrito tiene que fallar antes de levantar el navegador, no a mitad del video.
         if (actor.dispositivo) exigir(devices[actor.dispositivo], `el actor "${nombre}" pide el dispositivo "${actor.dispositivo}", que Playwright no conoce`);
         if (actor.baseURL) exigir(/^https?:\/\//.test(actor.baseURL), `la baseURL del actor "${nombre}" debe ser http(s) (recibí "${actor.baseURL}")`);
+        // `preparar` (src/sesiones.mjs) loguea siempre contra la baseURL GLOBAL: un actor con
+        // sesión y baseURL propia recibía cookies de otro host y grababa deslogueado sin avisar.
+        exigir(!(actor.baseURL && actor.sesion), `el actor "${nombre}": la baseURL por actor solo se admite con sesion:false (la sesión se prepara contra baseURL global)`);
         actores[nombre] = actor;
     }
     exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');
@@ -228,7 +244,7 @@ export async function cargarConfig(rutaProyecto) {
         for (const [id, s] of Object.entries(cruda.superficies)) {
             exigir(s?.nombre, `la superficie "${id}" no trae nombre (sale rotulado en el video)`);
             exigir(TIPOS_SUPERFICIE.includes(s.tipo), `la superficie "${id}" tiene tipo "${s.tipo}"; debe ser escritorio o telefono`);
-            superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], color: marca.color, ...s };
+            superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], ...s, color: normalizarColor(s.color ?? marca.color, id) };
         }
     }
     for (const [nombre, a] of Object.entries(actores)) {
