@@ -382,3 +382,19 @@ test('presentacion recibe mapaMs por defecto', async () => {
         actores:{ x:{sesion:false} }, video:{ presentacion:{} }`));
     assert.equal(c.video.presentacion.mapaMs, 2500);
 });
+
+test('audio.musica sin archivo, como string o apuntando a una carpeta es error de config', async () => {
+    const con = (musica) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        actores:{ x:{sesion:false} }, audio:{ musica:${musica} }`);
+    await assert.rejects(cargarConfig(con(`{}`)), /audio\.musica\.archivo es obligatorio/);
+    await assert.rejects(cargarConfig(con(`{ volumen:0.2 }`)), /audio\.musica\.archivo es obligatorio/);
+    await assert.rejects(cargarConfig(con(`'./x.mp3'`)), /audio\.musica\.archivo es obligatorio/);
+    await assert.rejects(cargarConfig(con(`{ archivo:'./' }`)), /audio\.musica\.archivo no existe/);
+});
+
+test('flujo que no es una lista de pares falla con mensaje claro', async () => {
+    const con = (flujo) => conGuiones(`baseURL:'http://localhost:8000', marca:{nombre:'M'},
+        superficies:{ a:{nombre:'A', tipo:'escritorio'} }, flujo:${flujo}, actores:{ x:{sesion:false} }`);
+    await assert.rejects(cargarConfig(con(`'a>b'`)), /flujo debe ser una lista de pares/);
+    await assert.rejects(cargarConfig(con(`[['a']]`)), /flujo debe ser una lista de pares/);
+});

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devices } from 'playwright';
@@ -235,6 +235,9 @@ export async function cargarConfig(rutaProyecto) {
         if (a.superficie) exigir(superficies?.[a.superficie], `el actor "${nombre}" usa la superficie "${a.superficie}", que no está en superficies`);
     }
     const flujo = cruda.flujo ?? [];
+    // Sin esta forma exigida, `'a>b'` reventaba con un TypeError crudo y `[['a']]` culpaba a
+    // una superficie "undefined": ninguno de los dos dice qué se escribió mal.
+    exigir(Array.isArray(flujo) && flujo.every((p) => Array.isArray(p) && p.length === 2), 'flujo debe ser una lista de pares [desde, hasta]');
     for (const [desde, hasta] of flujo) {
         for (const s of [desde, hasta]) exigir(superficies?.[s], `flujo menciona la superficie "${s}", que no está en superficies`);
     }
@@ -243,8 +246,12 @@ export async function cargarConfig(rutaProyecto) {
     // mezcla final tira a la basura una grabación entera.
     const audio = { ...DEFECTOS.audio, ...cruda.audio, clic: { ...DEFECTOS.audio.clic, ...cruda.audio?.clic } };
     if (audio.musica) {
-        audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo ?? '') };
-        exigir(existsSync(audio.musica.archivo), `audio.musica.archivo no existe: ${audio.musica.archivo}`);
+        // Se exige `archivo` ANTES de resolverlo: `absoluta('')` da la raíz del proyecto, que
+        // existe, y un `musica: {}` o un `musica: './x.mp3'` (string, typo frecuente) pasaban.
+        exigir(typeof audio.musica === 'object' && audio.musica.archivo, 'audio.musica.archivo es obligatorio cuando se declara música');
+        audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo) };
+        const { archivo } = audio.musica;
+        exigir(existsSync(archivo) && statSync(archivo).isFile(), `audio.musica.archivo no existe o no es un archivo: ${archivo}`);
     }
 
     return {
