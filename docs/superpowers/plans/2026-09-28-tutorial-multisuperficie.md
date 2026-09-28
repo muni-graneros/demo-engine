@@ -417,7 +417,7 @@ Kokoro y Piper solo traen acento de España; Pocket (CPU, 2 núcleos) y Chatterb
 
 Reglas de geometría:
 - **1 panel:** se centra en el lienzo. El hueco es el mayor rectángulo del `aspecto` dado que cabe en `lienzo - 2*padding`, descontando la barra de 38 px si es `ventana` y el bisel (18 px por lado, 56 arriba y abajo) si es `telefono`.
-- **2 paneles:** el lienzo se parte en dos columnas iguales con separación `padding/2` y en cada columna se aplica la regla de 1 panel.
+- **2 paneles:** columnas **proporcionales** al ancho natural de cada panel a una altura común de hueco (la mayor que quepa), separadas por `padding/2` y con el sobrante repartido a ambos lados. Un teléfono al lado de una ventana en mitades iguales dejaba el teléfono flotando y la ventana chica. (Ruling del ledger, 2026-09-28.)
 - El chip va sobre el panel, alineado a su borde izquierdo, 44 px de alto, a 12 px del borde superior del panel. Por eso el panel reserva 56 px arriba cuando lleva chip.
 
 - [ ] **Step 1: Tests que fallan**
