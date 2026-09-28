@@ -394,3 +394,177 @@ test('demo grabar aplica la presentación declarada en la config', async () => {
         await juguete.cerrar();
     }
 });
+
+// --- Multi-superficie: formatos, tarjetas del curso y cableado de montar() -----------------
+
+/** Clip de color con tono de audio: un «video nativo» (scrcpy) de juguete. */
+function clipDeColor(archivo, { color = 'red', tamano = '412x840', segundos = 2, audio = true } = {}) {
+    const args = ['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=${tamano}:d=${segundos}:r=25`];
+    if (audio) args.push('-f', 'lavfi', '-t', String(segundos), '-i', 'sine=frequency=440:sample_rate=48000');
+    args.push('-c:v', 'libx264', '-pix_fmt', 'yuv420p', ...(audio ? ['-c:a', 'aac'] : ['-an']), archivo);
+    const r = spawnSync(RUTA_FFMPEG, args, { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    return archivo;
+}
+
+/** Color RGB del pixel (x, y) del cuadro en `seg` segundos. */
+function pixel(mp4, seg, x, y) {
+    const r = spawnSync(RUTA_FFMPEG, ['-ss', String(seg), '-i', mp4, '-frames:v', '1',
+        '-vf', `crop=1:1:${x}:${y}:exact=1`, '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1e6 });
+    return [...r.stdout.subarray(0, 3)];
+}
+
+test('demo formatos x.mp4 --vertical crea solo la variante vertical, al lado del video', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-cli-formatos-'));
+    clipDeColor(join(dir, 'x.mp4'), { tamano: '320x200', segundos: 1 });
+
+    // Sin demo.config.mjs a propósito: es un post-proceso de un archivo, no necesita proyecto.
+    const r = await correrCli(dir, ['formatos', 'x.mp4', '--vertical']);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(join(dir, 'x-vertical.mp4')), 'no se creó x-vertical.mp4');
+    assert.ok(!existsSync(join(dir, 'x-cuadrado.mp4')), 'con --vertical no debe crear el cuadrado');
+    const info = spawnSync(RUTA_FFMPEG, ['-i', join(dir, 'x-vertical.mp4')], { encoding: 'utf8' });
+    assert.match(info.stderr, /1080x1920/);
+});
+
+test('demo formatos sin bandera hace los dos formatos', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-cli-formatos-'));
+    clipDeColor(join(dir, 'x.mp4'), { tamano: '320x200', segundos: 1 });
+    const r = await correrCli(dir, ['formatos', join(dir, 'x.mp4')]);
+    assert.equal(r.status, 0, r.stderr);
+    assert.ok(existsSync(join(dir, 'x-vertical.mp4')));
+    assert.ok(existsSync(join(dir, 'x-cuadrado.mp4')));
+});
+
+test('demo formatos sin archivo imprime el uso y sale con código != 0', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-cli-formatos-'));
+    const r = await correrCli(dir, ['formatos']);
+    assert.notEqual(r.status, 0);
+    assert.match(r.stdout + r.stderr, /Uso: demo formatos <video\.mp4> \[--vertical\] \[--cuadrado\]/);
+    const inexistente = await correrCli(dir, ['formatos', 'no-existe.mp4']);
+    assert.notEqual(inexistente.status, 0);
+    assert.match(inexistente.stderr, /no-existe\.mp4/);
+});
+
+const SUPERFICIES = `
+        superficies: {
+            vecino: { nombre: 'App del vecino', tipo: 'telefono', color: '#9a3412', quien: 'Vecina' },
+            sala: { nombre: 'Sala de operaciones', tipo: 'escritorio', color: '#1e3a8a', quien: 'Operador' },
+        },
+        flujo: [['vecino', 'sala']],`;
+
+test('demo curso: capítulo mapa + video nativo con superficie compuesto en el lienzo', async () => {
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete, SUPERFICIES);
+        mkdirSync(join(proyecto, 'clips'));
+        clipDeColor(join(proyecto, 'clips', 'nativo.mp4'), { color: 'red', segundos: 2 });
+        writeFileSync(join(proyecto, 'guiones', 'curso.mjs'), `export default {
+            id: 'curso', titulo: 'Curso multi-superficie',
+            capitulos: [
+                { id: 'mapa', titulo: 'El mapa', tipo: 'mapa', ms: 1500 },
+                { id: 'nativo', titulo: 'En terreno', fuente: 'video', archivo: 'clips/nativo.mp4', superficie: 'vecino' },
+            ],
+        };`);
+
+        const r = await correrCli(proyecto, ['curso']);
+        assert.equal(r.status, 0, r.stderr);
+        const mp4 = join(proyecto, 'salida', 'curso.mp4');
+        assert.ok(existsSync(mp4));
+        const md = readFileSync(join(proyecto, 'salida', 'curso.md'), 'utf8');
+        assert.match(md, /El mapa/);
+        assert.match(md, /En terreno/);
+
+        // Capítulo 2 = tarjeta (2,5 s por defecto) + clip de 2 s. A los 1,5 + 2,5 + 1 s se ve
+        // el clip: rojo en el centro del lienzo (640x480), dentro del hueco del teléfono…
+        const t = 1.5 + 2.5 + 1;
+        const [rr, gg, bb] = pixel(mp4, t, 320, 240);
+        assert.ok(rr > 150 && gg < 80 && bb < 80, `el centro debería ser el clip rojo, salió rgb(${rr},${gg},${bb})`);
+        // …y NO en el borde: el clip va dentro del marco, no estirado a pantalla completa.
+        const [r2, g2, b2] = pixel(mp4, t, 20, 240);
+        assert.ok(!(r2 > 150 && g2 < 80 && b2 < 80), `el borde no debería ser el clip, salió rgb(${r2},${g2},${b2})`);
+        // A mitad de la tarjeta, el centro NO es el clip todavía.
+        const [r3, g3, b3] = pixel(mp4, 1.5 + 1.2, 320, 240);
+        assert.ok(!(r3 > 150 && g3 < 80 && b3 < 80), 'durante la tarjeta no debería verse el clip');
+        const info = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' }).stderr;
+        assert.match(info, /Audio: aac.*48000 Hz, stereo/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo curso: un capítulo con superficie sin superficies en la config falla nombrando el capítulo', async () => {
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete);
+        mkdirSync(join(proyecto, 'clips'));
+        clipDeColor(join(proyecto, 'clips', 'nativo.mp4'), { segundos: 1 });
+        writeFileSync(join(proyecto, 'guiones', 'curso.mjs'), `export default {
+            id: 'curso', titulo: 'Curso',
+            capitulos: [{ id: 'terreno', titulo: 'En terreno', fuente: 'video', archivo: 'clips/nativo.mp4', superficie: 'vecino' }],
+        };`);
+        const r = await correrCli(proyecto, ['curso']);
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /terreno/);
+        assert.match(r.stderr, /superficies/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo grabar cablea superficies y audio: lienzo con chip y mezcla estéreo 48 kHz', async () => {
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete, `${SUPERFICIES}
+        audio: { clic: { activo: true } },`);
+        // El actor vive en la sala: el montaje entra en modo lienzo por declarar superficies.
+        writeFileSync(join(proyecto, 'demo.config.mjs'),
+            readFileSync(join(proyecto, 'demo.config.mjs'), 'utf8')
+                .replace("password: 'password' }", "password: 'password', superficie: 'sala' }"));
+        escribirGuionPanel(proyecto, 'panel', '/panel');
+
+        const r = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(r.status, 0, r.stderr);
+        const info = spawnSync(RUTA_FFMPEG, ['-i', join(proyecto, 'salida', 'panel.mp4')], { encoding: 'utf8' }).stderr;
+        assert.match(info, /Audio: aac.*48000 Hz, stereo/, 'con audio declarado, la mezcla nueva');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo grabar sin claves nuevas conserva el audio de siempre (compatibilidad)', async () => {
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete);
+        escribirGuionPanel(proyecto, 'panel', '/panel');
+        const r = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(r.status, 0, r.stderr);
+        const info = spawnSync(RUTA_FFMPEG, ['-i', join(proyecto, 'salida', 'panel.mp4')], { encoding: 'utf8' }).stderr;
+        assert.match(info, /Audio: aac.*mono/, 'sin audio declarado, la cadena mono de siempre');
+        assert.match(info, /640x480/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo manual con un capítulo mapa en el maestro no intenta grabarlo', async () => {
+    const juguete = await iniciarJuguete();
+    try {
+        const proyecto = proyectoDeJuguete(juguete, SUPERFICIES);
+        escribirGuionPanel(proyecto, 'cap1', juguete.url);
+        writeFileSync(join(proyecto, 'guiones', 'curso.mjs'), `export default {
+            id: 'curso', titulo: 'Curso con mapa',
+            capitulos: [
+                { id: 'mapa', titulo: 'El mapa', tipo: 'mapa', narrar: 'Estas son las superficies.' },
+                { id: 'capitulo-1', titulo: 'Capítulo 1', guion: 'cap1' },
+            ],
+        };`);
+        const r = await correrCli(proyecto, ['manual']);
+        assert.equal(r.status, 0, r.stderr);
+        const texto = readFileSync(join(proyecto, 'salida', 'curso.md'), 'utf8');
+        assert.match(texto, /Estas son las superficies\./);
+        assert.match(texto, /Ver panel \(cap1\)/);
+    } finally {
+        await juguete.cerrar();
+    }
+});
