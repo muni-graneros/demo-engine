@@ -2,7 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mjs';
-import { configurarCamara, instalarCursor } from './camara.mjs';
+import { alClicar, configurarCamara, instalarCursor } from './camara.mjs';
+import { actorConSesion, opcionesDeContexto } from './contexto-actor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { duracion } from './ffmpeg.mjs';
 
@@ -12,6 +13,15 @@ import { duracion } from './ffmpeg.mjs';
  * Cada actor tiene su propio contexto (y por lo tanto su propio video, con reloj propio).
  * Por eso de cada paso se anotan DOS tiempos: `tLocal`, dónde cae dentro de la pista de su
  * actor, y `tGlobal`, dónde cae en el relato. El montaje usa ambos.
+ *
+ * Devuelve `{ pistas, pasos, origenes, clics, dimensiones }`:
+ * - `origenes[actor]`: en qué ms del reloj global arrancó la pista de ese actor. El montaje
+ *   lo necesita para la pantalla dividida: el panel del OTRO actor no tiene paso propio en
+ *   ese tramo, así que su corte se calcula como `tGlobal - origen`.
+ * - `clics`: ms globales de cada `pulsar()`, para el clic sonoro de la mezcla.
+ * - `dimensiones[actor]`: el tamaño real de su pista (un teléfono no mide lo que la config).
+ * - cada paso lleva `dividir: [actor, actor] | null`, vigente desde el paso que lo declara
+ *   hasta uno con `dividir: null`, y nunca más allá de su escena.
  */
 export async function grabar(guion, { config, sesiones, salida, voz }) {
     exigirEntornoDeDesarrollo(config.baseURL);
@@ -23,6 +33,10 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     const navegador = await chromium.launch();
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];
+    const clics = [];
+    // Actores de los que ya se avisó que su panel dividido sale en blanco: sin esto, un
+    // tramo dividido de diez pasos repetía el mismo aviso diez veces.
+    const avisadosEnBlanco = new Set();
 
     /*
      * Todas las locuciones se sintetizan ANTES de que empiece a grabarse nada.
@@ -69,26 +83,69 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
      */
     async function actorDe(nombre) {
         if (contextos.has(nombre)) return contextos.get(nombre);
-        if (!sesiones[nombre]) throw new Error(`el guion usa el actor "${nombre}", que no está en la config`);
-        const ctx = await navegador.newContext({
-            baseURL: config.baseURL,
-            storageState: sesiones[nombre],
-            viewport: { width: ancho, height: alto },
-            locale: 'es-CL',
-        });
+        // Solo un actor CON sesión la exige: `sesion: false` (la app del vecino, un APK sin
+        // login previo) abre su contexto limpio, y el propio guion entra si hace falta.
+        if (actorConSesion(config, nombre) && !sesiones[nombre]) {
+            throw new Error(`el guion usa el actor "${nombre}", que no está en la config`);
+        }
+        const { opciones, pista } = opcionesDeContexto(config, nombre, sesiones, { ancho, alto });
+        const ctx = await navegador.newContext({ ...opciones, locale: 'es-CL' });
         const page = await ctx.newPage();
         await instalarCursor(page);
+        // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
+        // sobre el audio del video final, que corre en tiempo de relato.
+        alClicar(page, (t) => clics.push(t - t0Global));
         const archivoPista = join(salida, `pista-${nombre}.mp4`);
-        const grabacion = await iniciarGrabacion(page, { ancho, alto, salida: archivoPista, calidad, fps });
-        const datos = { ctx, page, t0: Date.now(), grabacion };
+        // La pista se graba al tamaño del actor, no al de `config.video`: el screencast toma
+        // `maxWidth`/`maxHeight` de `ancho`/`alto` (pantalla.mjs), así que pasar acá el
+        // tamaño del teléfono basta para que CDP entregue los frames a esa resolución.
+        const grabacion = await iniciarGrabacion(page, { ...pista, salida: archivoPista, calidad, fps });
+        const datos = { ctx, page, t0: Date.now(), grabacion, dim: pista };
         contextos.set(nombre, datos);
         return datos;
     }
 
+    /**
+     * Valida un `dividir` contra el actor del paso. Se exige un par EXACTO que incluya al
+     * actor que actúa: la pantalla dividida existe para mostrar un traspaso (el vecino
+     * envía, el operador lo recibe), y un panel sin el actor que se mueve dejaría la acción
+     * del paso fuera de cuadro.
+     */
+    function validarDividir(dividir, actor) {
+        const valido = Array.isArray(dividir) && dividir.length === 2 &&
+            dividir[0] !== dividir[1] && dividir.every((x) => typeof x === 'string') &&
+            dividir.includes(actor);
+        if (!valido) {
+            throw new Error(`dividir debe ser un par de actores distintos que incluya a "${actor}", y es ${JSON.stringify(dividir)}`);
+        }
+    }
+
     try {
         for (const escena of guion.escenas) {
+            // La pantalla dividida no cruza de escena: cada escena abre con su tarjeta de
+            // título, y un traspaso que siguiera partido detrás de ella se leería como parte
+            // de lo que viene y no de lo que terminó.
+            let dividirVigente = null;
             for (const [indice, paso] of escena.pasos.entries()) {
                 try {
+                    if ('dividir' in paso) dividirVigente = paso.dividir ?? null;
+                    if (dividirVigente) {
+                        validarDividir(dividirVigente, paso.actor);
+                        // Los dos contextos se abren ANTES de actuar: si el otro actor recién
+                        // se abriera en un paso posterior, su pista no cubriría este tramo y
+                        // el montaje no tendría qué poner en su mitad de la pantalla.
+                        for (const otro of dividirVigente) {
+                            const { page: suPagina } = await actorDe(otro);
+                            // El actor del paso navega en su propio `hacer`; el otro, si nunca
+                            // navegó, queda en about:blank y su panel sale en blanco. No es un
+                            // error (puede ser a propósito), pero casi siempre es un olvido.
+                            if (otro !== paso.actor && suPagina.url() === 'about:blank' && !avisadosEnBlanco.has(otro)) {
+                                avisadosEnBlanco.add(otro);
+                                console.warn(`[demo-engine] dividir: el actor "${otro}" no tiene nada abierto todavía; su panel saldrá en blanco`);
+                            }
+                        }
+                    }
+
                     const { page, t0 } = await actorDe(paso.actor);
 
                     const inicioLocal = Date.now() - t0;
@@ -162,6 +219,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                         narrar: paso.narrar,
                         wav,
                         captura: `capturas/${nombreCaptura}`,
+                        dividir: dividirVigente,
                     });
                 } catch (error) {
                     // Se identifica CON PRECISIÓN qué paso y qué escena fallaron: en un guion
@@ -178,13 +236,17 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         }
 
         const pistas = {};
-        for (const [nombre, { ctx, grabacion }] of contextos) {
+        const origenes = {};
+        const dimensiones = {};
+        for (const [nombre, { ctx, grabacion, t0, dim }] of contextos) {
+            origenes[nombre] = t0 - t0Global;
+            dimensiones[nombre] = dim;
             // Detener el screencast ANTES de cerrar el contexto: la sesión CDP muere con la
             // página, así que si se cierra primero se pierde el ack del último frame en vuelo.
             pistas[nombre] = await grabacion.detener();
             await ctx.close();
         }
-        return { pistas, pasos };
+        return { pistas, pasos, origenes, clics, dimensiones };
     } catch (error) {
         // Si se llegó hasta acá con un error, algún paso reventó antes de cerrar los
         // contextos en el camino feliz de arriba: hay que cerrarlos ACÁ para que la pista de

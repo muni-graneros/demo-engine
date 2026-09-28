@@ -41,3 +41,14 @@ test('con un solo actor la línea es la del guion, sin huecos', () => {
     ]);
     assert.equal(linea[0].hastaSeg, linea[1].desdeSeg);
 });
+
+test('los segmentos llevan dividir y tGlobal', () => {
+    const l = construirLineaDeTiempo([{ escena: 'e', actor: 'a', tLocal: 0, tGlobal: 0, duracionMs: 1000, dividir: ['a', 'b'] }]);
+    assert.deepEqual(l[0].dividir, ['a', 'b']);
+    assert.equal(l[0].tGlobal, 0);
+});
+
+test('un paso sin dividir produce un segmento con dividir null', () => {
+    const l = construirLineaDeTiempo([{ escena: 'e', actor: 'a', tLocal: 0, tGlobal: 0, duracionMs: 1000 }]);
+    assert.equal(l[0].dividir, null);
+});

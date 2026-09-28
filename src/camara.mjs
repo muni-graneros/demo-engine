@@ -86,6 +86,15 @@ export async function moverCursorA(page, selector, dentro) {
  * `dentro`, opcional: el cursor apunta y el clic ocurre sobre ESE elemento interior (acotado
  * a `selector`), en vez del centro geométrico de `selector`. Sin `dentro`, se comporta
  * exactamente igual que siempre. */
+const AVISOS_CLIC = new WeakMap();
+
+/** El grabador se entera de cada pulsación (para el clic sonoro) sin que los guiones cambien.
+ *
+ * WeakMap por página y no un parámetro de `pulsar`: los guiones ya escritos llaman
+ * `pulsar(page, selector)` a secas, y obligarlos a pasar un callback rompería todos. Así el
+ * aviso viaja pegado a la página que el grabador creó, y muere con ella. */
+export function alClicar(page, fn) { AVISOS_CLIC.set(page, fn); }
+
 export async function pulsar(page, selector, { alPintar, dentro } = {}) {
     await moverCursorA(page, selector, dentro);
     const { x, y } = await centroDe(page, selector, dentro);
@@ -99,6 +108,9 @@ export async function pulsar(page, selector, { alPintar, dentro } = {}) {
     }, { x, y });
     if (alPintar) await alPintar();
     await page.waitForTimeout(180);
+    // Justo antes del clic y no después: si el clic navega, `click()` vuelve recién cuando la
+    // página nueva cargó, y el sonido quedaría corrido cientos de ms respecto del halo.
+    AVISOS_CLIC.get(page)?.(Date.now());
     await localizadorDe(page, selector, dentro).click();
     // si el clic navegó, el cursor desapareció; reponerlo es idempotente
     await instalarCursor(page);

@@ -94,3 +94,45 @@ test('captura el pack: público + con sesión + interacción, y anota las que fa
         await juguete.cerrar();
     }
 });
+
+test('un actor sin sesión abre su contexto sin storageState y con su dispositivo', async () => {
+    // Antes, `paginaDe` tiraba "no hay sesión suya" para cualquier actor ausente de
+    // `sesiones`, incluso para los declarados `sesion: false` (la app del vecino, un APK),
+    // que por diseño no tienen sesión que guardar.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
+    try {
+        let ancho = null;
+        const config = {
+            baseURL: juguete.url,
+            actores: { vecina: { sesion: false, dispositivo: 'Pixel 7' } },
+            video: { ancho: 800, alto: 600 },
+            contexto: { salida, pantallas: [{ id: 'movil', url: '/', actor: 'vecina', esperaMs: 0,
+                hacer: async (page) => { ancho = page.viewportSize().width; } }] },
+        };
+        const { ok, fail, manifest } = await capturarContexto({ config, sesiones: { vecina: null }, salida });
+        assert.equal(fail, 0, `no debió fallar: ${JSON.stringify(manifest)}`);
+        assert.equal(ok, 1);
+        assert.equal(ancho, 412, 'la pantalla del actor móvil se captura con el viewport del Pixel 7');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('un actor CON sesión que falta en sesiones sigue fallando la pantalla', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            actores: { funcionario: {} },
+            video: { ancho: 800, alto: 600 },
+            contexto: { salida, pantallas: [{ id: 'p', url: '/', actor: 'funcionario', esperaMs: 0 }] },
+        };
+        const { fail, manifest } = await capturarContexto({ config, sesiones: {}, salida });
+        assert.equal(fail, 1);
+        assert.match(manifest[0].error, /funcionario/);
+    } finally {
+        await juguete.cerrar();
+    }
+});

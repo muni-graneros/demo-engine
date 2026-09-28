@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { grabar } from '../src/grabador.mjs';
 
-import { ff, duracion } from '../src/ffmpeg.mjs';
+import { ff, duracion, RUTA_FFMPEG as ffmpegPath } from '../src/ffmpeg.mjs';
+import { pulsar } from '../src/camara.mjs';
 import { declararEntornoDePruebas } from './entorno.mjs';
 
 // El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
@@ -447,4 +449,158 @@ test('las locuciones se sintetizan ANTES de grabar, y una repetida se sintetiza 
         rmSync(salida, { recursive: true, force: true });
         rmSync(dirSesiones, { recursive: true, force: true });
     }
+});
+
+// --- Actores con dispositivo, sin sesión, pantalla dividida y clics ------------------------
+//
+// Todos estos usan actores `sesion: false`: no hace falta loguear para probar el contexto,
+// el tamaño de la pista ni la pantalla dividida, y así cada test se ahorra el login.
+
+function configMulti(url, actores) {
+    return {
+        baseURL: url,
+        video: { ancho: 800, alto: 500, pausaMinima: 100, calidad: 80, fps: 25, msCursor: 50 },
+        auditoria: { patron: 'x^', chequeoEnVivo: false },
+        actores,
+    };
+}
+
+const SIN_VOZ = { disponible: () => false };
+
+test('actor con dispositivo graba a su tamaño y actor sin sesión no pide storageState', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { vecina: { sesion: false, dispositivo: 'Pixel 7' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'vecina', hacer: async (page) => { await page.goto(`${url}/panel`); } }] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(r.dimensiones.vecina, { ancho: 824, alto: 1678 });
+        assert.equal(r.origenes.vecina >= 0, true);
+        const info = spawnSync(ffmpegPath, ['-i', r.pistas.vecina]).stderr.toString();
+        assert.match(info, /824x1678/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dividir abre el contexto del otro actor antes del paso y viaja en el paso', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false, dispositivo: 'Pixel 7' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'b', hacer: async (page) => { await page.goto(`${url}/`); } },
+            { actor: 'a', dividir: ['b', 'a'], hacer: async (page) => { await page.goto(`${url}/`); } },
+        ] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(r.pasos[1].dividir, ['b', 'a']);
+        assert.equal(r.pasos[0].dividir, null, 'antes de declararlo, el paso no va dividido');
+        assert.ok(existsSync(r.pistas.b), 'la pista del otro actor tiene que existir');
+        assert.ok(r.origenes.b <= r.pasos[1].tGlobal,
+            'el otro actor tiene que estar grabando desde antes del tramo dividido');
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dividir queda vigente hasta un paso con dividir:null y no cruza de escena', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false } });
+        const ir = async (page) => { await page.goto(`${url}/`); };
+        const guion = { id: 'm', escenas: [
+            { id: 'e1', titulo: 'E1', pasos: [
+                { actor: 'b', hacer: ir },
+                { actor: 'a', dividir: ['a', 'b'], hacer: ir },
+                { actor: 'b', hacer: ir },
+                { actor: 'a', dividir: null, hacer: ir },
+                { actor: 'a', dividir: ['a', 'b'], hacer: ir },
+            ] },
+            { id: 'e2', titulo: 'E2', pasos: [{ actor: 'a', hacer: ir }] },
+        ] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(r.pasos.map((p) => p.dividir),
+            [null, ['a', 'b'], ['a', 'b'], null, ['a', 'b'], null]);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Review Focus #2: dividir con un actor que no navegó avisa por stderr', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    const avisos = [];
+    const warnOriginal = console.warn;
+    console.warn = (...args) => { avisos.push(args.join(' ')); };
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'a', dividir: ['a', 'b'], hacer: async (page) => { await page.goto(`${url}/`); } },
+        ] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.ok(avisos.some((m) => /dividir: el actor "b"/.test(m)),
+            `debió avisar que el panel de "b" sale en blanco; avisos: ${JSON.stringify(avisos)}`);
+        assert.ok(!avisos.some((m) => /dividir: el actor "a"/.test(m)),
+            'el actor del paso navega en su propio `hacer`: no hay que avisar por él');
+    } finally {
+        console.warn = warnOriginal;
+        await cerrar(); rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('dividir inválido (un solo actor, o sin el actor del paso) falla con escena y paso', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false }, c: { sesion: false } });
+        const ir = async (page) => { await page.goto(`${url}/`); };
+        for (const dividir of [['a'], ['b', 'c'], ['a', 'a'], ['a', 'b', 'c'], 'b']) {
+            const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', dividir, hacer: ir }] }] };
+            await assert.rejects(
+                () => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+                (error) => {
+                    assert.match(error.message, /dividir/);
+                    assert.match(error.message, /escena "e"/);
+                    assert.match(error.message, /paso 1/);
+                    return true;
+                },
+                `dividir ${JSON.stringify(dividir)} debió rechazarse`,
+            );
+        }
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('los clics hechos con pulsar() quedan en clics con tiempo global', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false } });
+        // Sin sesión, el juguete muestra el login: su botón «Entrar» es el clic a registrar.
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'a', hacer: async (page) => { await page.goto(`${url}/`); await pulsar(page, '#entrar'); } },
+        ] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.equal(r.clics.length, 1);
+        assert.ok(r.clics[0] > 0, `el clic tiene que caer después del cero global (${r.clics[0]})`);
+        assert.ok(r.clics[0] >= r.pasos[0].tGlobal && r.clics[0] <= r.pasos[0].tGlobal + r.pasos[0].duracionMs,
+            'el clic cae dentro del paso que lo hizo, en el reloj global');
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('un actor con sesión que falta en sesiones sigue siendo un error', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: {} });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', hacer: async () => {} }] }] };
+        await assert.rejects(() => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+            /no está en la config/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('la baseURL de un actor también pasa por el guardián de entorno', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false, baseURL: 'https://www.graneros.cl' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', hacer: async () => {} }] }] };
+        await assert.rejects(() => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+            /no es una dirección local/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
 });

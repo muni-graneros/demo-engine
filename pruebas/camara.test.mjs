@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { instalarCursor, moverCursorA, pulsar, acercarA, alejar } from '../src/camara.mjs';
+import { instalarCursor, moverCursorA, pulsar, acercarA, alejar, alClicar } from '../src/camara.mjs';
 
 async function conPagina(fn) {
     const juguete = await iniciarJuguete({ puerto: 0 });
@@ -194,5 +194,24 @@ test('acercar no desancla elementos position:fixed (barra lateral tipo panel Fil
         assert.equal(durante.ancho, antes.ancho, `la barra fija cambió de ancho: ${antes.ancho} → ${durante.ancho}`);
 
         await alejar(page);
+    });
+});
+
+test('alClicar avisa de cada pulsar con la hora justo antes del clic, sin que el guion cambie', async () => {
+    await conPagina(async (page) => {
+        const avisos = [];
+        alClicar(page, (t) => avisos.push({ t, url: page.url() }));
+        const antes = Date.now();
+        await pulsar(page, '#entrar');
+        assert.equal(avisos.length, 1, 'un pulsar, un aviso');
+        assert.ok(avisos[0].t >= antes && avisos[0].t <= Date.now(), 'el aviso lleva Date.now()');
+        assert.ok(!avisos[0].url.includes('/panel'), 'el aviso llega ANTES del clic, no después de navegar');
+    });
+});
+
+test('pulsar sin nadie registrado con alClicar funciona igual que siempre', async () => {
+    await conPagina(async (page) => {
+        await pulsar(page, '#entrar');
+        await page.waitForURL(/\/panel/);
     });
 });
