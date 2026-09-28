@@ -8,12 +8,14 @@
   /* Panel casi blanco: el fondo de marca puede ser claro u oscuro según el sistema, así que
      el texto no se apoya en él; se apoya en el panel, donde el contraste está garantizado. */
   #panel { position:relative; background:rgba(255,255,255,.97); border-radius:calc(28px*var(--k));
-           padding:calc(56px*var(--k)) calc(72px*var(--k)) calc(64px*var(--k));
+           padding:calc(56px*var(--k)) calc(72px*var(--k)) calc(96px*var(--k));
            box-shadow:0 calc(30px*var(--k)) calc(60px*var(--k)) rgba(0,0,0,.35); }
   #titulo { margin:0 0 calc(48px*var(--k)); text-align:center; color:#0f172a;
             font-size:calc(40px*var(--k)); font-weight:700; }
   .fila { display:flex; justify-content:center; gap:calc(140px*var(--k)); }
-  .fila + .fila { margin-top:calc(72px*var(--k)); }
+  /* Canal entre filas y banda inferior generosos: por ahí se enrutan en ángulo recto las
+     flechas que saltan de fila o van hacia atrás, con un carril por flecha. */
+  .fila + .fila { margin-top:calc(104px*var(--k)); }
   .nodo { position:relative; z-index:1; box-sizing:border-box; width:calc(300px*var(--k));
           padding:calc(28px*var(--k)) calc(20px*var(--k)); background:#fff;
           border:calc(2px*var(--k)) solid #cbd5e1; border-radius:calc(20px*var(--k));

@@ -76,3 +76,26 @@ test('un color que no es hexadecimal falla con un error claro', async (t) => {
     d.superficies.sala.color = 'rgb(30,58,138)';
     await assert.rejects(renderizarMapa(d), /superficies\.sala\.color debe ser hexadecimal/);
 });
+
+/** n superficies genéricas s1..sn. */
+function muchas(n) {
+    const superficies = {};
+    for (let i = 1; i <= n; i++) {
+        superficies['s' + i] = { nombre: `Superficie número ${i}`, icono: 'monitor', color: '#1e3a8a', quien: 'Funcionario municipal' };
+    }
+    return superficies;
+}
+
+test('ninguna flecha pasa por encima o por detrás de un nodo ajeno (9 en fila, secuencial)', async (t) => {
+    const flujo = Array.from({ length: 8 }, (_, i) => ['s' + (i + 1), 's' + (i + 2)]);
+    const r = await renderizarMapa({ ...datos(t), superficies: muchas(9), flujo, activa: 's6', anterior: 's5', devolverFlechas: true });
+    assert.equal(r.trazos, 8);
+    assert.deepEqual(r.choques, []);
+});
+
+test('7 superficies (4+3) con arista hacia atrás y salto no contiguo: tampoco pisan nodos', async (t) => {
+    const flujo = [...Array.from({ length: 6 }, (_, i) => ['s' + (i + 1), 's' + (i + 2)]), ['s7', 's1'], ['s1', 's3'], ['s2', 's1']];
+    const r = await renderizarMapa({ ...datos(t), superficies: muchas(7), flujo, activa: 's7', anterior: 's6', devolverFlechas: true });
+    assert.equal(r.trazos, 9);
+    assert.deepEqual(r.choques, []);
+});

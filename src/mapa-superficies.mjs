@@ -46,14 +46,15 @@ export function normalizarColor(color, id) {
  *
  * Con `devolverTexto` devuelve el innerText; con `devolverContrastes`, por cada texto
  * (`.nombre`, `.quien`, `.etiqueta`) su contraste real y la opacidad mínima de sus ancestros;
- * con `devolverCajas`, el rectángulo de cada nodo. Son las sondas que usan las pruebas para
+ * con `devolverCajas`, el rectángulo de cada nodo; con `devolverFlechas`, los puntos de
+ * cada flecha que caen dentro de un nodo ajeno. Son las sondas que usan las pruebas para
  * medir accesibilidad y encuadre en el DOM ya renderizado, no en el CSS escrito.
  *
  * @returns {Promise<string|object[]>} ruta del mp4, o la sonda pedida
  */
 export async function renderizarMapa({
     superficies, flujo = [], activa = null, anterior = null, lienzo, marca, ms, salida, nombre,
-    devolverTexto = false, devolverContrastes = false, devolverCajas = false,
+    devolverTexto = false, devolverContrastes = false, devolverCajas = false, devolverFlechas = false,
 }) {
     const { ancho, alto } = lienzo;
     const png = join(salida, nombre.replace(/\.mp4$/, '') + '.png');
@@ -149,20 +150,66 @@ export async function renderizarMapa({
                 document.documentElement.style.setProperty('--k', String(k));
             }
 
-            // Flechas: se dibujan después del layout, midiendo las cajas reales (con la
-            // escala de la activa incluida), y se recortan al borde de cada nodo para que la
-            // punta toque la tarjeta en vez de quedar escondida debajo de ella.
+            // Flechas: se dibujan después del layout, midiendo las cajas reales (con la escala
+            // de la activa y su etiqueta incluidas).
+            //
+            // Entre vecinos de la misma fila la flecha es una recta horizontal. Cualquier otra
+            // (salto de fila, arista hacia atrás, nodos no contiguos) se enruta en ángulo recto
+            // por el espacio libre: baja o sube al canal entre filas (o a la banda bajo la fila),
+            // lo recorre y entra por el borde del destino. Una diagonal pasaba por DETRÁS de los
+            // nodos intermedios y se veía cortada; seguridad-graneros tiene 7 superficies (4+3),
+            // así que el salto de fila aparece en el tutorial real.
             const capa = document.getElementById('flechas');
             const base = capa.getBoundingClientRect();
-            const caja = (el) => {
+            const caja = (id) => {
+                const el = elementos[id];
                 const r = el.getBoundingClientRect();
-                return { cx: r.left + r.width / 2 - base.left, cy: r.top + r.height / 2 - base.top, w: r.width / 2, h: r.height / 2 };
+                const et = el.querySelector('.etiqueta')?.getBoundingClientRect();
+                // La etiqueta sobresale por arriba: cuenta como parte del nodo para no pisarla.
+                const top = Math.min(r.top, et ? et.top : r.top);
+                return { left: r.left - base.left, right: r.right - base.left, top: top - base.top,
+                    bottom: r.bottom - base.top, cx: r.left + r.width / 2 - base.left, cy: r.top + r.height / 2 - base.top };
             };
-            // Punto donde la recta desde el centro de `b` en dirección (dx,dy) sale de su caja.
-            const borde = (b, dx, dy, margen) => {
-                const t = Math.min(dx ? (b.w + margen) / Math.abs(dx) : Infinity, dy ? (b.h + margen) / Math.abs(dy) : Infinity);
-                return [b.cx + dx * t, b.cy + dy * t];
+            const posicion = Object.fromEntries(nodos.map((n, i) => [n.id, { fila: Math.floor(i / porFila), col: i % porFila }]));
+            const filas = [...new Set(Object.values(posicion).map((p) => p.fila))].sort((a, b) => a - b);
+            const limites = filas.map((f) => {
+                const cajas = nodos.filter((n) => posicion[n.id].fila === f).map((n) => caja(n.id));
+                return { top: Math.min(...cajas.map((c) => c.top)), bottom: Math.max(...cajas.map((c) => c.bottom)) };
+            });
+            const ultima = filas.length - 1;
+
+            // Carriles: dos flechas en el mismo canal no se superponen, y dos que salen por el
+            // mismo lado de un nodo tampoco comparten su tramo vertical.
+            const paso = 20 * k;  // holgura para la flecha resaltada (7 px) junto a una de contexto
+            const usoCanal = {};
+            const carril = (clave) => {
+                const n = usoCanal[clave] = (usoCanal[clave] ?? -1) + 1;
+                return n;
             };
+            const alterno = (n) => (n % 2 ? 1 : -1) * Math.ceil(n / 2);  // 0, 1, -1, 2, -2…
+            const yCanal = (fila, n) => (fila < ultima
+                ? (limites[fila].bottom + limites[fila + 1].top) / 2 + alterno(n) * paso
+                : limites[fila].bottom + 22 * k + n * paso);
+            const xLado = (id, lado) => caja(id).cx + alterno(carril(id + ':' + lado)) * 16 * k;
+
+            // Polilínea ortogonal con codos redondeados (cuadráticas de radio chico).
+            const ruta = (pts) => {
+                const p = pts.filter((q, i) => i === 0 || Math.hypot(q[0] - pts[i - 1][0], q[1] - pts[i - 1][1]) > 0.01);
+                let d = `M${p[0][0]},${p[0][1]}`;
+                for (let i = 1; i < p.length - 1; i++) {
+                    const [a, b, c] = [p[i - 1], p[i], p[i + 1]];
+                    const lin = Math.hypot(b[0] - a[0], b[1] - a[1]);
+                    const lout = Math.hypot(c[0] - b[0], c[1] - b[1]);
+                    const din = [(b[0] - a[0]) / lin, (b[1] - a[1]) / lin];
+                    const dout = [(c[0] - b[0]) / lout, (c[1] - b[1]) / lout];
+                    if (Math.abs(din[0] - dout[0]) + Math.abs(din[1] - dout[1]) < 1e-6) { d += ` L${b[0]},${b[1]}`; continue; }
+                    const rr = Math.min(12 * k, lin / 2, lout / 2);
+                    d += ` L${b[0] - din[0] * rr},${b[1] - din[1] * rr} Q${b[0]},${b[1]} ${b[0] + dout[0] * rr},${b[1] + dout[1] * rr}`;
+                }
+                const f = p[p.length - 1];
+                return d + ` L${f[0]},${f[1]}`;
+            };
+
             const NS = 'http://www.w3.org/2000/svg';
             const defs = document.createElementNS(NS, 'defs');
             capa.appendChild(defs);
@@ -183,28 +230,68 @@ export async function renderizarMapa({
                 return id;
             };
             const colorDe = Object.fromEntries(nodos.map((n) => [n.id, n.color]));
+            const pares = new Set(flujo.map(([a, b]) => a + '>' + b));
+            const margen = 10 * k;
             for (const [desde, hasta] of flujo) {
                 if (!elementos[desde] || !elementos[hasta]) continue;
-                const a = caja(elementos[desde]);
-                const b = caja(elementos[hasta]);
-                const dx = b.cx - a.cx, dy = b.cy - a.cy;
-                const largo = Math.hypot(dx, dy) || 1;
-                const [x1, y1] = borde(a, dx / largo, dy / largo, 10 * k);
-                const [x2, y2] = borde(b, -dx / largo, -dy / largo, 10 * k);
+                const a = caja(desde), b = caja(hasta);
+                const pa = posicion[desde], pb = posicion[hasta];
+                let pts;
+                if (pa.fila === pb.fila && Math.abs(pa.col - pb.col) === 1) {
+                    // Vecinos: recta. Si también existe la vuelta, cada sentido va en su carril.
+                    const dy = pares.has(hasta + '>' + desde) ? (pa.col < pb.col ? -1 : 1) * 8 * k : 0;
+                    const y = a.cy + dy;
+                    pts = pa.col < pb.col ? [[a.right + margen, y], [b.left - margen, y]] : [[a.left - margen, y], [b.right + margen, y]];
+                } else {
+                    // Canal: el que queda entre las dos filas, o bajo la fila si están en la misma.
+                    const baja = pb.fila >= pa.fila;  // la fuente sale por abajo
+                    const filaCanal = pb.fila > pa.fila ? pa.fila : pb.fila < pa.fila ? pb.fila : pa.fila;
+                    const yg = yCanal(filaCanal, carril('canal' + filaCanal));
+                    const x1 = xLado(desde, baja ? 'abajo' : 'arriba');
+                    const entraPorArriba = pb.fila > pa.fila;
+                    const x2 = xLado(hasta, entraPorArriba ? 'arriba' : 'abajo');
+                    const y1 = baja ? a.bottom : a.top;
+                    const y2 = entraPorArriba ? b.top - margen : b.bottom + margen;
+                    pts = [[x1, y1], [x1, yg], [x2, yg], [x2, y2]];
+                }
                 // La flecha del traspaso que acaba de ocurrir (anterior → activa) se resalta
                 // en grosor y color; las demás quedan como contexto en gris pizarra.
                 const resaltada = desde === anterior && hasta === activa;
                 // Gris sólido #64748b (4.7:1 sobre blanco): una flecha es gráfico con significado
                 // y WCAG 1.4.11 pide ≥3:1; con opacidad .5 bajaba a ~2:1.
                 const color = resaltada ? colorDe[hasta] : '#64748b';
-                const linea = document.createElementNS(NS, 'line');
-                linea.setAttribute('x1', x1); linea.setAttribute('y1', y1);
-                linea.setAttribute('x2', x2); linea.setAttribute('y2', y2);
-                linea.setAttribute('stroke', color);
-                linea.setAttribute('stroke-width', String((resaltada ? 7 : 3) * k));
-                linea.setAttribute('stroke-linecap', 'round');
-                linea.setAttribute('marker-end', `url(#${punta(color)})`);
-                capa.appendChild(linea);
+                const trazo = document.createElementNS(NS, 'path');
+                trazo.setAttribute('d', ruta(pts));
+                trazo.setAttribute('fill', 'none');
+                trazo.setAttribute('stroke', color);
+                trazo.setAttribute('stroke-width', String((resaltada ? 7 : 3) * k));
+                trazo.setAttribute('stroke-linecap', 'round');
+                trazo.setAttribute('stroke-linejoin', 'round');
+                trazo.setAttribute('marker-end', `url(#${punta(color)})`);
+                trazo.dataset.desde = desde;
+                trazo.dataset.hasta = hasta;
+                capa.appendChild(trazo);
+            }
+            if (sondear === 'flechas') {
+                // Muestrea cada trazo y devuelve los puntos que caen dentro de un nodo que no
+                // es ni su origen ni su destino: tiene que salir vacío.
+                const trazos = [...capa.querySelectorAll('path[data-desde]')];
+                const choques = [];
+                for (const t of trazos) {
+                    const largo = t.getTotalLength();
+                    for (let s = 0; s <= largo; s += 3) {
+                        const q = t.getPointAtLength(s);
+                        for (const n of nodos) {
+                            if (n.id === t.dataset.desde || n.id === t.dataset.hasta) continue;
+                            const c = caja(n.id);
+                            if (q.x > c.left && q.x < c.right && q.y > c.top && q.y < c.bottom) {
+                                choques.push(`${t.dataset.desde}→${t.dataset.hasta} pisa ${n.id} en (${q.x.toFixed(0)},${q.y.toFixed(0)})`);
+                                break;
+                            }
+                        }
+                    }
+                }
+                return { trazos: trazos.length, choques };
             }
             if (sondear === 'cajas') {
                 return [...document.querySelectorAll('.nodo')].map((el) => {
@@ -234,13 +321,13 @@ export async function renderizarMapa({
             }
             return document.body.innerText;
         }, { nodos, flujo, activa, anterior, fondo, k: ancho / 1920,
-            sondear: devolverCajas ? 'cajas' : devolverContrastes ? 'contrastes' : 'texto' });
+            sondear: devolverFlechas ? 'flechas' : devolverCajas ? 'cajas' : devolverContrastes ? 'contrastes' : 'texto' });
 
-        if (devolverTexto || devolverContrastes || devolverCajas) return sonda;
+        if (devolverTexto || devolverContrastes || devolverCajas || devolverFlechas) return sonda;
         await page.screenshot({ path: png, type: 'png' });
         return png;
     });
-    if (devolverTexto || devolverContrastes || devolverCajas) return resultado;
+    if (devolverTexto || devolverContrastes || devolverCajas || devolverFlechas) return resultado;
 
     // Imagen en bucle → h264 yuv420p a 25 fps, sin audio (-an implícito: no hay entrada de audio).
     ff(['-y', '-loop', '1', '-i', png, '-t', String(ms / 1000), '-r', '25',
