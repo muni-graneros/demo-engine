@@ -219,3 +219,75 @@ test('con presentación, el curso conserva la resolución de salida y no letterb
     const [rr, gg, bb] = [...r.stdout.subarray(0, 3)];
     assert.ok(bb > 100 && rr < 80, `el borde debería ser el contenido azul, salió rgb(${rr},${gg},${bb})`);
 });
+
+/** Clip MUDO, como el que devuelve `renderizarMapa` (la tarjeta de superficies). */
+function clipMudo(dir, nombre, segundos, color, tamano = '640x400') {
+    const archivo = join(dir, nombre);
+    ff(['-y', '-f', 'lavfi', '-i', `color=c=${color}:s=${tamano}:d=${segundos}:r=25`,
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-an', archivo]);
+    return archivo;
+}
+
+function infoDe(mp4) {
+    try {
+        return execFileSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }) + '';
+    } catch (e) { return e.stderr.toString(); }
+}
+
+test('una parte con tarjeta suma su duración al capítulo y corre sus cues', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-tarjeta-'));
+    const cap1 = clip(dir, 'a.mp4', 2, 'blue');
+    const cap2 = clip(dir, 'b.mp4', 2, 'red');
+    writeFileSync(cap2.replace(/\.mp4$/, '.vtt'),
+        'WEBVTT\n\n00:00:00.500 --> 00:00:01.000\nCue del capítulo dos.\n');
+    const tarjeta = clipMudo(dir, 'mapa.mp4', 1, 'green');
+
+    const { mp4, vtt, capitulos } = await pegarCapitulos([
+        { id: 'uno', titulo: 'Primero', archivo: cap1 },
+        { id: 'dos', titulo: 'Segundo', archivo: cap2, tarjeta },
+    ], { salida: dir, nombre: 'curso.mp4', titulo: 'Curso', video: { ancho: 640, alto: 400 } });
+
+    // La tarjeta es del capítulo que ENTRA: el marcador cae en ella y su duración es suya.
+    assert.ok(Math.abs(capitulos[1].inicioSeg - 2) < 0.15, `inicio ${capitulos[1].inicioSeg}`);
+    assert.ok(Math.abs((capitulos[1].finSeg - capitulos[1].inicioSeg) - 3) < 0.15,
+        `el capítulo 2 dura clip + tarjeta (~3 s), midió ${capitulos[1].finSeg - capitulos[1].inicioSeg}`);
+    // La cue es relativa al CLIP: cae después de la tarjeta.
+    const [cue] = parseVtt(readFileSync(vtt, 'utf8'));
+    const esperado = capitulos[1].inicioSeg + 1 + 0.5;
+    assert.ok(Math.abs(cue.inicioSeg - esperado) < 0.15, `esperaba ~${esperado}s, midió ${cue.inicioSeg}s`);
+
+    // La tarjeta se ve donde toca: 0,5 s después del marcador del capítulo 2 hay verde.
+    const r = spawnSync(RUTA_FFMPEG, ['-ss', String(capitulos[1].inicioSeg + 0.5), '-i', mp4, '-frames:v', '1',
+        '-vf', 'crop=1:1:320:200:exact=1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'], { maxBuffer: 1e6 });
+    const [rr, gg, bb] = [...r.stdout.subarray(0, 3)];
+    assert.ok(gg > 80 && rr < 60 && bb < 60, `esperaba la tarjeta verde, salió rgb(${rr},${gg},${bb})`);
+
+    // Audio del curso: estéreo 48 kHz, el mismo formato que la mezcla nueva.
+    assert.match(infoDe(mp4), /Audio: aac.*48000 Hz, stereo/);
+});
+
+test('con transición y tarjeta, la cue cae después de ambas', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-curso-trans-tarjeta-'));
+    const cap1 = clip(dir, 'a.mp4', 2, 'blue', '480x270');
+    const cap2 = clip(dir, 'b.mp4', 2, 'red', '480x270');
+    writeFileSync(cap2.replace(/\.mp4$/, '.vtt'),
+        'WEBVTT\n\n00:00:00.500 --> 00:00:01.000\nCue del capítulo dos.\n');
+    const tarjeta = clipMudo(dir, 'mapa.mp4', 1, 'green', '480x270');
+    const presentacion = {
+        fondo: '#0f172a', padding: 20, radio: 16, sombra: true, barra: false,
+        salida: { ancho: 480, alto: 270 },
+        transicion3d: { activa: true, ms: 400, gradosMax: 12 },
+    };
+
+    const { vtt, capitulos } = await pegarCapitulos([
+        { id: 'uno', titulo: 'Primero', archivo: cap1 },
+        { id: 'dos', titulo: 'Segundo', archivo: cap2, tarjeta },
+    ], { salida: dir, nombre: 'curso.mp4', titulo: 'Curso', video: { ancho: 480, alto: 270 }, presentacion });
+
+    // 2 s de clip + 0,4 s de transición + 1 s de tarjeta.
+    assert.ok(Math.abs((capitulos[1].finSeg - capitulos[1].inicioSeg) - 3.4) < 0.2,
+        `el capítulo 2 debe durar ~3,4 s, midió ${capitulos[1].finSeg - capitulos[1].inicioSeg}`);
+    const [cue] = parseVtt(readFileSync(vtt, 'utf8'));
+    const esperado = capitulos[1].inicioSeg + 0.4 + 1 + 0.5;
+    assert.ok(Math.abs(cue.inicioSeg - esperado) < 0.2, `esperaba ~${esperado}s, midió ${cue.inicioSeg}s`);
+});
