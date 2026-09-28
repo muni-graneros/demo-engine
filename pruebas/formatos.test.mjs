@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,8 +8,9 @@ import { RUTA_FFMPEG as ffmpegPath, ff } from '../src/ffmpeg.mjs';
 import { variante } from '../src/formatos.mjs';
 
 /** Video base de 2 s con audio, subtítulos mov_text y dos capítulos. */
-function base() {
+function base(t) {
     const dir = mkdtempSync(join(tmpdir(), 'fmt-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
     const mp4 = join(dir, 'curso.mp4');
     const srt = join(dir, 's.srt');
     const meta = join(dir, 'm.txt');
@@ -20,8 +21,8 @@ function base() {
     return { dir, mp4 };
 }
 
-test('Review Focus #5: el vertical conserva audio, subtítulos y capítulos', () => {
-    const { dir, mp4 } = base();
+test('Review Focus #5: el vertical conserva audio, subtítulos y capítulos', (t) => {
+    const { dir, mp4 } = base(t);
     const vertical = variante(mp4, { formato: 'vertical', salida: dir });
     assert.ok(vertical.endsWith('curso-vertical.mp4'));
     const info = spawnSync(ffmpegPath, ['-i', vertical]).stderr.toString();
@@ -31,8 +32,8 @@ test('Review Focus #5: el vertical conserva audio, subtítulos y capítulos', ()
     assert.match(info, /Chapter #0:1/);
 });
 
-test('cuadrado: 1080x1080 y el fondo NO es negro liso (es el video desenfocado)', () => {
-    const { dir, mp4 } = base();
+test('cuadrado: 1080x1080 y el fondo NO es negro liso (es el video desenfocado)', (t) => {
+    const { dir, mp4 } = base(t);
     const cuadrado = variante(mp4, { formato: 'cuadrado', salida: dir });
     assert.ok(cuadrado.endsWith('curso-cuadrado.mp4'));
     const info = spawnSync(ffmpegPath, ['-i', cuadrado]).stderr.toString();
@@ -47,5 +48,5 @@ test('cuadrado: 1080x1080 y el fondo NO es negro liso (es el video desenfocado)'
 });
 
 test('formato desconocido: error legible', () => {
-    assert.throws(() => variante('x.mp4', { formato: 'panoramico', salida: '/tmp' }), /vertical o cuadrado/);
+    assert.throws(() => variante('x.mp4', { formato: 'panoramico', salida: tmpdir() }), /vertical o cuadrado/);
 });

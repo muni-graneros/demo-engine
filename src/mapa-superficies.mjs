@@ -1,4 +1,5 @@
 import { join, dirname } from 'node:path';
+import { unlinkSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { conPagina } from './render-web.mjs';
 import { ff } from './ffmpeg.mjs';
@@ -21,6 +22,18 @@ const ICONOS = {
 };
 
 /**
+ * Normaliza un color de superficie a `#rrggbb`. El cálculo de contraste de la etiqueta solo
+ * sabe leer hexadecimal; aceptar `rgb()` o nombres CSS en silencio producía un NaN y la
+ * etiqueta caía en tinta oscura sin avisar. Mejor un error claro al configurar.
+ */
+export function normalizarColor(color, id) {
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color).trim());
+    if (!m) throw new Error(`superficies.${id}.color debe ser hexadecimal (#rgb o #rrggbb), llegó "${color}"`);
+    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+    return '#' + h.toLowerCase();
+}
+
+/**
  * Renderiza la tarjeta «usted está aquí» y la convierte en un clip de `ms` milisegundos.
  *
  * Es una imagen fija: la entrada animada queda fuera de alcance porque 2,5 s bastan y el
@@ -31,11 +44,16 @@ const ICONOS = {
  * Los textos (nombre, quién) vienen de la config y se insertan con textContent, nunca como
  * HTML: un nombre con `<` no puede inyectar marcado en la página que se captura.
  *
- * @returns {Promise<string>} ruta del mp4, o el innerText de la tarjeta con devolverTexto
+ * Con `devolverTexto` devuelve el innerText; con `devolverContrastes`, por cada texto
+ * (`.nombre`, `.quien`, `.etiqueta`) su contraste real y la opacidad mínima de sus ancestros;
+ * con `devolverCajas`, el rectángulo de cada nodo. Son las sondas que usan las pruebas para
+ * medir accesibilidad y encuadre en el DOM ya renderizado, no en el CSS escrito.
+ *
+ * @returns {Promise<string|object[]>} ruta del mp4, o la sonda pedida
  */
 export async function renderizarMapa({
     superficies, flujo = [], activa = null, anterior = null, lienzo, marca, ms, salida, nombre,
-    devolverTexto = false,
+    devolverTexto = false, devolverContrastes = false, devolverCajas = false,
 }) {
     const { ancho, alto } = lienzo;
     const png = join(salida, nombre.replace(/\.mp4$/, '') + '.png');
@@ -43,14 +61,14 @@ export async function renderizarMapa({
     // Mismo fondo que el marco del video, para que la tarjeta no salte de color al entrar.
     const fondo = fondoDelMarco({}, marca);
     const nodos = Object.entries(superficies).map(([id, s]) => ({
-        id, nombre: s.nombre ?? id, quien: s.quien ?? null, color: s.color ?? '#1e3a8a',
+        id, nombre: s.nombre ?? id, quien: s.quien ?? null, color: normalizarColor(s.color ?? '#1e3a8a', id),
         icono: ICONOS[s.icono] ?? ICONOS.globo,
     }));
 
     const resultado = await conPagina({ '/superficies.html': PLANTILLA }, async (page, baseUrl) => {
         await page.setViewportSize({ width: ancho, height: alto });
         await page.goto(baseUrl + '/superficies.html');
-        const texto = await page.evaluate(({ nodos, flujo, activa, anterior, fondo, k }) => {
+        const sonda = await page.evaluate(({ nodos, flujo, activa, anterior, fondo, k, sondear }) => {
             document.documentElement.style.setProperty('--k', String(k));
             document.body.style.background = fondo;
             document.getElementById('titulo').textContent = activa ? 'Recorrido del caso' : 'Las superficies del sistema';
@@ -110,13 +128,26 @@ export async function renderizarMapa({
                     et.style.color = tintaSobre(n.color);
                     el.appendChild(et);
                 } else if (n.id === anterior) {
-                    el.style.opacity = '0.55';
+                    el.classList.add('anterior');
                 } else if (activa) {
-                    el.style.opacity = '0.35';
+                    el.classList.add('atenuada');
                 }
                 fila.appendChild(el);
                 elementos[n.id] = el;
             });
+
+            // Encuadre: con muchas superficies (9 → dos filas de 5) el panel pasaba el ancho del
+            // lienzo y nodos y etiqueta quedaban cortados por el overflow:hidden. Todo cuelga de
+            // --k, así que se achica --k hasta que el panel quepa con un margen del 4 %. Dos
+            // pasadas porque el ajuste de líneas del texto cambia un poco al reducir.
+            const panel = document.getElementById('panel');
+            for (let i = 0; i < 3; i++) {
+                const r = panel.getBoundingClientRect();
+                const s = Math.min(1, (innerWidth * 0.96) / r.width, (innerHeight * 0.96) / r.height);
+                if (s >= 0.999) break;
+                k *= s * 0.99;
+                document.documentElement.style.setProperty('--k', String(k));
+            }
 
             // Flechas: se dibujan después del layout, midiendo las cajas reales (con la
             // escala de la activa incluida), y se recortan al borde de cada nodo para que la
@@ -163,6 +194,8 @@ export async function renderizarMapa({
                 // La flecha del traspaso que acaba de ocurrir (anterior → activa) se resalta
                 // en grosor y color; las demás quedan como contexto en gris pizarra.
                 const resaltada = desde === anterior && hasta === activa;
+                // Gris sólido #64748b (4.7:1 sobre blanco): una flecha es gráfico con significado
+                // y WCAG 1.4.11 pide ≥3:1; con opacidad .5 bajaba a ~2:1.
                 const color = resaltada ? colorDe[hasta] : '#64748b';
                 const linea = document.createElementNS(NS, 'line');
                 linea.setAttribute('x1', x1); linea.setAttribute('y1', y1);
@@ -171,20 +204,49 @@ export async function renderizarMapa({
                 linea.setAttribute('stroke-width', String((resaltada ? 7 : 3) * k));
                 linea.setAttribute('stroke-linecap', 'round');
                 linea.setAttribute('marker-end', `url(#${punta(color)})`);
-                if (activa && !resaltada) linea.setAttribute('opacity', '0.5');
                 capa.appendChild(linea);
             }
+            if (sondear === 'cajas') {
+                return [...document.querySelectorAll('.nodo')].map((el) => {
+                    const r = el.getBoundingClientRect();
+                    const et = el.querySelector('.etiqueta')?.getBoundingClientRect();
+                    return { left: r.left, top: r.top, right: r.right, bottom: r.bottom,
+                        etiqueta: et ? { left: et.left, top: et.top, right: et.right, bottom: et.bottom } : null };
+                });
+            }
+            if (sondear === 'contrastes') {
+                const rgb = (c) => (c.match(/[\d.]+/g) || []).map(Number);
+                const lumRgb = ([r, g, b]) => [r, g, b].map((v) => v / 255)
+                    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4))
+                    .reduce((a, v, i) => a + v * [0.2126, 0.7152, 0.0722][i], 0);
+                return [...document.querySelectorAll('.nombre, .quien, .etiqueta')].map((el) => {
+                    let opacidad = 1;
+                    let fondoEl = null;
+                    for (let a = el; a; a = a.parentElement) {
+                        const cs = getComputedStyle(a);
+                        opacidad = Math.min(opacidad, parseFloat(cs.opacity));
+                        const bg = rgb(cs.backgroundColor);
+                        if (!fondoEl && bg.length >= 3 && (bg.length === 3 || bg[3] === 1)) fondoEl = bg;
+                    }
+                    const c = contraste(lumRgb(rgb(getComputedStyle(el).color)), lumRgb(fondoEl ?? [255, 255, 255]));
+                    return { texto: el.textContent, clase: el.className, contraste: c, opacidad };
+                });
+            }
             return document.body.innerText;
-        }, { nodos, flujo, activa, anterior, fondo, k: ancho / 1920 });
+        }, { nodos, flujo, activa, anterior, fondo, k: ancho / 1920,
+            sondear: devolverCajas ? 'cajas' : devolverContrastes ? 'contrastes' : 'texto' });
 
-        if (devolverTexto) return texto;
+        if (devolverTexto || devolverContrastes || devolverCajas) return sonda;
         await page.screenshot({ path: png, type: 'png' });
         return png;
     });
-    if (devolverTexto) return resultado;
+    if (devolverTexto || devolverContrastes || devolverCajas) return resultado;
 
     // Imagen en bucle → h264 yuv420p a 25 fps, sin audio (-an implícito: no hay entrada de audio).
     ff(['-y', '-loop', '1', '-i', png, '-t', String(ms / 1000), '-r', '25',
         '-vf', `scale=${ancho}:${alto},format=yuv420p`, '-c:v', 'libx264', '-preset', 'veryfast', mp4]);
+    // El PNG era solo un intermedio: dejarlo junto al mp4 ensuciaba la carpeta del curso con
+    // un archivo por capítulo que nadie consume.
+    unlinkSync(png);
     return mp4;
 }

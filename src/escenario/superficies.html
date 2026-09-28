@@ -23,6 +23,16 @@
   .nombre { margin-top:calc(16px*var(--k)); color:#0f172a; font-size:calc(28px*var(--k));
             font-weight:700; line-height:1.2; }
   .quien { margin-top:calc(8px*var(--k)); color:#334155; font-size:calc(20px*var(--k)); line-height:1.3; }
+  /* Atenuar SIN opacidad en el nodo: la opacidad de un contenedor arrastra al texto y lo
+     dejaba en ~2:1 sobre blanco (WCAG 1.4.3 pide 4.5:1, obligatorio por el Decreto 1/2015).
+     Solo se apagan ícono y borde; el texto baja a pizarra #475569 (7.6:1 sobre blanco), que
+     se lee como secundario sin dejar de ser legible. */
+  .nodo.anterior, .nodo.atenuada { border-color:#e2e8f0; }
+  .nodo.anterior .nombre, .nodo.atenuada .nombre,
+  .nodo.anterior .quien, .nodo.atenuada .quien { color:#475569; }
+  .nodo.anterior .icono { opacity:.55; }
+  .nodo.atenuada .icono { opacity:.35; }
+  .nodo.atenuada .nombre { font-weight:600; }
   /* Activa: borde de 4 px del color de la superficie (lo pone el JS) + escala 1.08. */
   .nodo.activa { border-width:calc(4px*var(--k)); transform:scale(1.08);
                  box-shadow:0 calc(12px*var(--k)) calc(28px*var(--k)) rgba(15,23,42,.25); }
