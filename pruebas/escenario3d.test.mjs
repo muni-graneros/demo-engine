@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, existsSync } from 'node:fs';
+import { mkdtempSync, existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -144,4 +144,26 @@ test('el fondo de la transición es el MISMO que el del marco', async () => {
         assert.ok(distancia <= 8,
             `(${x},${y}) marco rgb(${enElMarco}) vs transición rgb(${enLaTransicion})`);
     }
+});
+
+test('un video que Chromium no puede decodificar falla rápido y con motivo, no se cuelga', { timeout: 60_000 }, async () => {
+    // Antes `__preparar` esperaba `loadedmetadata` sin escuchar `error`: si el <video> no
+    // cargaba (MP4 corrupto, o un Chromium sin decodificador H.264 como el de algunos
+    // contenedores), la promesa no se resolvía nunca y `page.evaluate` —que no tiene tope—
+    // dejaba colgado el curso entero sin un solo mensaje. Un archivo basura como MP4 hace
+    // fallar la carga en cualquier Chromium, así que la prueba no depende del entorno.
+    const dir = mkdtempSync(join(tmpdir(), 'demo-3d-roto-'));
+    const mp4 = join(dir, 'cap.mp4');
+    writeFileSync(mp4, Buffer.alloc(4096, 7));
+
+    const inicio = Date.now();
+    await assert.rejects(
+        renderizarTransicion({ mp4, desdeSeg: 0, salida: dir, presentacion, fps: 25 }),
+        (error) => {
+            assert.match(error.message, /transición 3D/);
+            assert.match(error.message, /no pudo cargar el video/);
+            return true;
+        },
+    );
+    assert.ok(Date.now() - inicio < 30_000, `tardó ${Date.now() - inicio} ms en fallar`);
 });

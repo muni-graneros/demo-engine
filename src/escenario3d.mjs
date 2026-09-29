@@ -12,6 +12,24 @@ const AQUI = dirname(fileURLToPath(import.meta.url));
 const PLANTILLA = join(AQUI, 'escenario', 'escena.html');
 
 /**
+ * Corre un paso de la escena y, si falla, lo informa como falla de la transición 3D con su
+ * motivo. Sin esto el error llegaba —cuando llegaba— como un `page.evaluate: Error: ...`
+ * suelto, sin decir que era la transición ni qué hacer al respecto.
+ */
+async function enEscena(paso, accion) {
+    try {
+        return await accion();
+    } catch (error) {
+        const motivo = String(error?.message ?? error).split('\n')[0]
+            .replace(/^page\.evaluate:\s*(Error:\s*)?/, '');
+        throw new Error(`transición 3D: no se pudo ${paso}. ${motivo}. Si el navegador no `
+            + 'decodifica el MP4 (p. ej. un Chromium sin H.264), desactivá '
+            + '`video.presentacion.transicion3d.activa` o instalá el Chromium de Playwright.',
+        { cause: error });
+    }
+}
+
+/**
  * Renderiza la transición 3D de entrada a un capítulo, frame a frame.
  *
  * NO se graba el canvas en tiempo real, y esa es la decisión central: el screencast por CDP
@@ -49,15 +67,15 @@ export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion
             // El fondo sale de la MISMA función que usa el marco: si acá se resolviera aparte
             // (antes: `presentacion.fondo ?? '#0f172a'`), con el defecto `fondo:null` el video
             // saltaba del gradiente de marca al gris en cada transición.
-            await page.evaluate((args) => window.__preparar(args),
-                { ancho, alto, src: '/cap.mp4', fondo: fondoDelMarco(presentacion, marca) });
+            await enEscena(`preparar la escena con ${mp4}`, () => page.evaluate((args) => window.__preparar(args),
+                { ancho, alto, src: '/cap.mp4', fondo: fondoDelMarco(presentacion, marca) }));
 
             for (let i = 0; i < total; i++) {
-                await page.evaluate((args) => window.__frame(args), {
+                await enEscena(`renderizar el frame ${i + 1}/${total}`, () => page.evaluate((args) => window.__frame(args), {
                     t: desdeSeg + i / fps,
                     p: total === 1 ? 1 : i / (total - 1),
                     gradosMax,
-                });
+                }));
                 await page.locator('canvas').screenshot({
                     path: join(dirFrames, `f-${String(i).padStart(5, '0')}.jpg`),
                     type: 'jpeg', quality: 92,
