@@ -1,6 +1,6 @@
 {
   "name": "demo-engine",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "type": "module",
   "description": "Motor genérico de videos-tutorial para sistemas web.",
   "bin": {
