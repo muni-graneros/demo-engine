@@ -20,6 +20,7 @@ import { componerEnLienzo, lienzoDe } from './src/composicion.mjs';
 import { cadenaDeMezcla } from './src/mezcla.mjs';
 import { generarVtt } from './src/subtitulos.mjs';
 import { variante } from './src/formatos.mjs';
+import { sembrarSincronico } from './src/sembrar.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -201,7 +202,7 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
         }
     }
     limpiarCapturas(config);
-    if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
+    sembrarSincronico(config);
     const presentacion = config.video.presentacion;
     const lienzo = lienzoDe({ presentacion, video: config.video });
     // Tarjetas y compuestos viven hasta que el curso está pegado: `.tmp-curso` no sirve,
@@ -353,7 +354,7 @@ async function ejecutarOrden(config, voz) {
     const sesionesDe = (guion) => prepararSesionesParaGuion(guion, config, { dirSesiones });
 
     if (orden === 'preparar') {
-        if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
+        sembrarSincronico(config);
         // Acá sí, TODOS los actores de la config: el trabajo de `preparar` es dejar lista la
         // sesión de todo el mundo de una vez, por adelantado.
         await prepararSesiones(config, { dirSesiones });
@@ -385,7 +386,7 @@ async function ejecutarOrden(config, voz) {
         // anteriores, y un guion que abre el registro equivocado porque el
         // primero que coincide es uno viejo. Cuesta horas de diagnosticar,
         // porque cada síntoma parece un selector roto y en realidad es el estado.
-        if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
+        sembrarSincronico(config);
         // Mismo cableado que el curso (superficies, dividir, clics, audio); la tarjeta de
         // superficies no: es la entrada a un capítulo, y un guion suelto no tiene capítulos.
         const guion = await cargarGuion(config, argumento);
