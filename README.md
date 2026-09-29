@@ -244,8 +244,10 @@ Detalle completo en [docs/PRIVACIDAD.md](docs/PRIVACIDAD.md) y
 ## Cómo se prueba
 
 ```bash
-npm test      # node --test pruebas/ — única fuente de verdad
+npm test      # node pruebas/correr.mjs — única fuente de verdad
 ```
+
+Compatible con Node 20 y Node 22+. El script `pruebas/correr.mjs` descubre y ejecuta los tests automáticamente, evitando la incompatibilidad en Node 21+ cuando se pasa un directorio a `node --test`.
 
 ## Invariantes
 
