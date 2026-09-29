@@ -1,9 +1,9 @@
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mjs';
-import { alClicar, configurarCamara, instalarCursor } from './camara.mjs';
-import { actorConSesion, opcionesDeContexto } from './contexto-actor.mjs';
+import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
+import { alClicar, configurarCamara } from './camara.mjs';
+import { ejecutarGuion } from './ejecutor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { duracion } from './ffmpeg.mjs';
 
@@ -31,12 +31,9 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     // se sigue mejor ágil y uno de capacitación, pausado.
     configurarCamara({ msCursor });
     const navegador = await chromium.launch();
-    const contextos = new Map();   // actor → { ctx, page, t0 }
+    const contextos = new Map();   // actor → { ctx, page, pista, t0, grabacion, dim }
     const pasos = [];
     const clics = [];
-    // Actores de los que ya se avisó que su panel dividido sale en blanco: sin esto, un
-    // tramo dividido de diez pasos repetía el mismo aviso diez veces.
-    const avisadosEnBlanco = new Set();
 
     /*
      * Todas las locuciones se sintetizan ANTES de que empiece a grabarse nada.
@@ -70,181 +67,94 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     mkdirSync(dirCapturas, { recursive: true });
     let indiceCaptura = 0;
 
-    /**
-     * Crea (o recupera) el contexto de un actor, anotando cuándo empezó su grabación.
-     *
-     * El cursor se instala AQUÍ, antes de fijar `t0`: si se instalara después de capturar
-     * el reloj, el viaje de ida y vuelta al navegador sumaría unos milisegundos y el
-     * primer paso de la pista ya no arrancaría exactamente en cero.
-     *
-     * La grabación de pantalla es propia (`src/pantalla.mjs`, por CDP), no `recordVideo` de
-     * Playwright: ese solo deja elegir tamaño, con el bitrate fijo adentro y demasiado bajo
-     * para que el texto de un panel se lea nítido.
-     */
-    async function actorDe(nombre) {
-        if (contextos.has(nombre)) return contextos.get(nombre);
-        // Solo un actor CON sesión la exige: `sesion: false` (la app del vecino, un APK sin
-        // login previo) abre su contexto limpio, y el propio guion entra si hace falta.
-        if (actorConSesion(config, nombre) && !sesiones[nombre]) {
-            throw new Error(`el guion usa el actor "${nombre}", que no está en la config`);
-        }
-        const { opciones, pista } = opcionesDeContexto(config, nombre, sesiones, { ancho, alto });
-        const ctx = await navegador.newContext({ ...opciones, locale: 'es-CL' });
-        const page = await ctx.newPage();
-        await instalarCursor(page);
-        // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
-        // sobre el audio del video final, que corre en tiempo de relato.
-        alClicar(page, (t) => clics.push(t - t0Global));
-        const archivoPista = join(salida, `pista-${nombre}.mp4`);
-        // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide su
-        // viewport CSS (ver `opcionesDeContexto`), que es lo que el screencast entrega de
-        // verdad; con el tamaño de escritorio, ffmpeg lo encajonaría entre bandas negras.
-        const grabacion = await iniciarGrabacion(page, { ...pista, salida: archivoPista, calidad, fps });
-        const datos = { ctx, page, t0: Date.now(), grabacion, dim: pista };
-        contextos.set(nombre, datos);
-        return datos;
-    }
+    // Relojes del paso en curso: los fija `antesDePaso` y los leen los ganchos siguientes.
+    let inicioLocal = 0;
+    let inicioGlobal = 0;
 
-    /**
-     * Valida un `dividir` contra el actor del paso. Se exige un par EXACTO que incluya al
-     * actor que actúa: la pantalla dividida existe para mostrar un traspaso (el vecino
-     * envía, el operador lo recibe), y un panel sin el actor que se mueve dejaría la acción
-     * del paso fuera de cuadro.
+    /*
+     * La semántica del guion (actores perezosos, `dividir`, cursor, portero, errores con
+     * contexto) vive en `ejecutarGuion` (src/ejecutor.mjs), compartida con la demo en vivo.
+     * Acá solo se cuelga la GRABACIÓN de sus ganchos: pista, relojes, espera por la voz y
+     * captura para el manual.
      */
-    function validarDividir(dividir, actor) {
-        const valido = Array.isArray(dividir) && dividir.length === 2 &&
-            dividir[0] !== dividir[1] && dividir.every((x) => typeof x === 'string') &&
-            dividir.includes(actor);
-        if (!valido) {
-            throw new Error(`dividir debe ser un par de actores distintos que incluya a "${actor}", y es ${JSON.stringify(dividir)}`);
-        }
-    }
+    const ganchos = {
+        /**
+         * La grabación de pantalla es propia (`src/pantalla.mjs`, por CDP), no `recordVideo` de
+         * Playwright: ese solo deja elegir tamaño, con el bitrate fijo adentro y demasiado bajo
+         * para que el texto de un panel se lea nítido.
+         *
+         * El cursor ya lo instaló el ejecutor ANTES de este gancho, y `t0` se fija al final:
+         * si se instalara después de capturar el reloj, el viaje de ida y vuelta al navegador
+         * sumaría unos milisegundos y el primer paso de la pista ya no arrancaría en cero.
+         */
+        async alAbrirActor(nombre, datos) {
+            // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
+            // sobre el audio del video final, que corre en tiempo de relato.
+            alClicar(datos.page, (t) => clics.push(t - t0Global));
+            const archivoPista = join(salida, `pista-${nombre}.mp4`);
+            // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide
+            // su viewport CSS (ver `opcionesDeContexto`), que es lo que el screencast entrega de
+            // verdad; con el tamaño de escritorio, ffmpeg lo encajonaría entre bandas negras.
+            datos.grabacion = await iniciarGrabacion(datos.page, { ...datos.pista, salida: archivoPista, calidad, fps });
+            datos.t0 = Date.now();
+            datos.dim = datos.pista;
+        },
+
+        antesDePaso({ actor }) {
+            inicioLocal = Date.now() - actor.t0;
+            inicioGlobal = Date.now() - t0Global;
+        },
+
+        /*
+         * El paso dura lo que dure su locución (más un mínimo), en vez de un tiempo fijo: con
+         * espera fija la voz sigue sonando sobre la pantalla siguiente.
+         *
+         * Lo que la acción del paso YA consumió se descuenta de la espera. Antes se esperaba
+         * la locución ENTERA después de actuar, así que cada paso era una acción muda seguida
+         * de una pantalla congelada hablando: la voz y lo que se ve nunca coincidían. Medido
+         * en un tutorial de doce pasos: pasos de 30 a 60 segundos para narraciones de tres
+         * frases. Ahora el audio —que el montaje pega al inicio del paso— suena mientras la
+         * pantalla se mueve, que es como se ve un tutorial de verdad.
+         */
+        async esperarNarracion({ paso, actor }) {
+            const locucion = paso.narrar ? locuciones.get(paso.narrar) : null;
+            const msVoz = locucion?.ms ?? 0;
+            const consumido = Date.now() - actor.t0 - inicioLocal;
+            await actor.page.waitForTimeout(Math.max(pausaMinima, msVoz - consumido));
+        },
+
+        /*
+         * Con el portero ya pasado se captura la pantalla TAL COMO ESTÁ, con el mismo
+         * `page.screenshot` que usaría cualquiera: si el guion puso el cubridor, sale tapada,
+         * que es lo correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
+         * elementos `position:fixed` —el cubridor— cubran una captura de página completa) ni
+         * por selector (saltaría el overlay de privacidad).
+         *
+         * La locución se sintetizó UNA sola vez: la ruta del .wav viaja en el paso para que el
+         * montaje la reutilice. Sintetizarla de nuevo al montar duplicaría el trabajo más caro
+         * del pipeline en una máquina sin GPU.
+         */
+        async despuesDePaso({ escena, paso, actor, dividir }) {
+            const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
+            await actor.page.screenshot({ path: join(dirCapturas, nombreCaptura) });
+            const locucion = paso.narrar ? locuciones.get(paso.narrar) : null;
+            pasos.push({
+                escena: escena.id,
+                titulo: escena.titulo,
+                actor: paso.actor,
+                tLocal: inicioLocal,
+                tGlobal: inicioGlobal,
+                duracionMs: (Date.now() - actor.t0) - inicioLocal,
+                narrar: paso.narrar,
+                wav: locucion?.wav ?? null,
+                captura: `capturas/${nombreCaptura}`,
+                dividir,
+            });
+        },
+    };
 
     try {
-        for (const escena of guion.escenas) {
-            // La pantalla dividida no cruza de escena: cada escena abre con su tarjeta de
-            // título, y un traspaso que siguiera partido detrás de ella se leería como parte
-            // de lo que viene y no de lo que terminó.
-            let dividirVigente = null;
-            for (const [indice, paso] of escena.pasos.entries()) {
-                try {
-                    // Solo `null`/`undefined` apagan el tramo: cualquier otro valor (`false`,
-                    // `''`, `0`) se valida y revienta, en vez de colarse como «sin dividir» y
-                    // esconder un guion mal escrito.
-                    if ('dividir' in paso) dividirVigente = paso.dividir == null ? null : paso.dividir;
-                    if (dividirVigente !== null) {
-                        validarDividir(dividirVigente, paso.actor);
-                        // Los dos contextos se abren ANTES de actuar: si el otro actor recién
-                        // se abriera en un paso posterior, su pista no cubriría este tramo y
-                        // el montaje no tendría qué poner en su mitad de la pantalla.
-                        for (const otro of dividirVigente) {
-                            const { page: suPagina } = await actorDe(otro);
-                            // El actor del paso navega en su propio `hacer`; el otro, si nunca
-                            // navegó, queda en about:blank y su panel sale en blanco. No es un
-                            // error (puede ser a propósito), pero casi siempre es un olvido.
-                            if (otro !== paso.actor && suPagina.url() === 'about:blank' && !avisadosEnBlanco.has(otro)) {
-                                avisadosEnBlanco.add(otro);
-                                console.warn(`[demo-engine] dividir: el actor "${otro}" no tiene nada abierto todavía; su panel saldrá en blanco`);
-                            }
-                        }
-                    }
-
-                    const { page, t0 } = await actorDe(paso.actor);
-
-                    const inicioLocal = Date.now() - t0;
-                    const inicioGlobal = Date.now() - t0Global;
-
-                    // Se repone el cursor antes de actuar: en un actor reutilizado, el paso
-                    // anterior pudo haber navegado y una navegación se lleva el cursor consigo.
-                    await instalarCursor(page);
-                    // Segundo argumento: el contexto del guion. Como mínimo trae `config`, de
-                    // donde `portada()`/`cierre()` sacan `config.marca` (nombre, color, escudo).
-                    // Sin esto, un guion no tenía forma de alcanzar la identidad del sistema que
-                    // está grabando y las portadas salían con el azul por defecto del paquete —
-                    // visible en el video final, porque es lo primero que se ve de cada capítulo.
-                    // Los guiones que declaran `hacer(page)` a secas ignoran este segundo
-                    // argumento y siguen funcionando sin cambios.
-                    await paso.hacer(page, { config });
-                    await instalarCursor(page);   // el propio `hacer` también pudo navegar
-
-                    // El paso dura lo que dure su locución (más un mínimo), en vez de un tiempo
-                    // fijo: con espera fija la voz sigue sonando sobre la pantalla siguiente.
-                    //
-                    // La locución se sintetiza UNA sola vez: aquí se genera el .wav, se mide, y
-                    // la ruta viaja en el paso para que el montaje lo reutilice. Sintetizarla de
-                    // nuevo al montar duplicaría el trabajo más caro del pipeline en una máquina
-                    // sin GPU.
-                    const locucion = paso.narrar ? locuciones.get(paso.narrar) : null;
-                    const wav = locucion?.wav ?? null;
-                    const msVoz = locucion?.ms ?? 0;
-                    // Lo que la acción del paso YA consumió se descuenta de la espera. Antes se esperaba la locución ENTERA después de actuar, así
-                    // que cada paso era una acción muda seguida de una pantalla congelada
-                    // hablando: la voz y lo que se ve nunca coincidían, y el video se sentía
-                    // arrastrado aunque la locución fuera rápida. Medido en un tutorial de
-                    // doce pasos: pasos de 30 a 60 segundos para narraciones de tres frases.
-                    //
-                    // Ahora el paso dura lo que dure su locución contando desde que empezó a
-                    // actuar, y el audio —que el montaje pega al inicio del paso— suena
-                    // mientras la pantalla se mueve, que es como se ve un tutorial de verdad.
-                    const consumido = Date.now() - t0 - inicioLocal;
-                    await page.waitForTimeout(Math.max(pausaMinima, msVoz - consumido));
-
-                    // Comprobación en vivo, al cierre del paso y ANTES de la captura para el
-                    // manual: lee el DOM (sin OCR, 4-6 ms medido) y cuenta identificadores
-                    // distintos con el `patron`/`validar` de `config.auditoria`. Es la misma
-                    // pasada la que cubre "antes de cada captura" y "al cerrar cada paso" — en
-                    // este bucle son el mismo instante, porque cada paso deja EXACTAMENTE una
-                    // captura, siempre al final. Ver src/privacidad.mjs.
-                    //
-                    // `paso.variasPersonas: true` es la excepción declarada a propósito, para
-                    // las pantallas donde mostrar varias personas es lo correcto (un reporte
-                    // agregado, una cola). Lo seguro es el valor por defecto: hay que escribir
-                    // la excepción, no al revés.
-                    if (!paso.variasPersonas) {
-                        await exigirUnaSolaPersona(page, config.auditoria);
-                        // En un tramo dividido el panel del OTRO actor está igual de a la vista
-                        // en el video (Ley 21.719): sin auditarlo, un listado completo abierto
-                        // en un paso anterior —con su propia excepción `variasPersonas`— salía
-                        // al lado de este paso sin ningún control. Se revisan los dos; repetir
-                        // el del actor del paso cuesta unos ms y deja el bucle simple.
-                        for (const actor of dividirVigente ?? []) {
-                            await exigirUnaSolaPersona(contextos.get(actor).page, config.auditoria);
-                        }
-                    }
-
-                    // Se captura la pantalla TAL COMO ESTÁ, con el mismo `page.screenshot` que
-                    // usaría cualquiera: si el guion puso el cubridor, sale tapada, que es lo
-                    // correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
-                    // elementos `position:fixed` —el cubridor— cubran una captura de página
-                    // completa) ni por selector (saltaría el overlay de privacidad).
-                    const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
-                    await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
-
-                    pasos.push({
-                        escena: escena.id,
-                        titulo: escena.titulo,
-                        actor: paso.actor,
-                        tLocal: inicioLocal,
-                        tGlobal: inicioGlobal,
-                        duracionMs: (Date.now() - t0) - inicioLocal,
-                        narrar: paso.narrar,
-                        wav,
-                        captura: `capturas/${nombreCaptura}`,
-                        dividir: dividirVigente,
-                    });
-                } catch (error) {
-                    // Se identifica CON PRECISIÓN qué paso y qué escena fallaron: en un guion
-                    // largo, "algo reventó" obliga a releer todo el guion para ubicar el punto;
-                    // esto lo dice directo. `{ cause }` conserva el error original completo
-                    // (stack incluido) para quien necesite más detalle que el mensaje.
-                    throw new Error(
-                        `guion "${guion.id}", escena "${escena.id}" ("${escena.titulo}"), paso ${indice + 1} ` +
-                        `(actor "${paso.actor}"): ${error.message}`,
-                        { cause: error },
-                    );
-                }
-            }
-        }
+        await ejecutarGuion(guion, { config, sesiones, navegador, actores: contextos, tamano: { ancho, alto }, ganchos });
 
         const pistas = {};
         const origenes = {};
