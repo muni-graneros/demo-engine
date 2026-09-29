@@ -272,7 +272,8 @@ Todas estas funciones se reexportan desde `demo-engine`:
 
 ### Auditoría
 - `auditarVideo(video, config, { dirFrames?, ocr? }?) → Promise<{total, sospechosos}>`
-  — `config.auditoria`: `{ocr, patron, cada, maximo, validar}`; `sospechosos`: `{segundo, archivo, identificadores}[]`
+  — `config.auditoria`: `{ocr, token, patron, cada, maximo, validar}` (`token` va en el header
+    `X-Service-Token`; `maximo: null` = sin tope, cubre todo el video); `sospechosos`: `{segundo, archivo, identificadores}[]`
   — `ocr` es inyectable (para pruebas); sin él usa el endpoint real de `config.auditoria.ocr`
 - `auditarCapturas(dirCapturas, config, { ocr? }?) → Promise<{total, sospechosos}>`
   — audita las capturas del manual (`config.salida/capturas`), mismo criterio que `auditarVideo`

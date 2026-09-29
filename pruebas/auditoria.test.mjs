@@ -209,8 +209,9 @@ test('muestrearFrames extrae un frame cada N segundos y respeta el tope', () => 
     const frames = muestrearFrames(video, { cada: 1, maximo: 3, dirSalida: join(dir, 'frames') });
 
     assert.equal(frames.length, 3, 'debe respetar el tope de frames aunque el video dé para más');
+    // Desde v1.14.1 el tope REPARTE (paso = 5/3 s) en vez de cortar en el segundo 3.
     for (const [indice, frame] of frames.entries()) {
-        assert.equal(frame.segundo, indice * 1, 'el segundo de cada frame es determinístico por su posición');
+        assert.ok(Math.abs(frame.segundo - indice * (5 / 3)) < 0.05, `el segundo de cada frame es determinístico por su posición: ${frame.segundo}`);
         assert.ok(existsSync(frame.archivo), `el frame debe quedar guardado en disco: ${frame.archivo}`);
     }
 });
@@ -572,4 +573,125 @@ test('el reintento transitorio también aplica a auditarVideo (frames del .mp4, 
     } finally {
         await ocr.cerrar();
     }
+});
+
+// Credencial del OCR (v1.14.1). El OCR del ecosistema (plataforma-graneros-ocr) pasó a
+// exigir el header `X-Service-Token` y contesta 401 sin él: sin forma de mandarlo, `demo
+// auditar` no podía correr. El servidor de juguete imita ese contrato: 401 sin el header
+// correcto, 200 con él.
+function iniciarOcrConToken(tokenEsperado, texto = 'única persona a la vista: 11111111-1') {
+    const recibidos = [];
+    const servidor = createServer((req, res) => {
+        recibidos.push(req.headers['x-service-token']);
+        req.resume();
+        req.on('end', () => {
+            if (req.headers['x-service-token'] !== tokenEsperado) {
+                res.writeHead(401, { 'content-type': 'application/json' });
+                return res.end(JSON.stringify({ error: 'no autorizado' }));
+            }
+            res.writeHead(200, { 'content-type': 'application/json' });
+            res.end(JSON.stringify({ text: texto }));
+        });
+    });
+    return new Promise((listo) => {
+        servidor.listen(0, '127.0.0.1', () => {
+            const { port } = servidor.address();
+            listo({
+                url: `http://127.0.0.1:${port}/ocr`,
+                recibidos,
+                cerrar: () => new Promise((f) => servidor.close(f)),
+            });
+        });
+    });
+}
+
+test('auditoria.token viaja como X-Service-Token y el OCR protegido responde', async () => {
+    const ocr = await iniciarOcrConToken('secreto-de-prueba');
+    try {
+        const dir = dirCapturasDePrueba(['panel-0.png']);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON, token: 'secreto-de-prueba' } };
+
+        const resultado = await auditarCapturas(dir, config);
+
+        assert.equal(resultado.total, 1);
+        assert.deepEqual(ocr.recibidos, ['secreto-de-prueba']);
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+test('sin auditoria.token el OCR protegido contesta 401: falla sin reintentar, dice qué falta y no filtra el token', async () => {
+    const ocr = await iniciarOcrConToken('secreto-de-prueba');
+    try {
+        const dir = dirCapturasDePrueba(['panel-0.png']);
+        const sinToken = { auditoria: { ocr: ocr.url, patron: PATRON } };
+        await assert.rejects(() => auditarCapturas(dir, sinToken), (e) => {
+            assert.match(e.message, /401/);
+            assert.match(e.message, /auditoria\.token/, 'el mensaje debe decir qué configurar');
+            return true;
+        });
+        assert.deepEqual(ocr.recibidos, [undefined], 'sin token no se manda el header, y un 401 no se reintenta');
+
+        const malo = { auditoria: { ocr: ocr.url, patron: PATRON, token: 'token-equivocado-xyz' } };
+        await assert.rejects(() => auditarCapturas(dir, malo), (e) => {
+            assert.doesNotMatch(e.message, /token-equivocado-xyz/, 'el valor del token nunca va en un mensaje');
+            return true;
+        });
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+test('auditarVideo también manda el token en cada frame', async () => {
+    const ocr = await iniciarOcrConToken('secreto-de-prueba');
+    try {
+        const { dir, video } = videoDePrueba(2);
+        const config = { auditoria: { ocr: ocr.url, patron: PATRON, token: 'secreto-de-prueba', cada: 1 } };
+
+        const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames') });
+
+        assert.equal(resultado.total, 2);
+        assert.ok(ocr.recibidos.every((t) => t === 'secreto-de-prueba'));
+    } finally {
+        await ocr.cerrar();
+    }
+});
+
+// Cobertura del muestreo (v1.14.1). Con el defecto viejo (cada 10 s, tope 20) un video de
+// 28 minutos solo se auditaba en sus primeros 200 s: el resto del curso quedaba sin mirar y
+// el portero igual informaba "limpio". Ahora el muestreo cubre SIEMPRE el video entero.
+
+test('muestrearFrames sin tope cubre el video entero, un frame cada "cada" segundos', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-audit-completo-'));
+    const video = join(dir, 'clip.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=black:s=320x240:d=12', '-c:v', 'libx264', video]);
+
+    const frames = muestrearFrames(video, { cada: 1, maximo: null, dirSalida: join(dir, 'frames') });
+
+    assert.ok(frames.length >= 11, `debe haber un frame por segundo en 12 s, hubo ${frames.length}`);
+    assert.ok(frames.at(-1).segundo >= 11, `el último frame debe caer al final del video, cayó en ${frames.at(-1).segundo}`);
+});
+
+test('muestrearFrames con un tope menor que lo que pide "cada" reparte los frames a lo largo de TODO el video', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'demo-audit-reparto-'));
+    const video = join(dir, 'clip.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=black:s=320x240:d=12', '-c:v', 'libx264', video]);
+
+    const frames = muestrearFrames(video, { cada: 1, maximo: 4, dirSalida: join(dir, 'frames') });
+
+    assert.equal(frames.length, 4, 'el tope se respeta');
+    assert.equal(frames[0].segundo, 0);
+    assert.ok(frames.at(-1).segundo >= 8,
+        `con el tope, el último frame debe llegar al último tramo del video (no quedarse en el segundo 3): ${frames.at(-1).segundo}`);
+});
+
+test('el defecto de auditoria cubre el video entero (maximo: null), no solo los primeros 200 s', async () => {
+    const { dir, video } = videoDePrueba(12);
+    // 12 s a un frame cada 0,5 s son 24 frames: más que el tope viejo de 20.
+    const config = { auditoria: { ocr: 'http://fake.local/ocr', patron: PATRON, cada: 0.5 } };
+    const ocrFalso = async () => ({ text: '' });
+
+    const resultado = await auditarVideo(video, config, { dirFrames: join(dir, 'frames'), ocr: ocrFalso });
+
+    assert.ok(resultado.total >= 22, `sin maximo declarado no debe haber tope de 20 ni de nada: ${resultado.total} frames`);
 });

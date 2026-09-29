@@ -18,12 +18,13 @@ nada la detectara.
 
 **Video:**
 1. Muestrea frames del MP4 con ffmpeg (el mismo binario estático que ya trae el motor), uno
-   cada `auditoria.cada` segundos, hasta `auditoria.maximo` frames — pero **siempre al menos
-   uno** si el video tiene contenido: con un video más corto que `auditoria.cada` (un guion de
+   cada `auditoria.cada` segundos **a lo largo de todo el video** (ver "Política de muestreo"
+   más abajo) — y **siempre al menos uno** si el video tiene contenido: con un video más corto que `auditoria.cada` (un guion de
    una sola escena, por ejemplo), el paso efectivo se recorta a la duración real para que el
    primer frame (segundo 0) nunca se pierda. Sin esto, `fps=1/cada` de ffmpeg no entregaba
    ningún frame y el comando "aprobaba" sin haber mirado nada.
-2. Manda cada frame al servicio OCR configurado en `auditoria.ocr`.
+2. Manda cada frame al servicio OCR configurado en `auditoria.ocr` (con `auditoria.token` en
+   el header `X-Service-Token`, si está declarado).
 3. Cuenta cuántos identificadores **distintos** matchean `auditoria.patron` en el texto que
    devolvió el OCR. **Más de uno en el mismo frame significa que había una lista sin
    filtrar** — la misma fuga que `abrirFiltrado` existe para evitar.
@@ -52,6 +53,23 @@ muestrear. Eso **nunca** se reporta como "0 de 0 sospechosos": `demo auditar` co
 mensaje explícito y código de salida distinto de cero — un resultado "0 de 0" sería
 indistinguible de una auditoría real que sí miró y no encontró nada.
 
+### Política de muestreo: siempre el video entero (desde v1.14.1)
+
+Hasta v1.14.0 el defecto era `cada: 10` con `maximo: 20`, y el tope se aplicaba **cortando**:
+un curso de 28 minutos solo se auditaba en sus primeros 200 s, y el resto quedaba sin mirar
+mientras el comando informaba "limpio". La política ahora es:
+
+- **Sin `maximo` (el defecto, `null`):** un frame cada `auditoria.cada` segundos, desde el
+  segundo 0 hasta el final. Un curso de 28 min con `cada: 10` son ~168 frames; con el OCR
+  real a ~9,5 s por frame, ~27 minutos de auditoría. Es el costo de mirar el video completo.
+- **Con `maximo` declarado:** si el video pide más frames que el tope, el paso se **estira**
+  a `duración / maximo` y los frames se reparten uniformemente por todo el video (nunca se
+  corta la cola). Sirve para acotar el tiempo de una auditoría rápida, sabiendo que el paso
+  entre frames crece con la duración: con `maximo: 20` sobre 28 min, un frame cada ~84 s.
+
+Un tope que deja sin mirar el final del video no es un tope de costo: es un agujero del
+portero. Por eso ninguna combinación de `cada`/`maximo` puede dejar tramos sin muestrear.
+
 **Capturas del manual:** mismo paso 2 y 3 de arriba, pero SIN muestreo — a diferencia del
 video (una corriente continua de la que conviene recortar solo cada tantos segundos), cada
 paso del guion ya deja UNA sola captura, así que se audita cada PNG que haya en
@@ -71,8 +89,9 @@ export default {
   auditoria: {
     ocr: 'http://127.0.0.1:8110/ocr',                  // endpoint del servicio OCR, SIN VALOR POR DEFECTO
     patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])',  // qué cuenta como identificador (regex, sin flags; anclado desde v1.1.1)
-    cada: 10,                                          // un frame cada N segundos
-    maximo: 20,                                        // tope de frames por video
+    token: process.env.DEMO_OCR_TOKEN,                 // header X-Service-Token del OCR (desde el entorno, nunca en claro)
+    cada: 10,                                          // un frame cada N segundos, en todo el video
+    maximo: null,                                      // opcional: tope de frames; REPARTE, no corta (defecto: sin tope)
   },
 };
 ```
@@ -95,6 +114,14 @@ qué falta (no un `ECONNREFUSED` críptico contra `null`).
 
 El servicio OCR debe aceptar `POST` con el archivo en un campo `file` (`multipart/form-data`)
 y responder `{ text: "..." }`.
+
+**Credencial del OCR (`auditoria.token`, desde v1.14.1).** El OCR del ecosistema
+(`plataforma-graneros`, `ocr/app.py`) exige el header `X-Service-Token` en toda petición salvo
+`/health`, y contesta **401** sin él. `auditoria.token` se manda tal cual en ese header. Es un
+secreto: se lee del entorno del consumidor (`token: process.env.DEMO_OCR_TOKEN`), nunca se
+escribe en `demo.config.mjs` ni en un commit, y el motor no lo incluye en ningún mensaje ni log.
+Sin token no se manda el header (un OCR abierto sigue funcionando). Un 401/403 no se reintenta
+(la respuesta no va a cambiar) y el error dice si falta el token o si el OCR lo rechazó.
 
 ### Validación de identificadores (`auditoria.validar`)
 

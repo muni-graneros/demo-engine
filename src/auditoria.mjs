@@ -57,7 +57,14 @@ const DEFECTOS = {
     ocr: null,
     patron: PATRON_POR_DEFECTO,
     cada: 10,
-    maximo: 20,
+    // Sin tope por defecto (desde v1.14.1): antes era 20, y con `cada: 10` un curso de 28
+    // minutos solo se auditaba en sus primeros 200 s — el resto quedaba sin mirar y el
+    // portero igual informaba "limpio". Un tope declarado ya no corta la cola: reparte los
+    // frames a lo largo de todo el video (ver `muestrearFrames`).
+    maximo: null,
+    // Credencial del OCR (header `X-Service-Token`). Sin defecto: es un secreto, y va en el
+    // entorno del consumidor (`process.env.DEMO_OCR_TOKEN`), nunca escrito en la config.
+    token: null,
     // Sin defecto, a propósito: el motor no sabe qué es un RUT chileno ni ningún otro
     // identificador concreto. Es un filtro OPCIONAL que aporta quien configura el sistema
     // (ver contarIdentificadores más abajo); sin declararlo, el comportamiento es el de
@@ -86,7 +93,13 @@ export function exigirAuditoriaConfigurada(auditoria) {
 }
 
 /**
- * Extrae un frame cada `cada` segundos (hasta `maximo` frames) y los deja en `dirSalida`.
+ * Extrae un frame cada `cada` segundos a lo largo de TODO el video y los deja en `dirSalida`.
+ *
+ * Cobertura completa, siempre: sin `maximo` (el defecto) sale un frame cada `cada` segundos
+ * hasta el final. Con `maximo`, si el video pide más frames que el tope, el paso se ESTIRA
+ * (duración / maximo) en vez de cortar a mitad: antes el tope se aplicaba cortando, y un
+ * curso de 28 minutos quedaba auditado solo en sus primeros 200 s. Un tope que deja sin
+ * mirar el final del video no es un tope de costo, es un agujero del portero.
  *
  * El filtro `fps=1/cada` de ffmpeg agenda su primer punto de muestreo en el segundo `cada`
  * exacto — no en 0. Con un video MÁS CORTO que `cada` (un guion de una sola escena, por
@@ -115,8 +128,11 @@ export function muestrearFrames(video, { cada, maximo, dirSalida }) {
     const total = duracion(video);
     if (total <= 0) return [];
 
-    const efectivo = Math.min(cada, total);
-    ff(['-y', '-i', video, '-vf', `fps=1/${efectivo}`, '-frames:v', String(maximo), join(dirSalida, 'frame-%04d.png')]);
+    let efectivo = Math.min(cada, total);
+    const conTope = Number.isFinite(maximo) && maximo > 0;
+    if (conTope && total / efectivo > maximo) efectivo = total / maximo;
+    const tope = conTope ? ['-frames:v', String(maximo)] : [];
+    ff(['-y', '-i', video, '-vf', `fps=1/${efectivo}`, ...tope, join(dirSalida, 'frame-%04d.png')]);
 
     const archivos = readdirSync(dirSalida)
         .filter((nombre) => /^frame-\d+\.png$/.test(nombre))
@@ -188,13 +204,17 @@ export function contarIdentificadores(texto, patron, validar) {
  *   reintentar ahí solo demora el fracaso sin cambiar el resultado — tan malo como no
  *   reintentar nunca, según qué tan caro sea el reintento (acá, ~9,5s más por frame).
  */
-async function intentarOcr(endpoint, archivoFrame, datos) {
+async function intentarOcr(endpoint, archivoFrame, datos, token) {
     const formulario = new FormData();
     formulario.append('file', new Blob([datos]), basename(archivoFrame));
+    // `X-Service-Token` es el header que exige el OCR del ecosistema (plataforma-graneros,
+    // ocr/app.py). Sin token no se manda el header: un OCR abierto sigue funcionando igual.
+    // El valor NUNCA entra en un mensaje de error ni en un log.
+    const headers = token ? { 'X-Service-Token': token } : {};
 
     let respuesta;
     try {
-        respuesta = await fetch(endpoint, { method: 'POST', body: formulario });
+        respuesta = await fetch(endpoint, { method: 'POST', body: formulario, headers });
     } catch (error) {
         return {
             ok: false, transitorio: true, causa: error,
@@ -202,9 +222,15 @@ async function intentarOcr(endpoint, archivoFrame, datos) {
         };
     }
     if (!respuesta.ok) {
+        // 401/403 es credencial, no un servicio roto: se dice qué configurar (sin el valor).
+        const pista = respuesta.status === 401 || respuesta.status === 403
+            ? (token
+                ? ' — el OCR rechazó auditoria.token (¿token equivocado o revocado?)'
+                : ' — el OCR exige credencial: declarar auditoria.token (p. ej. process.env.DEMO_OCR_TOKEN)')
+            : '';
         return {
             ok: false, transitorio: false, causa: null,
-            mensaje: `el servicio OCR (${endpoint}) respondió ${respuesta.status} para ${archivoFrame}`,
+            mensaje: `el servicio OCR (${endpoint}) respondió ${respuesta.status} para ${archivoFrame}${pista}`,
         };
     }
     try {
@@ -229,14 +255,14 @@ async function intentarOcr(endpoint, archivoFrame, datos) {
  * examinar, y `auditarVideo`/`auditarCapturas` deben cortar en seco, nunca reportar "limpio"
  * sobre una imagen que no se pudo leer.
  */
-async function ocrPorDefecto(endpoint, archivoFrame) {
+async function ocrPorDefecto(endpoint, archivoFrame, token) {
     const datos = readFileSync(archivoFrame);
 
-    let resultado = await intentarOcr(endpoint, archivoFrame, datos);
+    let resultado = await intentarOcr(endpoint, archivoFrame, datos, token);
     let reintentado = false;
     if (!resultado.ok && resultado.transitorio) {
         reintentado = true;
-        resultado = await intentarOcr(endpoint, archivoFrame, datos);
+        resultado = await intentarOcr(endpoint, archivoFrame, datos, token);
     }
     if (!resultado.ok) {
         const sufijo = reintentado ? ' (tras reintentar una vez)' : '';
@@ -282,7 +308,7 @@ export async function auditarVideo(video, config, { dirFrames, ocr } = {}) {
         );
     }
 
-    const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo));
+    const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo, auditoria.token));
 
     const sospechosos = [];
     for (const frame of frames) {
@@ -323,7 +349,7 @@ export async function auditarCapturas(dirCapturas, config, { ocr } = {}) {
     const nombres = existsSync(dirCapturas)
         ? readdirSync(dirCapturas).filter((nombre) => nombre.endsWith('.png')).sort()
         : [];
-    const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo));
+    const leerFrame = ocr ?? ((archivo) => ocrPorDefecto(auditoria.ocr, archivo, auditoria.token));
 
     const sospechosos = [];
     for (const nombre of nombres) {

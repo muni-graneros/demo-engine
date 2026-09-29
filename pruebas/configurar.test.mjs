@@ -40,7 +40,8 @@ test('aplica los valores por defecto', async () => {
     // toque un literal y se olvide del otro rompa acá en vez de divergir en silencio.
     assert.equal(cfg.auditoria.patron, PATRON_POR_DEFECTO);
     assert.equal(cfg.auditoria.cada, 10);
-    assert.equal(cfg.auditoria.maximo, 20);
+    assert.equal(cfg.auditoria.maximo, null, 'sin tope: demo auditar cubre el video entero');
+    assert.equal(cfg.auditoria.token, null, 'el token es un secreto: nunca tiene defecto');
 });
 
 // El patrón por defecto quedó ANCLADO en v1.1.1 (ver src/auditoria.mjs,

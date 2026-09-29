@@ -35,7 +35,10 @@ const DEFECTOS = {
     marca: { color: '#1e3a8a', escudo: null },
     // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso
     // decide quien configura el sistema, no el motor (ver src/auditoria.mjs). `patron`,
-    // `cada` y `maximo` sí tienen un valor razonable porque no comprometen a ningún host.
+    // `cada` sí tiene un valor razonable porque no compromete a ningún host; `maximo` queda
+    // en null (sin tope) para que `demo auditar` cubra el video entero (ver auditoria.mjs).
+    // `token` (header X-Service-Token del OCR) tampoco tiene defecto: es un secreto y lo pone
+    // el consumidor desde su entorno (`process.env.DEMO_OCR_TOKEN`), nunca escrito en claro.
     // `validar` también queda sin defecto: es un filtro OPCIONAL (por ejemplo, el dígito
     // verificador de un RUT chileno) que solo quien configura el sistema puede aportar — el
     // motor no sabe qué hace válido a un identificador. Sin declararlo, se sigue contando
@@ -54,7 +57,7 @@ const DEFECTOS = {
     // (desde v1.1.1: `\d{7,8}-[\dkK]` sin anclar mordía dentro de cadenas más largas). Hay
     // un test en pruebas/configurar.test.mjs que compara ambos literales para detectar que
     // se desincronicen.
-    auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
+    auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: null, token: null, validar: null, chequeoEnVivo: true },
     sembrar: null,
     limpiar: null,
     // Audio opt-in: sin música y sin clic, un video de 1.13 suena igual que antes. El

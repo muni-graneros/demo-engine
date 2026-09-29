@@ -120,8 +120,9 @@ export default {
   auditoria: {
     ocr: 'http://127.0.0.1:8110/ocr',   // Endpoint OCR. SIN DEFECTO: hay que declararlo.
     patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])',  // Qué cuenta como identificador (defecto: RUT-like, ANCLADO)
-    cada: 10,                            // Un frame cada N segundos (defecto: 10)
-    maximo: 20,                          // Tope de frames por video (defecto: 20)
+    token: process.env.DEMO_OCR_TOKEN,   // Header X-Service-Token del OCR. SIN DEFECTO; desde el entorno, nunca en claro.
+    cada: 10,                            // Un frame cada N segundos, en TODO el video (defecto: 10)
+    maximo: null,                        // Opcional: tope de frames; reparte en vez de cortar (defecto: sin tope)
     validar: validarRut,                 // Opcional. Descarta lecturas que no son un RUT real.
     chequeoEnVivo: true                  // Portero por paso durante la grabación (defecto: true)
   }
@@ -131,8 +132,11 @@ export default {
 Valores por defecto reales (`src/configurar.mjs`): video `1600x1000` a 25 fps,
 `pausaMinima 350 ms`, `msCursor 260 ms`, sin presentación; voz Kokoro `ef_dora` a
 velocidad `1.25` con Piper de respaldo; guiones en `./demo/guiones` y salida en
-`./docs/manual`; auditoría cada 10 s hasta 20 frames, con el chequeo en vivo **encendido** y
-**sin** endpoint OCR (ese hay que declararlo).
+`./docs/manual`; auditoría de un frame cada 10 s **en todo el video** (sin tope; ver docs/AUDITORIA.md,
+"Política de muestreo"), con el chequeo en vivo **encendido**, **sin** endpoint OCR (ese hay
+que declararlo) y **sin** `auditoria.token`: si el OCR exige credencial (el del ecosistema
+contesta 401 sin ella), exportar `DEMO_OCR_TOKEN` y declarar
+`token: process.env.DEMO_OCR_TOKEN`; viaja en el header `X-Service-Token` y nunca se loguea.
 
 **Ojo con los selectores por defecto en paneles Filament (5 + Livewire 4):** los ejemplos de
 arriba (`input[name=email]`, `input[type=password]`) son genéricos y sirven para un form HTML
