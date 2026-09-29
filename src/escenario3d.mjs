@@ -23,8 +23,8 @@ async function enEscena(paso, accion) {
         const motivo = String(error?.message ?? error).split('\n')[0]
             .replace(/^page\.evaluate:\s*(Error:\s*)?/, '');
         throw new Error(`transición 3D: no se pudo ${paso}. ${motivo}. Si el navegador no `
-            + 'decodifica el MP4 (p. ej. un Chromium sin H.264), desactivá '
-            + '`video.presentacion.transicion3d.activa` o instalá el Chromium de Playwright.',
+            + 'decodifica el MP4 (p. ej. un Chromium sin H.264), desactiva '
+            + '`video.presentacion.transicion3d.activa` o instala el Chromium de Playwright.',
         { cause: error });
     }
 }
