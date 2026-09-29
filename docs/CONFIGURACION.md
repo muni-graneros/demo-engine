@@ -97,7 +97,21 @@ export default {
                                 // sobre lo que dejó la primera —casos ya resueltos que no
                                 // muestran sus botones, filas acumuladas— y cada síntoma parece
                                 // un selector roto cuando en realidad es el estado.
+                                // También puede ser una función `({ escena, guion }) => string`:
+                                // `demo vivo` la llama con la escena de cada capítulo; grabar,
+                                // curso y preparar la llaman sin escena (decide el defecto).
   limpiar: 'npm run clean',     // Después de todo
+
+  // Demo en vivo (`demo vivo`, ver README «Demo en vivo»). Opcional; no afecta la grabación.
+  vivo: {
+    pantalla: { x: 0, y: 0, ancho: 1920, alto: 1080 },  // zona del proyector para las ventanas
+    puerto: 8190,               // consola del presentador, siempre en 127.0.0.1
+    timeoutPaso: null,          // setDefaultTimeout de cada página (ms), si se declara
+    velocidad: 1,               // ritmo del cursor falso (0.8 = más lento)
+    clips: null,                // modo seguro: (guion) => ruta, o plantillas con {guion}
+    reproductor: null,          // comando para el clip (defecto: `mpv --fs`, si no `xdg-open`)
+    permitirHosts: [],          // hosts extra además de loopback, localhost y *.test
+  },
 
   // Pack de contexto (`demo contexto` y `demo todo`): un screenshot por pantalla declarada.
   // `aislar`/`mostrar` son comandos DEL SISTEMA GRABADO (no del CLI de este repo) que

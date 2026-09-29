@@ -57,6 +57,7 @@ node cli.mjs contexto
 node cli.mjs todo [maestro] # pipeline completo: aislar → pack → curso → manual → restaurar
 node cli.mjs auditar <guion|video>
 node cli.mjs formatos <video.mp4> [--vertical] [--cuadrado]  # 9:16 y 1:1, sin config
+node cli.mjs vivo [maestro] [--desde=ID] [--auto] [--headless]  # demo en vivo (src/vivo/), sin grabar
 ```
 
 Voces: `bash node_modules/demo-engine/herramientas/instalar-voces.sh` (descarga ~670 MB a
