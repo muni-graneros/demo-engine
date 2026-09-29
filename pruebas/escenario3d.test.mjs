@@ -160,10 +160,33 @@ test('un video que Chromium no puede decodificar falla rápido y con motivo, no 
     await assert.rejects(
         renderizarTransicion({ mp4, desdeSeg: 0, salida: dir, presentacion, fps: 25 }),
         (error) => {
-            assert.match(error.message, /transición 3D/);
-            assert.match(error.message, /no pudo cargar el video/);
+            // Según el navegador falla la carga del <video> o, sin H.264, el extracto VP9
+            // (ffmpeg tampoco lo abre): en los dos casos el mensaje dice qué y con qué archivo.
+            assert.match(error.message, /^transición 3D: no se pudo /);
+            assert.ok(error.message.includes(mp4), error.message);
             return true;
         },
     );
     assert.ok(Date.now() - inicio < 30_000, `tardó ${Date.now() - inicio} ms en fallar`);
+});
+
+test('sin H.264 en el navegador, la escena usa un extracto VP9 y el color llega igual', { timeout: 120_000 }, async () => {
+    // El Chromium de algunos contenedores no trae decodificador H.264 (canPlayType('avc1')
+    // vacío) y todos los MP4 del motor son H.264. En vez de fallar, la escena recibe un
+    // extracto VP9 del tramo que necesita. `codecEscena: 'vp9'` fuerza esa ruta para que
+    // también se pruebe donde el navegador sí trae H.264 (el CI).
+    const dir = mkdtempSync(join(tmpdir(), 'demo-3d-vp9-'));
+    const mp4 = join(dir, 'cap.mp4');
+    // Gris solo entre 1 s y 2 s, negro fuera: si el extracto no arrancara en desdeSeg, o si el
+    // tiempo no se contara desde su inicio, la sonda caería en negro.
+    ff(['-y', '-f', 'lavfi', '-i',
+        "color=c=0x808080:s=640x400:d=3,drawbox=c=black:t=fill:enable='not(between(t,1,1.99))'",
+        '-c:v', 'libx264', '-pix_fmt', 'yuv420p', mp4]);
+
+    const clip = await renderizarTransicion({
+        mp4, desdeSeg: 1, salida: dir, presentacion, fps: 25, codecEscena: 'vp9',
+    });
+    assert.ok(Math.abs(duracion(clip) - 0.4) < 0.12, `duración ${duracion(clip)}`);
+    const p = pixel(clip, 240, 135, 0.36);
+    p.forEach((c) => assert.ok(Math.abs(c - 128) <= 12, `rgb medido ${p}, esperado ~128`));
 });
