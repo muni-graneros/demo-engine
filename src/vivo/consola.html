@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consola del presentador</title>
+<style>
+  :root {
+    --fondo: #0b1220; --panel: #111a2e; --borde: #334155; --texto: #f1f5f9; --tenue: #a8b3c4;
+    --acento: #fbbf24; --peligro: #fca5a5; --peligro-fondo: #450a0a; --ok: #86efac; --foco: #fbbf24;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--fondo); color: var(--texto); font: 16px/1.45 system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 1.1rem; margin: 0; color: var(--tenue); font-weight: 600; }
+  #capitulo { font-size: 1.35rem; margin: 0; }
+  .chips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .chip { border: 1px solid var(--borde); border-radius: 999px; padding: 2px 10px; font-size: .9rem; color: var(--tenue); }
+  .chip[data-activo="true"] { color: #0b1220; background: var(--acento); border-color: var(--acento); font-weight: 700; }
+  section { background: var(--panel); border: 1px solid var(--borde); border-radius: 12px; padding: 16px; }
+  #prompter { font-size: clamp(1.5rem, 3.2vw, 2.4rem); line-height: 1.3; margin: 0; min-height: 3.5em; }
+  #despues { font-size: 1.1rem; color: var(--tenue); margin: 12px 0 0; }
+  #meta { color: var(--tenue); margin: 0 0 8px; font-size: .95rem; }
+  #fallo { display: none; background: var(--peligro-fondo); border-color: var(--peligro); color: var(--peligro); }
+  #fallo[data-visible="true"] { display: block; }
+  #fallo pre { white-space: pre-wrap; margin: 8px 0 0; font-size: .95rem; color: var(--texto); }
+  .botones { display: flex; flex-wrap: wrap; gap: 8px; }
+  button, select { font: inherit; color: var(--texto); background: #1e293b; border: 1px solid var(--borde);
+    border-radius: 8px; padding: 10px 14px; min-height: 44px; cursor: pointer; }
+  button.principal { background: #1d4ed8; border-color: #3b82f6; font-weight: 700; }
+  button.peligro { border-color: var(--peligro); }
+  button:hover { filter: brightness(1.15); }
+  button:focus-visible, select:focus-visible { outline: 3px solid var(--foco); outline-offset: 2px; }
+  kbd { font: .8rem ui-monospace, monospace; border: 1px solid var(--borde); border-radius: 4px; padding: 0 4px; margin-left: 6px; color: var(--tenue); }
+  #aviso { min-height: 1.5em; color: var(--acento); margin: 0; }
+  .fila { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  label { color: var(--tenue); }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  @media (prefers-reduced-motion: no-preference) { button { transition: filter .1s; } }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>Consola del presentador · demo en vivo</h1>
+      <p id="capitulo">Conectando…</p>
+    </div>
+    <div class="chips" aria-label="Estado">
+      <span class="chip" id="fase">—</span>
+      <span class="chip" id="pausa" data-activo="false">En curso</span>
+      <span class="chip" id="negro" data-activo="false">Pantalla visible</span>
+      <span class="chip" id="reloj" title="Hora que muestra el sistema en pantalla">--:--</span>
+    </div>
+  </header>
+
+  <section aria-labelledby="t-prompter">
+    <h2 id="t-prompter" class="sr">Teleprompter</h2>
+    <p id="meta"></p>
+    <p id="prompter" aria-live="polite"></p>
+    <p id="despues"></p>
+  </section>
+
+  <section id="fallo" role="alert" data-visible="false">
+    <strong>El paso falló.</strong> La ventana del actor quedó tapada. Reintenta, sáltalo, reinicia el capítulo o pasa al clip grabado.
+    <pre id="error"></pre>
+  </section>
+
+  <section aria-labelledby="t-controles">
+    <h2 id="t-controles" class="sr">Controles</h2>
+    <div class="botones">
+      <button class="principal" data-orden="siguiente">Siguiente paso<kbd>→</kbd><kbd>PgDn</kbd><kbd>Espacio</kbd></button>
+      <button data-orden="pausa" id="b-pausa" aria-pressed="false">Pausa<kbd>P</kbd></button>
+      <button data-orden="reintentar">Reintentar paso<kbd>R</kbd><kbd>←</kbd></button>
+      <button data-orden="saltar">Saltar paso<kbd>S</kbd></button>
+      <button data-orden="reiniciar">Reiniciar capítulo<kbd>I</kbd></button>
+      <button data-orden="seguro">Modo seguro: clip grabado<kbd>C</kbd></button>
+      <button data-orden="negro" id="b-negro" aria-pressed="false">Pantalla negra<kbd>B</kbd></button>
+    </div>
+  </section>
+
+  <section aria-labelledby="t-capitulos">
+    <h2 id="t-capitulos" style="font-size:1rem;margin:0 0 8px">Capítulos</h2>
+    <div class="fila">
+      <label for="lista">Ir a</label>
+      <select id="lista"></select>
+      <button id="ir">Ir al capítulo</button>
+      <button class="peligro" id="salir">Terminar la demo</button>
+    </div>
+  </section>
+
+  <p id="aviso" role="status" aria-live="polite"></p>
+</main>
+<script>
+  const TECLAS = /*TECLAS*/{};
+  const $ = (id) => document.getElementById(id);
+  const FASES = { preparando: 'Preparando', sembrando: 'Sembrando datos', esperando: 'Listo: esperando', actuando: 'Actuando…',
+    fallo: 'Falló el paso', clip: 'Modo seguro', fin: 'Fin' };
+  let estado = null;
+
+  async function mandar(orden) {
+    try {
+      const r = await fetch('/orden', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(orden) });
+      const j = await r.json();
+      if (!j.aceptada) $('aviso').textContent = j.mensaje;
+    } catch (e) { $('aviso').textContent = 'Sin conexión con el motor: ' + e.message; }
+  }
+
+  document.querySelectorAll('button[data-orden]').forEach((b) => b.addEventListener('click', () => mandar({ tipo: b.dataset.orden })));
+  $('ir').addEventListener('click', () => mandar({ tipo: 'ir', valor: Number($('lista').value) }));
+  $('salir').addEventListener('click', () => { if (confirm('¿Terminar la demo y cerrar las ventanas?')) mandar({ tipo: 'salir' }); });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.altKey || e.ctrlKey || e.metaKey) return;
+    // En el menú de capítulos las flechas y el espacio son del menú, no del clicker.
+    if (e.target instanceof HTMLSelectElement) return;
+    let orden = null;
+    if (/^[1-9]$/.test(e.key)) orden = { tipo: 'ir', valor: Number(e.key) - 1 };
+    else if (TECLAS[e.key] || TECLAS[e.key.toLowerCase()]) orden = { tipo: TECLAS[e.key] || TECLAS[e.key.toLowerCase()] };
+    if (!orden) return;
+    // Espacio sobre un botón con foco lo activaría además de mandar la orden: se manda una vez.
+    e.preventDefault();
+    mandar(orden);
+  });
+
+  function pintar(e) {
+    estado = e;
+    const cap = e.capitulos[e.capitulo];
+    $('capitulo').textContent = cap ? `Capítulo ${cap.id} · ${cap.titulo}` : 'Demo en vivo';
+    $('fase').textContent = FASES[e.fase] || e.fase;
+    $('pausa').textContent = e.pausado ? 'EN PAUSA' : (e.auto ? 'Automático' : 'Manual');
+    $('pausa').dataset.activo = String(e.pausado);
+    $('b-pausa').setAttribute('aria-pressed', String(e.pausado));
+    $('b-pausa').firstChild.textContent = e.pausado ? 'Reanudar' : 'Pausa';
+    $('negro').textContent = e.negro ? 'PANTALLA NEGRA' : 'Pantalla visible';
+    $('negro').dataset.activo = String(e.negro);
+    $('b-negro').setAttribute('aria-pressed', String(e.negro));
+    if (e.paso) {
+      $('meta').textContent = `Paso ${e.paso.numero} de ${e.paso.total} · ${e.paso.escena} · actor: ${e.paso.actor}${e.paso.superficie ? ' · ' + e.paso.superficie : ''}${e.paso.dividir ? ' · pantalla dividida: ' + e.paso.dividir.join(' + ') : ''}`;
+      $('prompter').textContent = e.paso.narrar || '(Este paso no tiene narración.)';
+    } else {
+      $('meta').textContent = '';
+      $('prompter').textContent = e.fase === 'clip' ? (e.clip ? 'Reproduciendo el clip grabado. Siguiente para continuar.' : '')
+        : e.fase === 'fin' ? 'Fin de la demo.' : (e.narrarCapitulo || '');
+    }
+    $('despues').textContent = e.siguiente ? `Después: ${e.siguiente.narrar || '(sin narración)'}` : '';
+    $('fallo').dataset.visible = String(e.fase === 'fallo');
+    $('error').textContent = e.error || '';
+    $('aviso').textContent = e.aviso || (e.clip ? `Clip: ${e.clip}` : '');
+    const lista = $('lista');
+    if (lista.options.length !== e.capitulos.length) {
+      lista.innerHTML = '';
+      e.capitulos.forEach((c, i) => lista.add(new Option(`${i < 9 ? (i + 1) + ') ' : ''}${c.id} · ${c.titulo}`, String(i))));
+    }
+    if (document.activeElement !== lista && e.capitulo != null) lista.value = String(e.capitulo);
+  }
+
+  setInterval(() => { $('reloj').textContent = new Date().toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' }); }, 1000);
+  const fuente = new EventSource('/eventos');
+  fuente.onmessage = (m) => pintar(JSON.parse(m.data));
+  fuente.onerror = () => { $('aviso').textContent = 'Reconectando con el motor…'; };
+</script>
+</body>
+</html>

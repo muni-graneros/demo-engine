@@ -21,6 +21,7 @@ import { cadenaDeMezcla } from './src/mezcla.mjs';
 import { generarVtt } from './src/subtitulos.mjs';
 import { variante } from './src/formatos.mjs';
 import { sembrarSincronico } from './src/sembrar.mjs';
+import { capitulosDe, vivo } from './src/vivo/index.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -313,6 +314,55 @@ function ejecutarInit() {
     console.log('Siguiente: edita demo.config.mjs y lee demo/CONTEXTO-Y-SEEDER.md; luego `demo preparar` y `demo todo`.');
 }
 
+/**
+ * `demo vivo [maestro|guion] [--desde=ID] [--capitulos=ID,ID] [--auto] [--headless]
+ *            [--puerto=N] [--permitir-host=HOST] [--velocidad=X] [--sin-teclado]`
+ *
+ * Presenta los guiones en vivo, en ventanas reales de Chromium, paso a paso desde la consola
+ * del presentador (src/vivo/). Sin argumento usa el maestro `curso`.
+ */
+async function ejecutarVivo(config, args) {
+    const USO = 'Uso: demo vivo [maestro|guion] [--desde=ID] [--capitulos=ID,ID,…] [--auto] [--headless] '
+        + '[--puerto=N] [--permitir-host=HOST] [--velocidad=X] [--sin-teclado]';
+    const banderas = {};
+    const posicionales = [];
+    for (const a of args) {
+        const m = /^--([a-z-]+)(?:=(.*))?$/.exec(a);
+        if (m) banderas[m[1]] = m[2] ?? true;
+        else posicionales.push(a);
+    }
+    const conocidas = ['desde', 'capitulos', 'auto', 'headless', 'puerto', 'permitir-host', 'velocidad', 'sin-teclado'];
+    const desconocidas = Object.keys(banderas).filter((b) => !conocidas.includes(b));
+    if (desconocidas.length || posicionales.length > 1) {
+        console.log(desconocidas.length ? `Bandera desconocida: --${desconocidas.join(' --')}\n${USO}` : USO);
+        process.exitCode = 1;
+        return;
+    }
+    const id = posicionales[0] ?? 'curso';
+    const archivo = join(config.guiones, `${id}.mjs`);
+    if (!existsSync(archivo)) throw new ErrorConfig(`no encontré el guion o maestro "${id}" (${archivo})`);
+    let capitulos = capitulosDe(await import(pathToFileURL(archivo).href), id);
+    if (typeof banderas.capitulos === 'string') {
+        const pedidos = banderas.capitulos.split(',').map((x) => x.trim()).filter(Boolean);
+        const faltan = pedidos.filter((p) => !capitulos.some((c) => String(c.id) === p));
+        if (faltan.length) throw new ErrorConfig(`--capitulos: no existen ${faltan.join(', ')} en "${id}"`);
+        capitulos = pedidos.map((p) => capitulos.find((c) => String(c.id) === p));
+    }
+    if (banderas.velocidad !== undefined) {
+        const v = Number(banderas.velocidad);
+        if (!(v > 0)) throw new ErrorConfig('--velocidad debe ser un número mayor que cero (0.8 = más lento)');
+        config.vivo = { ...config.vivo, velocidad: v };
+    }
+    const puerto = banderas.puerto !== undefined ? Number(banderas.puerto) : config.vivo.puerto;
+    await vivo({
+        config, capitulos, desde: typeof banderas.desde === 'string' ? banderas.desde : null,
+        headless: Boolean(banderas.headless), auto: Boolean(banderas.auto), puerto,
+        teclado: !banderas['sin-teclado'],
+        permitirHosts: typeof banderas['permitir-host'] === 'string' ? banderas['permitir-host'].split(',') : [],
+        dirSesiones: join(raiz, '.sesiones'),
+    });
+}
+
 async function main() {
     // `init` corre ANTES de cargar la config: justamente sirve para crearla.
     if (orden === 'init') {
@@ -322,6 +372,11 @@ async function main() {
         return ejecutarFormatos(process.argv.slice(3));
     }
     const config = await cargarConfig(raiz);
+    // La demo en vivo no sintetiza voz (narra el presentador): no se crea el motor de voz,
+    // que además avisaría por stderr de modelos que acá no hacen falta.
+    if (orden === 'vivo') {
+        return ejecutarVivo(config, process.argv.slice(3));
+    }
     const voz = crearVoz(config.voz);
     try {
         return await ejecutarOrden(config, voz);
@@ -477,7 +532,7 @@ async function ejecutarOrden(config, voz) {
         return;
     }
 
-    console.log('Uso: demo <init|preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>|formatos <video> [--vertical] [--cuadrado]>');
+    console.log('Uso: demo <init|preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>|formatos <video> [--vertical] [--cuadrado]|vivo [maestro|guion] [--desde=ID] [--auto] [--headless]>');
     process.exitCode = 1;
 }
 

@@ -14,3 +14,12 @@ export {
 } from './privacidad.mjs';
 export { auditarVideo, auditarCapturas, muestrearFrames, contarIdentificadores, exigirAuditoriaConfigurada } from './auditoria.mjs';
 export { instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara } from './camara.mjs';
+export { ejecutarGuion, Interrupcion, pasosEnOrden } from './ejecutor.mjs';
+export { vivo, capitulosDe, buscarClip, exigirEntornoEnVivo, disposicionVentanas } from './vivo/index.mjs';
+export { comandoDeSembrado } from './sembrar.mjs';
+
+/**
+ * Lo que sabe hacer esta versión del motor, para que un sistema pueda adaptarse sin mirar
+ * números de versión (p. ej. declarar `sembrar` como función solo si el motor la entiende).
+ */
+export const CAPACIDADES = Object.freeze(['sembrar-funcion', 'vivo']);
