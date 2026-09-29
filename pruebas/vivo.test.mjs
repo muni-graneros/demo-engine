@@ -22,7 +22,7 @@ const DEV = { DEMO_ENTORNO: 'local' };
 
 test('guardián en vivo: solo loopback, localhost y *.test, y además el entorno declarado', () => {
     const cfg = (baseURL, actores = {}) => ({ baseURL, actores });
-    for (const url of ['http://127.0.0.1:8071', 'http://localhost:8071', 'http://seguridad.test']) {
+    for (const url of ['http://127.0.0.1:8071', 'http://localhost:8071', 'http://seguridad.test', 'http://[::1]:8071']) {
         assert.doesNotThrow(() => exigirEntornoEnVivo(cfg(url), { env: DEV }), url);
     }
     // Una IP privada pasa el guardián de grabación, pero en la red municipal puede ser producción.

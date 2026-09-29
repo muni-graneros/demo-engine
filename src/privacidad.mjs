@@ -13,7 +13,10 @@ const ENTORNOS_DE_DESARROLLO = ['local', 'testing', 'development'];
  * «es desarrollo» —eso lo decide la declaración explícita, ver abajo—, solo descarta lo
  * que con certeza es público. Se usa únicamente para NEGAR, nunca para permitir.
  */
-function hostNoPublico(host) {
+function hostNoPublico(hostname) {
+    // `URL.hostname` entrega una IPv6 entre corchetes («[::1]»): sin quitarlos, el loopback
+    // IPv6 nunca coincidía y se rechazaba como si fuera público.
+    const host = hostname.replace(/^\[(.*)\]$/, '$1');
     return host === 'localhost' || host === '::1' || host.endsWith('.lan') ||
         host.endsWith('.local') || host.endsWith('.test') ||
         /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
