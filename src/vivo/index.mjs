@@ -202,9 +202,14 @@ export async function vivo({
     }
 
     async function modoSeguro(cap) {
-        const { encontrado, buscados } = cap.fuente === 'video'
-            ? { encontrado: join(config.raiz ?? process.cwd(), cap.archivo), buscados: [cap.archivo] }
-            : buscarClip(config, cap.guion);
+        let encontrado;
+        let buscados;
+        if (cap.fuente === 'video') {
+            const ruta = isAbsolute(cap.archivo) ? cap.archivo : join(config.raiz ?? process.cwd(), cap.archivo);
+            [encontrado, buscados] = [existsSync(ruta) ? ruta : null, [ruta]];
+        } else {
+            ({ encontrado, buscados } = buscarClip(config, cap.guion));
+        }
         clipEnCurso?.detener();
         clipEnCurso = encontrado && reproducir ? reproducir(encontrado) : null;
         control.actualizar({
