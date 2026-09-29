@@ -354,7 +354,18 @@ async function ejecutarVivo(config, args) {
         config.vivo = { ...config.vivo, velocidad: v };
     }
     const puerto = banderas.puerto !== undefined ? Number(banderas.puerto) : config.vivo.puerto;
+    // Ctrl+C (sin TTY) o un SIGTERM: se pide «salir», que se atiende en el próximo punto de
+    // espera y cierra navegador y consola en orden; si un paso no suelta, se corta a los 5 s.
+    let controlVivo = null;
+    const alSenal = () => {
+        if (!controlVivo) process.exit(130);
+        controlVivo.orden({ tipo: 'salir' });
+        setTimeout(() => process.exit(130), 5000).unref();
+    };
+    process.once('SIGINT', alSenal);
+    process.once('SIGTERM', alSenal);
     await vivo({
+        alListo: ({ control }) => { controlVivo = control; },
         config, capitulos, desde: typeof banderas.desde === 'string' ? banderas.desde : null,
         headless: Boolean(banderas.headless), auto: Boolean(banderas.auto), puerto,
         teclado: !banderas['sin-teclado'],
