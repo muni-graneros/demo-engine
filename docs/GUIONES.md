@@ -293,6 +293,13 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `moverCursorA(page, selector) → Promise<void>` (mueve con easing)
 - `pulsar(page, selector, { alPintar? }) → Promise<void>` (mueve, halo, clic)
 - `acercarA(page, selector, { escala? }) → Promise<void>` (zoom sobre elemento, escala defecto: 1.6)
+  — deja el elemento centrado en pantalla también en paneles con barras fijas y contenido que
+    se desplaza dentro de un contenedor propio (Filament 5 SPA) y en layouts de alto fijo (una
+    sala React): primero lo centra dentro de sus contenedores con scroll (sin restaurarlos al
+    `alejar`) y después desplaza el viewport visual. Si la raíz tiene overflow hidden/clip, el
+    documento no se mueve (sin franja vacía); un elemento pegado al borde queda lo más cerca
+    posible del centro sin mostrar nada fuera de la página. Desde v1.14.1 ya no hacen falta
+    ayudantes propios tipo `enfocar`/`soltar` para esto.
 - `alejar(page) → Promise<void>` (vuelve al zoom 1:1)
 
 ### Portadas

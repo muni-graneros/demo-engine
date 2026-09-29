@@ -215,3 +215,119 @@ test('pulsar sin nadie registrado con alClicar funciona igual que siempre', asyn
         await page.waitForURL(/\/panel/);
     });
 });
+
+// acercarA en layouts reales (v1.14.1). Defecto: el zoom se hacía con
+// Emulation.setPageScaleFactor + window.scrollTo, pero en Chromium window.scrollTo mueve SOLO
+// el viewport de layout (el visual es "inerte"): con escala > 1 el viewport visual nunca se
+// desplazaba y quedaba anclado arriba a la izquierda. En una página simple parecía funcionar
+// porque el documento sí se desplazaba en vertical; en un panel con contenedor de scroll
+// propio o en una sala de alto fijo, el objetivo quedaba fuera de cuadro.
+
+/** Centro del objetivo en PANTALLA (lo que se ve en el video), desde la geometría del DOM. */
+async function centroEnPantalla(page, selector) {
+    return page.evaluate((sel) => {
+        const r = document.querySelector(sel).getBoundingClientRect();
+        const vv = window.visualViewport;
+        return {
+            x: (r.x + r.width / 2 - vv.offsetLeft) * vv.scale,
+            y: (r.y + r.height / 2 - vv.offsetTop) * vv.scale,
+            ancho: innerWidth, alto: innerHeight, escala: vv.scale, scrollY,
+        };
+    }, selector);
+}
+
+/** Centro de los píxeles magenta (#ff00ff) de una captura, decodificada en un canvas. */
+async function centroMagenta(navegador, png) {
+    const lienzo = await navegador.newPage();
+    try {
+        return await lienzo.evaluate(async (b64) => {
+            const img = new Image();
+            img.src = `data:image/png;base64,${b64}`;
+            await img.decode();
+            const c = document.createElement('canvas');
+            c.width = img.width; c.height = img.height;
+            const ctx = c.getContext('2d');
+            ctx.drawImage(img, 0, 0);
+            const { data } = ctx.getImageData(0, 0, c.width, c.height);
+            let sx = 0, sy = 0, n = 0;
+            for (let i = 0; i < data.length; i += 4) {
+                if (data[i] > 240 && data[i + 1] < 20 && data[i + 2] > 240) {
+                    const p = i / 4;
+                    sx += p % c.width; sy += Math.floor(p / c.width); n++;
+                }
+            }
+            return n ? { x: sx / n, y: sy / n, n, ancho: c.width, alto: c.height } : null;
+        }, png.toString('base64'));
+    } finally {
+        await lienzo.close();
+    }
+}
+
+async function conPaginaDeCamara(ruta, fn) {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const navegador = await chromium.launch();
+    const page = await navegador.newPage();
+    try {
+        await page.goto(`${juguete.url}${ruta}`);
+        await instalarCursor(page);
+        await fn(page, navegador);
+    } finally {
+        await navegador.close();
+        await juguete.cerrar();
+    }
+}
+
+async function exigirCentrado(page, navegador) {
+    const dom = await centroEnPantalla(page, '#objetivo');
+    assert.ok(Math.abs(dom.escala - 1.6) < 0.05, `la escala no subió: ${dom.escala}`);
+    assert.ok(Math.abs(dom.x - dom.ancho / 2) < 20, `x del objetivo en pantalla ${dom.x}, centro ${dom.ancho / 2}`);
+    assert.ok(Math.abs(dom.y - dom.alto / 2) < 20, `y del objetivo en pantalla ${dom.y}, centro ${dom.alto / 2}`);
+
+    const pixeles = await centroMagenta(navegador, await page.screenshot());
+    assert.ok(pixeles, 'el objetivo (magenta) no aparece en la captura: quedó fuera de cuadro');
+    assert.ok(Math.abs(pixeles.x - pixeles.ancho / 2) < 20, `por píxel, x ${pixeles.x} vs centro ${pixeles.ancho / 2}`);
+    assert.ok(Math.abs(pixeles.y - pixeles.alto / 2) < 20, `por píxel, y ${pixeles.y} vs centro ${pixeles.alto / 2}`);
+    return dom;
+}
+
+test('acercarA centra el objetivo en un panel cuyo contenido se desplaza dentro de un contenedor (tipo Filament)', async () => {
+    await conPaginaDeCamara('/camara/contenedor', async (page, navegador) => {
+        await acercarA(page, '#objetivo', { escala: 1.6 });
+        await exigirCentrado(page, navegador);
+
+        await alejar(page);
+        const despues = await centroEnPantalla(page, '#objetivo');
+        assert.ok(Math.abs(despues.escala - 1) < 0.05, `alejar debe volver a escala 1: ${despues.escala}`);
+    });
+});
+
+test('acercarA centra el objetivo en una sala de alto fijo sin desplazar el documento (sin franja vacía)', async () => {
+    await conPaginaDeCamara('/camara/fija', async (page, navegador) => {
+        await acercarA(page, '#objetivo', { escala: 1.6 });
+        const dom = await exigirCentrado(page, navegador);
+        assert.equal(dom.scrollY, 0,
+            'el documento de una sala de alto fijo no debe desplazarse: correrlo deja una franja vacía abajo');
+
+        await alejar(page);
+        const despues = await centroEnPantalla(page, '#objetivo');
+        assert.ok(Math.abs(despues.escala - 1) < 0.05);
+        assert.equal(despues.scrollY, 0);
+    });
+});
+
+test('acercarA en una página simple que se desplaza también centra en horizontal (no solo en vertical)', async () => {
+    await conPagina(async (page) => {
+        await page.setContent(`<!doctype html><html><body style="margin:0;height:3000px">
+            <button id="objetivo" style="position:absolute;left:760px;top:1400px;width:120px;height:60px;background:#ff00ff;border:0">Ir</button>
+        </body></html>`);
+        await instalarCursor(page);
+        const scrollAntes = await page.evaluate(() => scrollY);
+        await acercarA(page, '#objetivo', { escala: 1.6 });
+        const dom = await centroEnPantalla(page, '#objetivo');
+        assert.ok(Math.abs(dom.x - dom.ancho / 2) < 20, `x ${dom.x} vs ${dom.ancho / 2}`);
+        assert.ok(Math.abs(dom.y - dom.alto / 2) < 20, `y ${dom.y} vs ${dom.alto / 2}`);
+
+        await alejar(page);
+        assert.equal(await page.evaluate(() => scrollY), scrollAntes,'alejar restaura el desplazamiento original');
+    });
+});

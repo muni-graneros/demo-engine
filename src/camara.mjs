@@ -134,6 +134,48 @@ async function sesionDe(page) {
     return sesion;
 }
 
+/**
+ * Deja el viewport VISUAL centrado en `punto` (coordenadas de documento), a la escala actual.
+ *
+ * Por qué no `window.scrollTo`: en Chromium el viewport visual es "inerte" para la página —
+ * `scrollTo` mueve SOLO el viewport de layout—, así que con escala > 1 el visual nunca se
+ * desplazaba y el zoom quedaba anclado arriba a la izquierda. En una página que se desplaza
+ * en vertical parecía andar (el layout sí bajaba), pero en un panel con barras fijas y el
+ * contenido dentro de un contenedor de scroll propio (Filament 5 SPA), o en una sala de alto
+ * fijo, el objetivo quedaba fuera de cuadro. `scrollIntoView` sí desplaza el viewport visual
+ * (primero el visual y después, si hace falta, el de layout), así que se centra un marcador
+ * de 1 px puesto en `punto` y se quita en el acto.
+ *
+ * En un eje donde el documento NO debe desplazarse (overflow hidden/clip en la raíz, o un
+ * objetivo dentro de algo `position: fixed`, que viaja con el viewport de layout) el punto se
+ * limita a lo alcanzable moviendo solo el visual dentro del layout actual: una sala de alto
+ * fijo con contenido sobrante debajo se correría hacia arriba y dejaría media pantalla en
+ * blanco. Si el objetivo está tan al borde que no cabe centrado, queda lo más cerca posible
+ * del centro, sin mostrar nada fuera de la página.
+ */
+async function centrarVista(page, punto) {
+    await page.evaluate(({ x, y, libreX, libreY }) => {
+        const vv = window.visualViewport;
+        const raiz = document.documentElement;
+        const limitar = (v, min, max) => (min > max ? (min + max) / 2 : Math.min(max, Math.max(min, v)));
+        const cx = libreX ? x : limitar(x, scrollX + vv.width / 2, scrollX + raiz.clientWidth - vv.width / 2);
+        const cy = libreY ? y : limitar(y, scrollY + vv.height / 2, scrollY + raiz.clientHeight - vv.height / 2);
+        const marca = document.createElement('div');
+        marca.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:1px;height:1px;`
+            + 'margin:0;padding:0;border:0;visibility:hidden;pointer-events:none';
+        const antes = { x: scrollX, y: scrollY };
+        raiz.appendChild(marca);
+        marca.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+        marca.remove();
+        // Aun con el punto limitado, el redondeo subpíxel del visual puede empujar el layout
+        // un par de px: en un eje que no debe desplazarse se devuelve a donde estaba (esto
+        // mueve solo el layout; el visual conserva su posición relativa).
+        if ((!libreX && scrollX !== antes.x) || (!libreY && scrollY !== antes.y)) {
+            window.scrollTo({ left: libreX ? scrollX : antes.x, top: libreY ? scrollY : antes.y, behavior: 'instant' });
+        }
+    }, punto);
+}
+
 /** Recorre la escala del viewport visual en pasos pequeños para que el zoom se vea como un
  * acercamiento suave y no como un salto. Si se entrega `punto`, lo mantiene centrado en
  * cada paso (recentrar solo al final se vería como un tirón). */
@@ -141,12 +183,7 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
     for (let i = 1; i <= PASOS_ZOOM; i++) {
         const escala = desde + (hasta - desde) * (i / PASOS_ZOOM);
         await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: escala });
-        if (punto) {
-            await page.evaluate(({ x, y }) => {
-                const vv = window.visualViewport;
-                window.scrollTo(x - vv.width / 2, y - vv.height / 2);
-            }, punto);
-        }
+        if (punto) await centrarVista(page, punto);
         await page.waitForTimeout(MS_ZOOM / PASOS_ZOOM);
     }
 }
@@ -159,19 +196,62 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
  * la raíz en bloque contenedor de todo lo `position: fixed`, así que una barra lateral o
  * superior fija —como las de un panel Filament— se desancla del viewport en vez de quedar
  * a la vista. El zoom vía CDP deja el layout intacto: los elementos fijos siguen fijos.
+ *
+ * Antes de acercar, el elemento se centra dentro de cada contenedor con scroll propio que lo
+ * contenga (la lista de un panel, la columna de una sala), moviendo SOLO esos contenedores:
+ * es lo que haría una persona para mostrarlo, y sin eso el objetivo puede estar fuera de
+ * cuadro aunque la cámara apunte bien. Esos contenedores no se restauran al `alejar`
+ * (restaurarlos daría un salto en el video sin nada que contar); el documento sí.
  */
 export async function acercarA(page, selector, { escala = 1.6 } = {}) {
     // la hoja de estilos del cursor viaja con la cámara
     await instalarCursor(page);
-    const { x, y } = await centroDe(page, selector);
+    // centroDe falla con un mensaje claro si el objetivo no existe
+    await centroDe(page, selector);
     const sesion = await sesionDe(page);
     // se guarda el desplazamiento original solo la primera vez: si ya estábamos con zoom
     // (dos acercarA seguidos sin alejar), no hay que perder el punto de partida real.
     if (!sesion.origen) {
         sesion.origen = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
     }
+    const punto = await localizadorDe(page, selector).evaluate((el) => {
+        const desplaza = (v) => /(auto|scroll)/.test(v);
+        for (let padre = el.parentElement; padre && padre !== document.body && padre !== document.documentElement;
+            padre = padre.parentElement) {
+            const estilo = getComputedStyle(padre);
+            const enY = desplaza(estilo.overflowY) && padre.scrollHeight > padre.clientHeight;
+            const enX = desplaza(estilo.overflowX) && padre.scrollWidth > padre.clientWidth;
+            if (!enY && !enX) continue;
+            const caja = el.getBoundingClientRect();
+            const marco = padre.getBoundingClientRect();
+            padre.scrollTo({
+                top: padre.scrollTop + (enY ? (caja.top + caja.height / 2) - (marco.top + padre.clientTop + padre.clientHeight / 2) : 0),
+                left: padre.scrollLeft + (enX ? (caja.left + caja.width / 2) - (marco.left + padre.clientLeft + padre.clientWidth / 2) : 0),
+                behavior: 'instant',
+            });
+        }
+        let fijo = false;
+        for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
+            if (getComputedStyle(n).position === 'fixed') { fijo = true; break; }
+        }
+        // overflow de la raíz: el de <html>, o el de <body> si <html> lo deja en visible
+        // (el navegador propaga el de body al viewport en ese caso).
+        const raiz = getComputedStyle(document.documentElement);
+        const cuerpo = document.body ? getComputedStyle(document.body) : raiz;
+        const libre = (eje) => {
+            const v = raiz[eje] !== 'visible' ? raiz[eje] : cuerpo[eje];
+            return !fijo && !/(hidden|clip)/.test(v);
+        };
+        const r = el.getBoundingClientRect();
+        return {
+            x: r.left + r.width / 2 + window.scrollX,
+            y: r.top + r.height / 2 + window.scrollY,
+            libreX: libre('overflowX'),
+            libreY: libre('overflowY'),
+        };
+    });
     const escalaActual = await page.evaluate(() => window.visualViewport.scale);
-    await animarEscala(page, sesion.cdp, escalaActual, escala, { x, y });
+    await animarEscala(page, sesion.cdp, escalaActual, escala, punto);
 }
 
 /** Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento. */

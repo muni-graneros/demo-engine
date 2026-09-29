@@ -128,6 +128,43 @@ function paginaDetalle(rut) {
     <button id="aprobar">Aprobar</button>`);
 }
 
+// Pantallas para la cámara (`acercarA`), sin sesión: reproducen los dos layouts reales donde
+// el zoom no centraba. El objetivo es un bloque magenta macizo para poder ubicarlo también
+// por píxel en una captura, no solo por geometría del DOM.
+const OBJETIVO_CAMARA = 'width:120px;height:60px;background:#ff00ff;border:0;color:#ff00ff';
+
+// Panel tipo Filament 5 en modo SPA: barra lateral y superior fijas, y el contenido se
+// desplaza DENTRO de un contenedor propio; el documento en sí no se desplaza.
+function paginaCamaraContenedor() {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Contenedor</title></head>
+    <body style="margin:0;height:100vh;overflow:hidden;background:#fff">
+      <aside style="position:fixed;left:0;top:0;width:200px;height:100vh;background:#111"></aside>
+      <header style="position:fixed;left:200px;right:0;top:0;height:60px;background:#ccc"></header>
+      <main id="contenido" style="position:fixed;left:200px;right:0;top:60px;bottom:0;overflow:auto">
+        <div style="position:relative;height:3000px">
+          <button id="objetivo" style="position:absolute;left:500px;top:1800px;${OBJETIVO_CAMARA}">Aprobar</button>
+        </div>
+      </main>
+    </body></html>`;
+}
+
+// Sala de operaciones tipo React: aplicación de alto fijo (100vh) que no se desplaza. La
+// trampa: bajo la aplicación queda contenido extra, así que el documento SÍ es desplazable
+// por programa aunque tenga overflow:hidden; si la cámara lo desplaza, la sala se corre
+// hacia arriba y deja una franja vacía abajo (el defecto real).
+function paginaCamaraFija() {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>Sala</title></head>
+    <body style="margin:0;overflow:hidden;background:#fff">
+      <div id="app" style="height:100vh;display:grid;grid-template-columns:1fr 1fr;background:#eef">
+        <section style="background:#dde"></section>
+        <section style="position:relative;background:#fed">
+          <button id="objetivo" style="position:absolute;left:150px;top:440px;${OBJETIVO_CAMARA}">Pánico</button>
+        </section>
+      </div>
+      <div style="height:600px"></div>
+    </body></html>`;
+}
+
 /** Lee un cuerpo `application/x-www-form-urlencoded` y lo entrega como objeto. */
 function leerCuerpo(req, seguir) {
     let crudo = '';
@@ -212,6 +249,8 @@ export function iniciarJuguete({ puerto = 0 } = {}) {
             if (conSesion) { res.writeHead(302, { location: '/portal/panel' }); return res.end(); }
             return html(paginaPortal());
         }
+        if (url.pathname === '/camara/contenedor') return html(paginaCamaraContenedor());
+        if (url.pathname === '/camara/fija') return html(paginaCamaraFija());
         if (url.pathname === '/portal/panel') return html(marco('Portal', '<h1 id="portal-ok">Portal ciudadano</h1>'));
         if (url.pathname === '/codigo' && req.method === 'GET') return html(paginaCodigo());
         if (url.pathname === '/codigo' && req.method === 'POST') {
