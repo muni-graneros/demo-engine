@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
-import { actorConSesion, opcionesDeContexto } from './contexto-actor.mjs';
+import { actorConSesion, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
 
 /**
  * Captura el "pack de contexto" de un sistema: un screenshot por pantalla declarada, para
@@ -48,7 +48,7 @@ export async function capturarContexto({ config, sesiones, salida }) {
     const ancho = config.video?.ancho ?? 1600;
     const alto = config.video?.alto ?? 1000;
 
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     const paginas = new Map(); // clave de actor → { page, baseURL } (una por actor, reutilizada)
 
     const paginaDe = async (actor) => {

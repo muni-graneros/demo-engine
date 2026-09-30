@@ -416,3 +416,79 @@ test('el color de una superficie se valida como hexadecimal al cargar la config'
     const c = await cargarConfig(con('#ABC'));
     assert.equal(c.superficies.s.color, '#aabbcc');
 });
+
+// C2, C9, D96 (1.15): bloques nuevos, todos opcionales y con defecto.
+import { generarVtt } from '../src/subtitulos.mjs';
+
+test('subtitulos: por defecto parte en 2 líneas de 42; se puede apagar o cambiar, y se valida', async () => {
+    const largo = 'Una locución larga de verdad que no cabe en una sola línea de subtítulo. Y otra frase más.';
+    const cfg = await cargarConfig(proyecto(minima));
+    assert.deepEqual(cfg.subtitulos, { partir: true, ancho: 42, lineas: 2 });
+    assert.ok((generarVtt([{ inicioSeg: 0, finSeg: 5, narrar: largo }]).match(/-->/g) ?? []).length > 1);
+
+    const apagado = await cargarConfig(proyecto({ ...minima, subtitulos: { partir: false } }));
+    assert.equal(apagado.subtitulos.partir, false);
+    assert.equal((generarVtt([{ inicioSeg: 0, finSeg: 5, narrar: largo }]).match(/-->/g) ?? []).length, 1,
+        'cargarConfig aplica la config al generador de subtítulos del proceso');
+
+    await cargarConfig(proyecto(minima)); // vuelve al defecto para el resto de la suite
+    for (const malo of [{ ancho: 0 }, { lineas: 1.5 }, { partir: 'no' }, 'x']) {
+        await assert.rejects(cargarConfig(proyecto({ ...minima, subtitulos: malo })), ErrorConfig, JSON.stringify(malo));
+    }
+});
+
+test('navegador.args: por defecto vacío; acepta banderas de Chromium y rechaza lo que no lo es', async () => {
+    const cfg = await cargarConfig(proyecto(minima));
+    assert.deepEqual(cfg.navegador, { args: [] });
+
+    const reglas = '--host-resolver-rules=MAP seguridad.municipalidadgraneros.cl 127.0.0.1';
+    const con = await cargarConfig(proyecto({ ...minima, navegador: { args: [reglas] } }));
+    assert.deepEqual(con.navegador.args, [reglas]);
+
+    for (const malo of [{ args: '--x' }, { args: ['sin-guiones'] }, { args: [3] }, { args: [''] }]) {
+        await assert.rejects(cargarConfig(proyecto({ ...minima, navegador: malo })), ErrorConfig, JSON.stringify(malo));
+    }
+});
+
+test('tactil: se valida como booleano en superficie y actor, y actorTactil decide por dispositivo si no se declara', async () => {
+    const { actorTactil } = await import('../src/contexto-actor.mjs');
+    const cfg = await cargarConfig(proyecto({
+        ...minima,
+        superficies: {
+            apk: { nombre: 'APK', tipo: 'telefono' },
+            kiosco: { nombre: 'Kiosco', tipo: 'escritorio', tactil: true },
+            web: { nombre: 'Web móvil', tipo: 'telefono', tactil: false },
+        },
+        actores: {
+            funcionario: { email: 'f@x.cl', password: 'password' },
+            patrullero: { sesion: false, dispositivo: 'Pixel 7', superficie: 'apk' },
+            kiosco: { sesion: false, superficie: 'kiosco' },
+            vecina: { sesion: false, dispositivo: 'Pixel 7', superficie: 'web' },
+            forzado: { sesion: false, dispositivo: 'Pixel 7', superficie: 'web', tactil: true },
+        },
+    }));
+    assert.equal(actorTactil(cfg, 'funcionario'), false, 'escritorio sin declarar: flecha, como siempre');
+    assert.equal(actorTactil(cfg, 'patrullero'), true, 'dispositivo táctil sin declarar: toque');
+    assert.equal(actorTactil(cfg, 'kiosco'), true, 'la superficie lo declara');
+    assert.equal(actorTactil(cfg, 'vecina'), false, 'la superficie lo apaga aunque el dispositivo sea táctil');
+    assert.equal(actorTactil(cfg, 'forzado'), true, 'el actor manda sobre su superficie');
+
+    await assert.rejects(cargarConfig(proyecto({ ...minima, superficies: { a: { nombre: 'A', tipo: 'telefono', tactil: 'si' } } })), ErrorConfig);
+    await assert.rejects(cargarConfig(proyecto({ ...minima, actores: { f: { sesion: false, tactil: 1 } } })), ErrorConfig);
+});
+
+test('video.cursorEnCapturas: por defecto true (como siempre) y se valida', async () => {
+    assert.equal((await cargarConfig(proyecto(minima))).video.cursorEnCapturas, true);
+    assert.equal((await cargarConfig(proyecto({ ...minima, video: { cursorEnCapturas: false } }))).video.cursorEnCapturas, false);
+    await assert.rejects(cargarConfig(proyecto({ ...minima, video: { cursorEnCapturas: 'no' } })), ErrorConfig);
+});
+
+test('navegador.args: --host-resolver-rules solo puede mapear a loopback (no desviar el guardián de entorno)', async () => {
+    // El guardián decide por el host de baseURL. Una regla que mande `localhost` (u otro
+    // nombre) a otra máquina lo burlaría: se graba contra lo que diga la regla, no el host.
+    const ok = ['--host-resolver-rules=MAP seguridad.municipalidadgraneros.cl 127.0.0.1:8071, MAP *.graneros.cl localhost, EXCLUDE x.cl'];
+    assert.deepEqual((await cargarConfig(proyecto({ ...minima, navegador: { args: ok } }))).navegador.args, ok);
+    for (const malo of ['--host-resolver-rules=MAP localhost 10.0.0.5', '--host-resolver-rules=MAP * 190.1.2.3', '--host-resolver-rules=REMAP x']) {
+        await assert.rejects(cargarConfig(proyecto({ ...minima, navegador: { args: [malo] } })), ErrorConfig, malo);
+    }
+});

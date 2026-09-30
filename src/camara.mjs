@@ -15,16 +15,44 @@ export function configurarCamara({ msCursor } = {}) {
     if (Number.isFinite(msCursor) && msCursor > 0) MS_MOVIMIENTO = msCursor;
 }
 
+/*
+ * Cursor por página: flecha de ratón (escritorio) o indicador de toque (C9 / G2-38). En una
+ * app táctil la flecha no significa nada —nadie usa ratón en un teléfono— y además tapaba
+ * texto («Salir», «Llegué al lugar»). El toque es un círculo translúcido centrado en el punto,
+ * como el «mostrar toques» de Android. WeakMap por página por la misma razón que AVISOS_CLIC:
+ * los guiones llaman `instalarCursor(page)`/`pulsar(page, …)` sin más, y el modo tiene que
+ * sobrevivir a cada navegación, que se lleva el DOM y obliga a reinstalar.
+ */
+const MODOS_CURSOR = new WeakMap();
+
+/** Elige el cursor de una página: `{ tactil: true }` dibuja el indicador de toque. Lo llama
+ * el grabador por actor (ver `actorTactil`); un guion puede llamarlo a mano para una página
+ * que abra por su cuenta. Se aplica en el próximo `instalarCursor` (lo hacen todas las
+ * funciones de este módulo). */
+export function configurarCursor(page, { tactil = false } = {}) {
+    MODOS_CURSOR.set(page, { tactil: Boolean(tactil) });
+}
+
 /** Dibuja el cursor y el estilo de los halos. Idempotente.
  *
  * El cursor nace OCULTO (opacity:0): sin esto, cada documento nuevo (cada navegación) lo
  * instala visible en (0,0), y ahí se queda a la vista —saltando a la esquina superior
  * izquierda en el video— hasta el próximo `moverCursorA`. `moverCursorA` es quien lo hace
  * visible, justo cuando ya sabe adónde llevarlo.
+ *
+ * `data-tipo` dice cuál se dibuja (`flecha` o `toque`); se actualiza aunque el cursor ya
+ * exista, para que `configurarCursor` valga sin recargar la página. La flecha apunta con su
+ * esquina (el punto es su origen); el toque se centra en el punto con un margen negativo, así
+ * que el `translate` de `moverCursorA` sirve igual para los dos.
  */
 export async function instalarCursor(page) {
-    await page.evaluate((ms) => {
-        if (document.getElementById('__cursor')) return;
+    const tipo = MODOS_CURSOR.get(page)?.tactil ? 'toque' : 'flecha';
+    await page.evaluate(({ ms, tipo }) => {
+        const existente = document.getElementById('__cursor');
+        if (existente) {
+            existente.dataset.tipo = tipo;
+            return;
+        }
         const estilo = document.createElement('style');
         estilo.textContent = `
             #__cursor { position: fixed; top: 0; left: 0; width: 22px; height: 22px; z-index: 2147483646;
@@ -33,16 +61,35 @@ export async function instalarCursor(page) {
                 background: no-repeat center/contain url("data:image/svg+xml;utf8,\
 <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
 <path d='M5 2l14 9-6 1.5L15 20l-3 1-2-7-5 2z' fill='%23fff' stroke='%23111' stroke-width='1.5'/></svg>"); }
+            #__cursor[data-tipo="toque"] { width: 34px; height: 34px; margin: -17px 0 0 -17px; box-sizing: border-box;
+                border-radius: 50%; background: rgba(255,255,255,.35); border: 3px solid rgba(17,17,17,.7);
+                box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 1px 6px rgba(0,0,0,.35); }
             .__halo { position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
                 border: 3px solid #38bdf8; z-index: 2147483645; pointer-events: none;
                 animation: __pulso 600ms ease-out forwards; }
             @keyframes __pulso { from { transform: scale(1); opacity: .9 } to { transform: scale(4); opacity: 0 } }
+            html[data-demo-sin-cursor] #__cursor, html[data-demo-sin-cursor] .__halo { visibility: hidden !important; }
         `;
         document.head.appendChild(estilo);
         const cursor = document.createElement('div');
         cursor.id = '__cursor';
+        cursor.dataset.tipo = tipo;
         document.documentElement.appendChild(cursor);
-    }, MS_MOVIMIENTO);
+    }, { ms: MS_MOVIMIENTO, tipo });
+}
+
+/**
+ * Corre `fn` con el cursor y los halos ocultos, y los devuelve a como estaban (aunque `fn`
+ * falle). Para las capturas fijas que van al manual (`video.cursorEnCapturas: false`): en un
+ * video el cursor dice dónde se toca; en una imagen quieta solo tapa texto.
+ */
+export async function conCursorOculto(page, fn) {
+    await page.evaluate(() => document.documentElement.setAttribute('data-demo-sin-cursor', ''));
+    try {
+        return await fn();
+    } finally {
+        await page.evaluate(() => document.documentElement.removeAttribute('data-demo-sin-cursor')).catch(() => {});
+    }
 }
 
 /** El elemento a mirar: `dentro`, si viene, ACOTADO a `selector` (no un selector suelto de
@@ -161,7 +208,10 @@ async function centrarVista(page, punto) {
         const cx = libreX ? x : limitar(x, scrollX + vv.width / 2, scrollX + raiz.clientWidth - vv.width / 2);
         const cy = libreY ? y : limitar(y, scrollY + vv.height / 2, scrollY + raiz.clientHeight - vv.height / 2);
         const marca = document.createElement('div');
-        marca.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:1px;height:1px;`
+        // El marcador mide 1 px y `scrollIntoView` centra SU centro: se corre medio píxel para
+        // que ese centro caiga justo en el punto. Sin esto, con el punto limitado al borde, el
+        // encuadre se pasaba medio píxel (uno redondeado) y a escala 2 cortaba 2 px del objetivo.
+        marca.style.cssText = `position:absolute;left:${cx - 0.5}px;top:${cy - 0.5}px;width:1px;height:1px;`
             + 'margin:0;padding:0;border:0;visibility:hidden;pointer-events:none';
         const antes = { x: scrollX, y: scrollY };
         raiz.appendChild(marca);
@@ -188,8 +238,33 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
     }
 }
 
+/** Fracción de la pantalla que puede ocupar el objetivo tras el tope de escala: deja un 4 %
+ * de aire por lado para que el borde del elemento no quede pegado al borde del cuadro. Es el
+ * mismo 0,92 que ya usaban los guiones que se topaban la escala a mano. */
+const MARGEN_ENCUADRE = 0.92;
+
+/**
+ * La escala más cercana a la pedida con la que el objetivo entra ENTERO en pantalla, con margen.
+ *
+ * Con la escala fija, un elemento ancho (una franja de ancho completo, el botón de pánico fijo
+ * abajo en un teléfono) quedaba más grande que el cuadro y la cámara lo cortaba justo a él. Solo
+ * se BAJA una escala que cortaba —nunca se sube— y nunca por debajo de 1 (sin zoom): un objetivo
+ * que no cabe ni a escala 1 se muestra como está. Una escala pedida ≤ 1 se respeta tal cual.
+ */
+export function escalaQueCabe(escala, { ancho, alto, vistaAncho, vistaAlto }, margen = MARGEN_ENCUADRE) {
+    if (!(escala > 1) || !(ancho > 0) || !(alto > 0) || !(vistaAncho > 0) || !(vistaAlto > 0)) return escala;
+    const tope = Math.min((margen * vistaAncho) / ancho, (margen * vistaAlto) / alto);
+    return Math.max(1, Math.min(escala, tope));
+}
+
 /**
  * Acerca la vista sobre un elemento, dejándolo centrado.
+ *
+ * `escala` es un MÁXIMO: si a esa escala el objetivo no cabe entero (con `margen`, la fracción
+ * del cuadro que puede ocupar; 0,92 por defecto), se baja lo justo para que quepa (ver
+ * `escalaQueCabe`). `ajustar: false` vuelve al comportamiento anterior a 1.15 (escala exacta,
+ * aunque corte). Cerca de un borde, el encuadre no se centra más allá de la página: se detiene
+ * en el borde del viewport y el objetivo queda entero, descentrado hacia ese lado.
  *
  * Usa el zoom real del navegador (CDP `Emulation.setPageScaleFactor`, el mismo mecanismo
  * del pellizco en el móvil) y NO `transform: scale()` sobre `<html>`. Ese transform convierte
@@ -203,7 +278,7 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
  * cuadro aunque la cámara apunte bien. Esos contenedores no se restauran al `alejar`
  * (restaurarlos daría un salto en el video sin nada que contar); el documento sí.
  */
-export async function acercarA(page, selector, { escala = 1.6 } = {}) {
+export async function acercarA(page, selector, { escala = 1.6, ajustar = true, margen = MARGEN_ENCUADRE } = {}) {
     // la hoja de estilos del cursor viaja con la cámara
     await instalarCursor(page);
     // centroDe falla con un mensaje claro si el objetivo no existe
@@ -236,7 +311,8 @@ export async function acercarA(page, selector, { escala = 1.6 } = {}) {
         }
         // overflow de la raíz: el de <html>, o el de <body> si <html> lo deja en visible
         // (el navegador propaga el de body al viewport en ese caso).
-        const raiz = getComputedStyle(document.documentElement);
+        const raizEl = document.documentElement;
+        const raiz = getComputedStyle(raizEl);
         const cuerpo = document.body ? getComputedStyle(document.body) : raiz;
         const libre = (eje) => {
             const v = raiz[eje] !== 'visible' ? raiz[eje] : cuerpo[eje];
@@ -248,10 +324,15 @@ export async function acercarA(page, selector, { escala = 1.6 } = {}) {
             y: r.top + r.height / 2 + window.scrollY,
             libreX: libre('overflowX'),
             libreY: libre('overflowY'),
+            ancho: r.width,
+            alto: r.height,
+            vistaAncho: raizEl.clientWidth,
+            vistaAlto: raizEl.clientHeight,
         };
     });
+    const destino = ajustar ? escalaQueCabe(escala, punto, margen) : escala;
     const escalaActual = await page.evaluate(() => window.visualViewport.scale);
-    await animarEscala(page, sesion.cdp, escalaActual, escala, punto);
+    await animarEscala(page, sesion.cdp, escalaActual, destino, punto);
 }
 
 /** Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento. */

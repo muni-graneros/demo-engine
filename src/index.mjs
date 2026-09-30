@@ -13,4 +13,7 @@ export {
     identificadoresEnPantalla, exigirUnaSolaPersona,
 } from './privacidad.mjs';
 export { auditarVideo, auditarCapturas, muestrearFrames, contarIdentificadores, exigirAuditoriaConfigurada } from './auditoria.mjs';
-export { instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara } from './camara.mjs';
+export {
+    instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara, configurarCursor, conCursorOculto, escalaQueCabe,
+} from './camara.mjs';
+export { partirCue, partirCues, configurarSubtitulos } from './subtitulos.mjs';

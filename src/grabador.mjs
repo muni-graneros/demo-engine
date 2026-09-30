@@ -2,8 +2,8 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mjs';
-import { alClicar, configurarCamara, instalarCursor } from './camara.mjs';
-import { actorConSesion, opcionesDeContexto } from './contexto-actor.mjs';
+import { alClicar, configurarCamara, configurarCursor, conCursorOculto, instalarCursor } from './camara.mjs';
+import { actorConSesion, actorTactil, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { esPlano } from './rotulos.mjs';
 import { duracion } from './ffmpeg.mjs';
@@ -33,7 +33,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     // El ritmo del puntero es del proyecto, no del motor: un tutorial de trámite
     // se sigue mejor ágil y uno de capacitación, pausado.
     configurarCamara({ msCursor });
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     const contextos = new Map();   // actor → { ctx, page, t0 }
     const pasos = [];
     const clics = [];
@@ -94,6 +94,8 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         const { opciones, pista } = opcionesDeContexto(config, nombre, sesiones, { ancho, alto });
         const ctx = await navegador.newContext({ ...opciones, locale: 'es-CL' });
         const page = await ctx.newPage();
+        // Flecha o indicador de toque según el actor (superficie/dispositivo táctil).
+        configurarCursor(page, { tactil: actorTactil(config, nombre) });
         await instalarCursor(page);
         // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
         // sobre el audio del video final, que corre en tiempo de relato.
@@ -226,7 +228,11 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                     const plano = paso.marco === true ? null : paso.marco === false ? 'paso' : await esPlano(page);
 
                     const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
-                    await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
+                    // `cursorEnCapturas: false`: la imagen fija del manual sale sin cursor (en el
+                    // video sí se ve; ahí dice dónde se toca). `!== false` para que una config
+                    // armada a mano sin el campo siga como siempre.
+                    const capturar = () => page.screenshot({ path: join(dirCapturas, nombreCaptura) });
+                    await (config.video?.cursorEnCapturas === false ? conCursorOculto(page, capturar) : capturar());
 
                     pasos.push({
                         escena: escena.id,

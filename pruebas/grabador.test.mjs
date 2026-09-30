@@ -674,3 +674,62 @@ test('Ley 21.719: en un tramo dividido, la pantalla del OTRO actor también pasa
         rmSync(dirSesiones, { recursive: true, force: true });
     }
 });
+
+// C9 (G2-38): el grabador decide el cursor por actor (actorTactil) y, con
+// video.cursorEnCapturas:false, deja las capturas del manual sin cursor.
+test('un actor con dispositivo táctil graba con indicador de toque; uno de escritorio, con flecha', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' }, pc: { sesion: false } });
+        const tipos = {};
+        const paso = (actor) => ({ actor, hacer: async (page) => {
+            await page.goto(`${url}/`);
+            await pulsar(page, '#entrar');
+            tipos[actor] = await page.evaluate(() => document.getElementById('__cursor')?.dataset.tipo);
+        } });
+        const guion = { id: 't', escenas: [{ id: 'e', titulo: 'E', pasos: [paso('tel'), paso('pc')] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(tipos, { tel: 'toque', pc: 'flecha' });
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('video.cursorEnCapturas:false: la captura del manual sale sin cursor (y el video lo sigue mostrando)', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const { chromium } = await import('playwright');
+        // Página con fondo liso y el cursor táctil (círculo) en un punto conocido: se mide
+        // por píxel si el círculo aparece en la captura.
+        const hacer = async (page) => {
+            await page.setContent('<body style="margin:0;background:#ff00ff"><button id="b" style="margin:200px;width:100px;height:40px;background:#ff00ff;color:#ff00ff;border:0">x</button></body>');
+            const { moverCursorA } = await import('../src/camara.mjs');
+            await moverCursorA(page, '#b');
+        };
+        const guion = { id: 'c', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'tel', hacer }] }] };
+        const noMagenta = async (png) => {
+            const nav = await chromium.launch();
+            try {
+                const p = await nav.newPage();
+                return await p.evaluate(async (b64) => {
+                    const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
+                    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+                    const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+                    const { data } = ctx.getImageData(0, 0, c.width, c.height);
+                    let n = 0;
+                    for (let i = 0; i < data.length; i += 4) if (!(data[i] > 240 && data[i + 1] < 20 && data[i + 2] > 240)) n++;
+                    return n;
+                }, png.toString('base64'));
+            } finally { await nav.close(); }
+        };
+        const { readFileSync } = await import('node:fs');
+        const conCursor = await grabar(guion, { config: configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' } }), sesiones: {}, salida: join(dir, 'a'), voz: SIN_VOZ });
+        const sinCursorCfg = configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' } });
+        sinCursorCfg.video.cursorEnCapturas = false;
+        const sinCursor = await grabar(guion, { config: sinCursorCfg, sesiones: {}, salida: join(dir, 'b'), voz: SIN_VOZ });
+        const a = await noMagenta(readFileSync(join(dir, 'a', conCursor.pasos[0].captura)));
+        const b = await noMagenta(readFileSync(join(dir, 'b', sinCursor.pasos[0].captura)));
+        assert.ok(a > 200, `con el defecto, el cursor sale en la captura (${a} px distintos del fondo)`);
+        assert.equal(b, 0, `con cursorEnCapturas:false no debe haber nada más que el fondo (${b} px)`);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});

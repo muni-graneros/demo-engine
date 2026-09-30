@@ -8,6 +8,28 @@ export function actorConSesion(config, nombre) {
 }
 
 /**
+ * ¿El actor se graba como pantalla táctil (indicador de toque en vez de flecha)?
+ *
+ * Manda lo declarado: `tactil` del actor, si no el de su superficie. Sin declarar, lo decide el
+ * dispositivo: un descriptor de Playwright con `hasTouch` (Pixel 7, iPhone…) es táctil. Así un
+ * APK o una web móvil dejan de mostrar el puntero de ratón sin tocar la config, y un escritorio
+ * sigue con la flecha de siempre. `tactil: false` en la superficie o el actor lo apaga.
+ */
+export function actorTactil(config, nombre) {
+    const actor = config.actores?.[nombre] ?? {};
+    if (typeof actor.tactil === 'boolean') return actor.tactil;
+    const superficie = actor.superficie ? config.superficies?.[actor.superficie] : null;
+    if (typeof superficie?.tactil === 'boolean') return superficie.tactil;
+    return Boolean(actor.dispositivo && devices[actor.dispositivo]?.hasTouch);
+}
+
+/** Opciones de `chromium.launch()` desde la config: hoy, solo `navegador.args`. */
+export function opcionesDeLanzamiento(config) {
+    const args = config?.navegador?.args ?? [];
+    return args.length ? { args: [...args] } : {};
+}
+
+/**
  * Opciones de `browser.newContext()` para un actor, más el tamaño de su pista de video.
  *
  * Vive aparte porque la usan DOS caminos que tienen que ver lo mismo: el grabador (el

@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
+import { opcionesDeLanzamiento } from './contexto-actor.mjs';
 
 /** Decodifica base32 (RFC 4648) sin dependencias. */
 function base32ABuffer(secreto) {
@@ -60,7 +61,7 @@ export async function prepararSesiones(config, { dirSesiones }) {
 
     mkdirSync(dirSesiones, { recursive: true });
     const loginGlobal = config.login ?? {};
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     const sesiones = {};
 
     try {
@@ -147,7 +148,7 @@ export async function sesionSigueViva(archivo, config, login = {}) {
     // ese host antes de que nada abortara.
     exigirEntornoDeDesarrollo(config.baseURL);
 
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     try {
         const ctx = await navegador.newContext({ baseURL: config.baseURL, storageState: archivo });
         try {
