@@ -1,6 +1,6 @@
 {
   "name": "demo-engine",
-  "version": "1.14.1",
+  "version": "1.15.0",
   "type": "module",
   "description": "Motor genérico de videos-tutorial para sistemas web.",
   "bin": {
@@ -15,6 +15,7 @@
     "plantillas",
     "skill",
     "README.md",
+    "CHANGELOG.md",
     "docs/*.md"
   ],
   "scripts": {

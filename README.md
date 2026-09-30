@@ -16,6 +16,9 @@ genera MP4 con subtítulos y PDF **sin tocar ningún servidor**.
   pone la tarjeta «Estás aquí» antes de cada capítulo. También suma música atenuada bajo
   la voz, un clic sonoro y variantes vertical y cuadrada para redes. Guía en
   [docs/TUTORIALES-MULTISUPERFICIE.md](docs/TUTORIALES-MULTISUPERFICIE.md).
+- **Acabado de explainer** (1.15.0): portadas a pantalla completa, pantalla dividida con foco,
+  ficha y globo que no tapan lo importante, cursor de toque, cámara que no corta el objetivo,
+  subtítulos de 2 líneas y sin destellos negros. Detalle en [CHANGELOG.md](CHANGELOG.md).
 - **Genérico**: el motor no conoce ningún sistema; todo vive en `demo.config.mjs`.
 
 ## Requisitos
