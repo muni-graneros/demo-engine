@@ -40,10 +40,23 @@ test('el clip de la tarjeta dura ms, tiene el tamaño del lienzo y no trae audio
     assert.equal(existsSync(join(d.salida, 'mapa.png')), false);
 });
 
-test('la tarjeta rotula "Usted está aquí" solo en la activa', async (t) => {
+test('la tarjeta rotula "Estás aquí" (tuteo, como los sistemas) solo en la activa', async (t) => {
     // renderizarMapa acepta devolverTexto:true (como renderizarMarco) y devuelve el innerText.
     const texto = await renderizarMapa({ ...datos(t), devolverTexto: true });
+    assert.equal(texto.match(/Estás aquí/g).length, 1);
+    // G8-15: el ustedeo desentonaba con los sistemas, que tutean.
+    assert.doesNotMatch(texto, /Usted/);
+});
+
+test('el rótulo de la activa se configura: por llamada y por superficie', async (t) => {
+    let texto = await renderizarMapa({ ...datos(t), textoAqui: 'Usted está aquí', devolverTexto: true });
     assert.equal(texto.match(/Usted está aquí/g).length, 1);
+    // La superficie manda sobre la llamada (config: superficies.<id>.aqui).
+    const d = datos(t);
+    d.superficies.sala = { ...d.superficies.sala, aqui: 'Aquí trabajas' };
+    texto = await renderizarMapa({ ...d, textoAqui: 'Usted está aquí', devolverTexto: true });
+    assert.equal(texto.match(/Aquí trabajas/g).length, 1);
+    assert.doesNotMatch(texto, /Usted está aquí/);
 });
 
 test('WCAG 1.4.3: todo texto de la tarjeta es opaco y tiene contraste >= 4.5:1', async (t) => {
