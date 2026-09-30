@@ -65,3 +65,39 @@ export function componerEnLienzo(entradas, { png, huecos, lienzo, salida, duraci
         '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-an', salida]);
     return salida;
 }
+
+/**
+ * Compone un tramo de rótulo PLANO (portada o cierre, ver `esPlano` en src/rotulos.mjs) a
+ * pantalla completa: sin ventana, sin barra de URL, sin chip de superficie. Con marco, la
+ * tarjeta de título se veía como una página más del sistema, con el dominio encima.
+ *
+ * La grabación rara vez tiene el aspecto del lienzo (1600×1000 en 1920×1080, o un teléfono
+ * vertical), así que se escala a lo que quepa, sin deformar, y el sobrante se rellena con el
+ * PROPIO color de la tarjeta: se toma una muestra de 2×2 del borde izquierdo a media altura y
+ * se estira al lienzo. Así el relleno empalma con el fondo de la portada sea cual sea su
+ * color (el de `marca.color` o uno propio), sin franjas negras. Se muestrea el borde y no la
+ * esquina: el cursor del motor arranca en (0,0) y teñiría el fondo entero.
+ *
+ * Mismo contrato de duración y cadencia que `componerEnLienzo`: largo EXPLÍCITO, 25 fps, mp4
+ * mudo del tamaño del lienzo, para que el concat posterior lo pegue sin reencodear.
+ *
+ * @param {{mp4:string, desdeSeg:number, hastaSeg:number}} entrada
+ * @param {{lienzo:{ancho:number,alto:number}, salida:string, duracion:number}} destino
+ * @returns {string} la ruta de `salida`
+ */
+export function componerPlano(entrada, { lienzo, salida, duracion }) {
+    if (!(duracion > 0)) throw new Error(`componerPlano: falta la duracion del tramo (llegó ${duracion})`);
+    const { ancho: W, alto: H } = lienzo;
+    const f = [
+        `color=c=black:s=${W}x${H}:r=25:d=${duracion}[b0]`,
+        '[0:v]split[m][v]',
+        `[m]crop=2:2:4:(ih/2),scale=${W}:${H},setsar=1,fps=25[fondo]`,
+        `[v]scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=25[tarjeta]`,
+        '[b0][fondo]overlay=0:0:eof_action=repeat[b1]',
+        '[b1][tarjeta]overlay=(W-w)/2:(H-h)/2:eof_action=repeat,format=yuv420p[s]',
+    ];
+    ff(['-y', '-ss', String(entrada.desdeSeg), '-t', String(entrada.hastaSeg - entrada.desdeSeg), '-i', entrada.mp4,
+        '-filter_complex', f.join(';'), '-map', '[s]', '-t', String(duracion),
+        '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-an', salida]);
+    return salida;
+}

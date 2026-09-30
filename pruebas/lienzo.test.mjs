@@ -145,3 +145,66 @@ test('dos paneles: ambos huecos transparentes, bisel y barra opacos', async (ctx
     assert.ok(bisel[0] < 30 && bisel[1] < 30 && bisel[2] < 30, `bisel ${bisel}`);
     assert.equal(pixel(png, v.x + 200, v.y - 19)[3], 255);              // barra de la ventana
 });
+
+// ---- Pantalla dividida con foco (C5: la sala dividida no se leía) --------------------------
+
+const VENTANA = (nombre) => ({ tipo: 'ventana', aspecto: 1600 / 1000, url: 'http://x', chip: { nombre, icono: 'monitor', color: '#1e3a8a' } });
+/** Ancho útil que se reparten dos ventanas (sin la separación entre paneles). */
+const DISPONIBLE = L.ancho - 2 * PADDING - SEP;
+
+test('foco: dos salas de 1600 px, la mitad activa se agranda hasta leerse y la otra queda de contexto', () => {
+    const [a, b] = geometriaLienzo({ lienzo: L, paneles: [VENTANA('op'), VENTANA('sup')], dividida: { modo: 'foco', foco: 0.72, activo: 0 } });
+    // Legibilidad medida: un texto de 14 px en una sala de 1600 px de ancho tiene que quedar
+    // en ≥ 11 px en el 1920×1080 final. Con columnas iguales quedaba en 7,7 px (0,55×).
+    const escala = a.ancho / 1600;
+    assert.ok(14 * escala >= 11, `texto de 14 px sale a ${(14 * escala).toFixed(1)} px (escala ${escala.toFixed(3)})`);
+    assert.ok(Math.abs(a.ancho / DISPONIBLE - 0.72) < 0.01, `la activa ocupa ${(a.ancho / DISPONIBLE).toFixed(3)} del ancho`);
+    assert.ok(b.ancho < a.ancho / 2, 'la pasiva queda como vista de contexto');
+    // El orden izquierda/derecha del `dividir` no cambia: sólo cambian los tamaños.
+    assert.ok(a.x + a.ancho + SEP <= b.x, `a=${JSON.stringify(a)} b=${JSON.stringify(b)}`);
+    for (const h of [a, b]) {
+        assert.ok(h.x >= PADDING && h.x + h.ancho <= L.ancho - PADDING, JSON.stringify(h));
+        assert.ok(h.y - ALTO_BARRA_Y_CHIP >= PADDING - 1 && h.y + h.alto <= L.alto - PADDING, JSON.stringify(h));
+        assert.ok(Math.abs(h.ancho / h.alto - 1.6) < 0.01, 'sin deformar');
+        for (const v of [h.x, h.y, h.ancho, h.alto]) assert.equal(v % 2, 0);
+    }
+});
+
+const ALTO_BARRA_Y_CHIP = 38 + 56;
+
+test('foco: cuando actúa el otro actor, se amplía la otra mitad (espejo) y el orden se conserva', () => {
+    const d = (activo) => geometriaLienzo({ lienzo: L, paneles: [VENTANA('op'), VENTANA('sup')], dividida: { modo: 'foco', foco: 0.72, activo } });
+    const [a0, b0] = d(0);
+    const [a1, b1] = d(1);
+    assert.equal(a0.ancho, b1.ancho);
+    assert.equal(b0.ancho, a1.ancho);
+    assert.ok(a1.x < b1.x, 'la izquierda sigue a la izquierda');
+});
+
+test('foco: teléfono y sala no comparten alto; cada uno llega a su tamaño natural y la sala crece', () => {
+    const tel = { tipo: 'telefono', aspecto: 412 / 915, chip: { nombre: 'App', icono: 'phone', color: '#166534' } };
+    const legado = geometriaLienzo({ lienzo: L, paneles: [tel, VENTANA('sala')] });
+    for (const activo of [0, 1]) {
+        const [t, v] = geometriaLienzo({ lienzo: L, paneles: [tel, VENTANA('sala')], dividida: { modo: 'foco', foco: 0.72, activo } });
+        // El teléfono llega a todo el alto que le deja el lienzo (con bisel y chip), sea o no el activo.
+        assert.ok(t.alto >= legado[0].alto, `teléfono ${t.alto} < ${legado[0].alto}`);
+        assert.ok(t.alto + 56 + 56 + 56 <= L.alto - 2 * PADDING + 2);
+        // La sala aprovecha lo que el teléfono no puede usar.
+        assert.ok(v.ancho > legado[1].ancho, `sala ${v.ancho} ≤ legado ${legado[1].ancho}`);
+        assert.ok(t.x + t.ancho + 18 + SEP <= v.x, 'sin solaparse');
+    }
+});
+
+test('foco: rechaza una proporción fuera de rango o un modo desconocido', () => {
+    const p = [VENTANA('a'), VENTANA('b')];
+    assert.throws(() => geometriaLienzo({ lienzo: L, paneles: p, dividida: { modo: 'foco', foco: 0.3, activo: 0 } }), /foco/);
+    assert.throws(() => geometriaLienzo({ lienzo: L, paneles: p, dividida: { modo: 'mosaico', activo: 0 } }), /modo/);
+});
+
+test('modo igual: la geometría de siempre (mismo alto en los dos paneles)', () => {
+    const p = [VENTANA('a'), VENTANA('b')];
+    assert.deepEqual(
+        geometriaLienzo({ lienzo: L, paneles: p, dividida: { modo: 'igual', activo: 0 } }),
+        geometriaLienzo({ lienzo: L, paneles: p }),
+    );
+});

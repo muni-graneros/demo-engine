@@ -8,7 +8,11 @@ import { renderizarMarco } from './marco.mjs';
 import { renderizarLienzo } from './lienzo.mjs';
 import { cadenaDeMezcla } from './mezcla.mjs';
 import { superficieDe } from './configurar.mjs';
-import { componerEnLienzo, lienzoDe } from './composicion.mjs';
+import { componerEnLienzo, componerPlano, lienzoDe } from './composicion.mjs';
+
+/** Disposición de la pantalla dividida si quien llama a montar() no la declara (ver configurar.mjs). */
+const DIVIDIDA_POR_DEFECTO = { modo: 'foco', foco: 0.72 };
+const ICONO_POR_PANEL = { telefono: 'phone', ventana: 'monitor' };
 
 /**
  * Traduce los clics (ms del reloj GLOBAL de la grabación) al reloj del video final, en
@@ -42,6 +46,36 @@ export function tipoDePanel(superficie, actor) {
 }
 
 /**
+ * El panel (marco, aspecto, chip y URL) con el que sale `actor` en el lienzo.
+ *
+ * En pantalla dividida el chip suma el `rotulo` del actor a la superficie («Sala de
+ * operaciones · Camila · operadora»): con dos salas lado a lado los dos chips decían lo mismo
+ * y, con la mitad de contexto achicada, un rótulo pintado DENTRO de la página (el
+ * `rotularPuesto` de un guion) queda a ~5 px. El chip se dibuja sobre el lienzo, a tamaño
+ * fijo, así que se lee igual en la mitad chica. Sin `rotulo`, el chip de siempre; sin
+ * superficie pero con `rotulo`, un chip sólo con el rótulo, del color de la marca.
+ */
+export function panelDeActor({ actor, config, dimensiones = {}, video, presentacion = null, baseURL = null, marca = null, dividido = false }) {
+    const { actores = {} } = config;
+    const superficie = superficieDe(config, actor);
+    const dim = dimensiones[actor] ?? video;
+    const tipo = tipoDePanel(superficie, actores[actor]);
+    const rotulo = dividido ? actores[actor]?.rotulo : null;
+    let chip = superficie ? { nombre: superficie.nombre, icono: superficie.icono, color: superficie.color } : null;
+    if (rotulo) {
+        chip = chip
+            ? { ...chip, nombre: `${chip.nombre} · ${rotulo}` }
+            : { nombre: rotulo, icono: ICONO_POR_PANEL[tipo], color: marca?.color ?? '#1e3a8a' };
+    }
+    return {
+        tipo,
+        aspecto: dim.ancho / dim.alto,
+        chip,
+        url: presentacion?.url ?? actores[actor]?.baseURL ?? baseURL,
+    };
+}
+
+/**
  * Corta cada pista en los tramos que le corresponden, los ordena por tiempo global,
  * los pega, y le suma la voz y los subtítulos.
  */
@@ -61,23 +95,22 @@ export async function montar({
     const modoLienzo = superficies != null || linea.some((s) => s.dividir);
     const lienzo = lienzoDe({ presentacion, video });
     const config = { superficies, actores };
-    const panelDe = (actor) => {
-        const superficie = superficieDe(config, actor);
-        const dim = dimensiones[actor] ?? video;
-        return {
-            tipo: tipoDePanel(superficie, actores[actor]),
-            aspecto: dim.ancho / dim.alto,
-            chip: superficie ? { nombre: superficie.nombre, icono: superficie.icono, color: superficie.color } : null,
-            url: presentacion?.url ?? actores[actor]?.baseURL ?? baseURL,
-        };
-    };
+    const dividida = video?.dividida ?? DIVIDIDA_POR_DEFECTO;
+    // Portadas y cierres a pantalla completa, salvo que el proyecto pida el aspecto de 1.14.
+    // Sólo cuenta cuando hay algo que sacar: sin lienzo ni presentación no hay marco.
+    const rotulosPlanos = (video?.rotulos ?? 'plano') === 'plano' && (modoLienzo || presentacion != null);
+    // Sin lienzo, la presentación enmarcaba el video YA pegado, de una vez. Con algún rótulo
+    // plano eso no sirve (lo enmarcaría también), así que se enmarca tramo por tramo.
+    const enmarcarPorTramo = presentacion != null && !modoLienzo && rotulosPlanos && linea.some((s) => s.plano);
+    const marcoPorTramo = enmarcarPorTramo ? await renderizarMarco({ salida: temporal, presentacion, marca, baseURL }) : null;
+    const panelDe = (actor, dividido) => panelDeActor({ actor, config, dimensiones, video, presentacion, baseURL, marca, dividido });
     // Un PNG por combinación distinta de paneles: renderizar el lienzo cuesta un Chromium, y
     // un curso repite las mismas dos o tres combinaciones en decenas de tramos.
     const lienzos = new Map();
-    const lienzoPara = async (paneles) => {
-        const clave = JSON.stringify(paneles);
+    const lienzoPara = async (paneles, disposicion = null) => {
+        const clave = JSON.stringify([paneles, disposicion]);
         if (!lienzos.has(clave)) {
-            lienzos.set(clave, await renderizarLienzo({ lienzo, paneles, marca, salida: temporal, nombre: `lienzo-${lienzos.size}.png` }));
+            lienzos.set(clave, await renderizarLienzo({ lienzo, paneles, marca, dividida: disposicion, salida: temporal, nombre: `lienzo-${lienzos.size}.png` }));
         }
         return lienzos.get(clave);
     };
@@ -144,14 +177,29 @@ export async function montar({
         recortados.push({ ...seg, hastaSeg: hasta });
 
         const trozo = join(temporal, `trozo-${String(i).padStart(3, '0')}.mp4`);
-        if (modoLienzo) {
+        if (rotulosPlanos && seg.plano) {
+            // Portada o cierre: una tarjeta del video, a pantalla completa. Si el paso seguía
+            // dentro de un `dividir`, la tarjeta gana: es del actor del paso, sola.
+            componerPlano({ mp4: pista, desdeSeg: seg.desdeSeg, hastaSeg: hasta }, { lienzo, salida: trozo, duracion: hasta - seg.desdeSeg });
+        } else if (modoLienzo) {
             const actoresDelTramo = seg.dividir ?? [seg.actor];
             const entradas = actoresDelTramo.map((actor) => {
                 if (actor === seg.actor) return { mp4: pista, desdeSeg: seg.desdeSeg, hastaSeg: hasta };
                 return tramoDelOtro(actor, seg, hasta - seg.desdeSeg);
             });
-            const { png, huecos } = await lienzoPara(actoresDelTramo.map(panelDe));
+            const dividido = actoresDelTramo.length === 2;
+            // La mitad grande es la del actor que actúa en ESTE paso (ver geometriaConFoco).
+            const disposicion = dividido ? { ...dividida, activo: actoresDelTramo.indexOf(seg.actor) } : null;
+            const { png, huecos } = await lienzoPara(actoresDelTramo.map((a) => panelDe(a, dividido)), disposicion);
             componerEnLienzo(entradas, { png, huecos, lienzo, salida: trozo, duracion: hasta - seg.desdeSeg });
+        } else if (enmarcarPorTramo) {
+            // Mismo corte de siempre, a 25 fps fijos (el concat copia sin reencodear y exige
+            // la misma cadencia que los tramos planos), y el marco sobre este tramo solo.
+            const crudo = join(temporal, `crudo-${String(i).padStart(3, '0')}.mp4`);
+            ff(['-y', '-i', pista, '-ss', String(seg.desdeSeg), '-to', String(hasta),
+                '-vf', `scale=${video.ancho}:${video.alto},setsar=1,fps=25`,
+                '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-an', crudo]);
+            componer(crudo, marcoPorTramo, trozo, presentacion);
         } else {
             ff(['-y', '-i', pista, '-ss', String(seg.desdeSeg), '-to', String(hasta),
                 '-vf', `scale=${video.ancho}:${video.alto},setsar=1`,
@@ -173,7 +221,7 @@ export async function montar({
     //     En modo lienzo no: el lienzo ya puso el fondo y el marco de cada superficie, y
     //     tiene el mismo tamaño que `presentacion.salida`, así que el curso lo trata igual.
     let baseVideo = mudo;
-    if (presentacion && !modoLienzo) {
+    if (presentacion && !modoLienzo && !enmarcarPorTramo) {
         const marcoPng = await renderizarMarco({ salida: temporal, presentacion, marca, baseURL });
         baseVideo = componer(mudo, marcoPng, join(temporal, 'presentado.mp4'), presentacion);
     }

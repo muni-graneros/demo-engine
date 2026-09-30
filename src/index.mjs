@@ -6,7 +6,7 @@ export { pegarCapitulos } from './curso.mjs';
 export { generarManual } from './manual.mjs';
 export { capturarContexto } from './contexto.mjs';
 export { crearVoz } from './voz/index.mjs';
-export { portada, cierre } from './rotulos.mjs';
+export { portada, cierre, esPlano } from './rotulos.mjs';
 export { elenco, presentar, quitarPresentacion, anotar } from './explainer.mjs';
 export {
     abrirFiltrado, abrirVerificado, cubrir, descubrir, exigirEntornoDeDesarrollo,
