@@ -4,6 +4,7 @@ import { pathToFileURL } from 'node:url';
 import { devices } from 'playwright';
 import { validarDividida } from './lienzo.mjs';
 import { configurarSubtitulos } from './subtitulos.mjs';
+import { POSICIONES_FICHA } from './explainer.mjs';
 
 export class ErrorConfig extends Error {}
 
@@ -104,6 +105,9 @@ const DEFECTOS_PRESENTACION = {
     // Cuánto dura en pantalla el mapa de superficies antes de la primera escena: lo
     // bastante para leer los rótulos, no tanto como para que parezca una diapositiva.
     mapaMs: 2500,
+    // Rótulo de la superficie activa en el mapa. null = `TEXTO_AQUI` («Estás aquí»); cada
+    // superficie puede traer el suyo en `superficies.<id>.aqui`.
+    textoAqui: null,
 };
 
 /**
@@ -121,6 +125,24 @@ export function normalizarColor(color, id) {
 
 function exigir(condicion, mensaje) {
     if (!condicion) throw new ErrorConfig(`demo.config.mjs: ${mensaje}`);
+}
+
+/**
+ * `superficies.<id>.presentar`: las opciones de la ficha de `presentar` para los actores de
+ * esa superficie (el grabador las pasa a `configurarPresentacion` con su página). Se validan
+ * al cargar: una posición mal escrita reventaría recién al abrir el contexto del actor.
+ */
+function validarPresentar(presentar, id) {
+    if (presentar === undefined) return;
+    const donde = `superficies.${id}.presentar`;
+    exigir(presentar !== null && typeof presentar === 'object' && !Array.isArray(presentar),
+        `${donde} debe ser un objeto { posicion, evitar, margen }`);
+    exigir(presentar.posicion === undefined || POSICIONES_FICHA.includes(presentar.posicion),
+        `${donde}.posicion "${presentar.posicion}" no existe; usá una de ${POSICIONES_FICHA.join(', ')}`);
+    exigir(presentar.evitar === undefined || (Array.isArray(presentar.evitar) && presentar.evitar.every((e) => typeof e === 'string')),
+        `${donde}.evitar debe ser una lista de selectores`);
+    exigir(presentar.margen === undefined || (Number.isFinite(presentar.margen) && presentar.margen >= 0),
+        `${donde}.margen debe ser un número de px >= 0`);
 }
 
 /**
@@ -162,6 +184,9 @@ function fusionarVideo(defectos, cruda = {}) {
         salida: { ...DEFECTOS_PRESENTACION.salida, ...cruda.presentacion.salida },
         transicion3d: { ...DEFECTOS_PRESENTACION.transicion3d, ...cruda.presentacion.transicion3d },
     };
+    const { textoAqui } = video.presentacion;
+    exigir(textoAqui === null || (typeof textoAqui === 'string' && textoAqui.trim() !== ''),
+        'video.presentacion.textoAqui debe ser un texto no vacío (o null para «Estás aquí»)');
     return video;
 }
 
@@ -296,6 +321,7 @@ export async function cargarConfig(rutaProyecto) {
             exigir(s?.nombre, `la superficie "${id}" no trae nombre (sale rotulado en el video)`);
             exigir(TIPOS_SUPERFICIE.includes(s.tipo), `la superficie "${id}" tiene tipo "${s.tipo}"; debe ser escritorio o telefono`);
             exigir(s.tactil === undefined || typeof s.tactil === 'boolean', `la superficie "${id}": tactil debe ser true o false`);
+            validarPresentar(s.presentar, id);
             superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], ...s, color: normalizarColor(s.color ?? marca.color, id) };
         }
     }

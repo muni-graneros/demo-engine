@@ -186,6 +186,8 @@ video: {
     salida: { ancho: 1920, alto: 1080 }, // Resolución final del video (distinta de video.ancho/alto)
     transicion3d: { activa: true, ms: 900, gradosMax: 12 }, // Giro 3D al cambiar de capítulo
     mapaMs: 2500,                 // Duración de la tarjeta de superficies antes de cada capítulo
+    textoAqui: null,              // Rótulo de la superficie activa en esa tarjeta (1.15).
+                                  // null = «Estás aquí»; 'Usted está aquí' recupera el ustedeo.
   },
 },
 ```
@@ -209,7 +211,7 @@ que la 1.13.0. La guía de narrativa, con la receta de seguridad-graneros, está
 [TUTORIALES-MULTISUPERFICIE.md](TUTORIALES-MULTISUPERFICIE.md).
 
 ```js
-// Cada superficie sale con su marco y su chip, y aparece en la tarjeta «usted está aquí».
+// Cada superficie sale con su marco y su chip, y aparece en la tarjeta «Estás aquí».
 superficies: {
   sala:   { nombre: 'Sala de operaciones', tipo: 'escritorio', color: '#1e3a8a', quien: 'Operador' },
   vecino: { nombre: 'App del vecino', tipo: 'telefono', color: '#9a3412', quien: 'Vecina' },
@@ -245,6 +247,12 @@ audio: {
 - **`superficies.<id>`**: exige `nombre` y `tipo` (`escritorio` o `telefono`). El `color`
   tiene que ir en hexadecimal (`#rgb` o `#rrggbb`), porque la tarjeta calcula con él el
   contraste de la etiqueta. Si no se declara, se usa `marca.color`.
+- **`superficies.<id>.aqui`** (opcional, 1.15): el rótulo de esa superficie cuando está activa
+  en la tarjeta; manda sobre `video.presentacion.textoAqui`.
+- **`superficies.<id>.presentar`** (opcional, 1.15): `{ posicion?, evitar?, margen? }` de la ficha
+  de `presentar()` para los actores de esa superficie (ver `configurarPresentacion` en
+  GUIONES.md). Ej.: `apk: { …, presentar: { posicion: 'arriba-derecha', evitar: ['#panico'] } }`,
+  porque abajo vive PÁNICO. Se valida al cargar; la opción de cada llamada a `presentar` manda.
 - **Un actor con `dispositivo`** graba a su viewport CSS real: un `Pixel 7` graba a 412×840.
   Sin `dispositivo`, graba a `video.ancho`×`video.alto` como siempre.
 - **`tactil`** (superficie o actor, booleano, desde 1.15): en una superficie táctil el cursor

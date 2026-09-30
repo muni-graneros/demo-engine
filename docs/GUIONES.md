@@ -142,7 +142,7 @@ capitulos: [
   // Dura max(ms ?? 6000, voz + 600 ms).
   { id: 'mapa', titulo: 'El mapa', tipo: 'mapa', narrar: 'Estas son las partes del sistema.', ms: 8000 },
 
-  // Antes del capítulo entra la tarjeta «usted está aquí»: `superficie` resaltada y la del
+  // Antes del capítulo entra la tarjeta «Estás aquí»: `superficie` resaltada y la del
   // capítulo previo que declaró una, atenuada. Dura `presentacion.mapaMs` (2500 ms).
   { id: 'avisa', titulo: 'Marta avisa', guion: 'denuncia', superficie: 'denuncia' },
 
@@ -260,7 +260,7 @@ Todas estas funciones se reexportan desde `demo-engine`:
     48 kHz; con los defectos (o `null`), la cadena mono de siempre.
 - `pegarCapitulos(partes, { salida, nombre, titulo, video, presentacion?, marca? }) → Promise<{mp4, md, capitulos, vtt}>`
   - `partes`: array de `{id, titulo, archivo, tarjeta?}`; `tarjeta` es un mp4 mudo (la
-    tarjeta de superficies, «usted está aquí») que entra después de la transición 3D y
+    tarjeta de superficies, «Estás aquí») que entra después de la transición 3D y
     antes del clip de ese capítulo
   - `vtt`: ruta al `.vtt` combinado del curso, o `null` si ningún capítulo traía subtítulos
 
@@ -345,8 +345,20 @@ Para el estilo onboarding corporativo: presentar a los personajes ficticios que 
 el caso y señalar en pantalla lo que se está explicando.
 
 - `elenco(page, { cast, titulo?, marca?, esperaMs? }) → Promise<void>` (lámina con el elenco)
-- `presentar(page, { nombre, rol?, foto, esperaMs? }) → Promise<void>` (ficha del personaje)
+- `presentar(page, { nombre, rol?, foto, esperaMs?, posicion?, evitar?, margen? }) → Promise<void>`
+  (ficha del personaje)
+  — desde 1.15 `posicion: 'auto'` (defecto) elige la esquina con menos controles y contenido
+    debajo; también acepta una esquina fija (`POSICIONES_FICHA`: `abajo-izquierda`, que era la
+    de siempre, `abajo-derecha`, `arriba-izquierda`, `arriba-derecha`). Mientras está en
+    pantalla se corre si el objetivo del paso cae debajo: el anillo de `anotar`,
+    `#demo-resalte`, `[data-demo-objetivo]`, los selectores de `evitar` o el cursor del motor.
+- `configurarPresentacion(opciones, page?) → void` (1.15: fija `posicion`/`evitar`/`margen` de
+  la ficha para todo el proceso o, con `page`, sólo para esa página. El grabador la llama solo
+  con `superficies.<id>.presentar` de la superficie de cada actor; la llamada a `presentar` manda)
 - `quitarPresentacion(page) → Promise<void>` (la retira)
-- `anotar(page, selector, texto, { esperaMs?, permanecer? }) → Promise<void>` (globo sobre un
-  elemento; `permanecer: true` lo deja puesto)
+- `anotar(page, selector, texto, { esperaMs?, permanecer?, lado? }) → Promise<void>` (globo junto a
+  un elemento; `permanecer: true` lo deja puesto)
+  — desde 1.15 el globo se mide ya renderizado, se prueba en los cuatro lados y gana el que
+    cabe en pantalla, no cruza la ficha de `presentar` y tapa menos contenido; lleva flecha
+    hacia el objetivo. `lado: 'arriba'|'abajo'|'izquierda'|'derecha'` lo fuerza mientras quepa.
 

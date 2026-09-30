@@ -42,7 +42,8 @@ El curso abre con un capítulo `tipo: 'mapa'`. Es el diagrama completo, sin nada
 con quién usa cada superficie. Después, cada capítulo que declara `superficie` entra con la
 misma tarjeta durante unos 2,5 s (`presentacion.mapaMs`). En esa tarjeta:
 
-- la superficie activa va resaltada con «Usted está aquí»;
+- la superficie activa va resaltada con «Estás aquí» (desde 1.15; antes decía «Usted está aquí».
+  Se cambia con `superficies.<id>.aqui` o `video.presentacion.textoAqui`);
 - la superficie del capítulo anterior aparece atenuada, con la flecha del traspaso marcada.
 
 Cada superficie lleva color, ícono y **texto**, porque el color nunca puede ser lo único que

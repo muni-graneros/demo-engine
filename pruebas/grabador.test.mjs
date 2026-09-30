@@ -733,3 +733,30 @@ test('video.cursorEnCapturas:false: la captura del manual sale sin cursor (y el 
         assert.equal(b, 0, `con cursorEnCapturas:false no debe haber nada más que el fondo (${b} px)`);
     } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('superficies.<id>.presentar fija la ficha de presentar para los actores de esa superficie (C3)', async () => {
+    // configurarPresentacion(opciones, page) existía, pero nadie la llamaba: declarar en la
+    // config que el APK quiere la ficha arriba (abajo vive PÁNICO) no hacía nada.
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = {
+            ...configMulti(url, { tel: { sesion: false, superficie: 'apk' }, pc: { sesion: false, superficie: 'sala' } }),
+            superficies: {
+                apk: { nombre: 'APK', tipo: 'escritorio', presentar: { posicion: 'arriba-derecha' } },
+                sala: { nombre: 'Sala', tipo: 'escritorio' },
+            },
+        };
+        const { presentar } = await import('../src/explainer.mjs');
+        const posiciones = {};
+        const paso = (actor) => ({ actor, hacer: async (page) => {
+            await page.goto(`${url}/`);
+            await presentar(page, { nombre: actor, posicion: actor === 'pc' ? 'abajo-izquierda' : undefined });
+            posiciones[actor] = await page.evaluate(() => document.getElementById('demo-lower-third')?.dataset.posicion);
+        } });
+        const guion = { id: 't', escenas: [{ id: 'e', titulo: 'E', pasos: [paso('tel'), paso('pc')] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        // La superficie manda sobre el defecto; la llamada, sobre la superficie.
+        assert.deepEqual(posiciones, { tel: 'arriba-derecha', pc: 'abajo-izquierda' });
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});

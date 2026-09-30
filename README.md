@@ -13,7 +13,7 @@ genera MP4 con subtítulos y PDF **sin tocar ningún servidor**.
 - **Montaje offline**: ffmpeg local pega los videos, dibuja subtítulos, normaliza audio.
 - **Multi-superficie** (1.14.0): cada actor graba en su dispositivo (escritorio o teléfono), sale
   con su marco y su chip, dos actores pueden verse a la vez en pantalla dividida, y el curso
-  pone la tarjeta «usted está aquí» antes de cada capítulo. También suma música atenuada bajo
+  pone la tarjeta «Estás aquí» antes de cada capítulo. También suma música atenuada bajo
   la voz, un clic sonoro y variantes vertical y cuadrada para redes. Guía en
   [docs/TUTORIALES-MULTISUPERFICIE.md](docs/TUTORIALES-MULTISUPERFICIE.md).
 - **Genérico**: el motor no conoce ningún sistema; todo vive en `demo.config.mjs`.

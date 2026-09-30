@@ -1,11 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { RUTA_FFMPEG as ffmpegPath, duracion } from '../src/ffmpeg.mjs';
-import { renderizarMapa } from '../src/mapa-superficies.mjs';
+import { renderizarMapa, opcionesDelMapa } from '../src/mapa-superficies.mjs';
 
 // Los mismos datos para todas las pruebas: tres superficies, la sala activa y el vecino
 // anterior, así hay un nodo en cada estado (activa, anterior, atenuada).
@@ -111,4 +111,22 @@ test('7 superficies (4+3) con arista hacia atrás y salto no contiguo: tampoco p
     const r = await renderizarMapa({ ...datos(t), superficies: muchas(7), flujo, activa: 's7', anterior: 's6', devolverFlechas: true });
     assert.equal(r.trazos, 9);
     assert.deepEqual(r.choques, []);
+});
+
+test('video.presentacion.textoAqui de la config llega a la tarjeta que arma el CLI (C6)', async (t) => {
+    // renderizarMapa ya aceptaba textoAqui, pero cli.mjs no se lo pasaba: declararlo en la
+    // config no cambiaba nada. Las dos llamadas del CLI arman sus opciones con opcionesDelMapa.
+    const d = datos(t);
+    const config = { superficies: d.superficies, flujo: d.flujo, marca: d.marca,
+        video: { presentacion: { textoAqui: 'Usted está aquí' } } };
+    const texto = await renderizarMapa({ ...d, ...opcionesDelMapa(config), devolverTexto: true });
+    assert.equal(texto.match(/Usted está aquí/g).length, 1);
+    // Sin presentación (o sin textoAqui) queda el defecto tuteado.
+    const sin = await renderizarMapa({ ...d, ...opcionesDelMapa({ ...config, video: {} }), devolverTexto: true });
+    assert.equal(sin.match(/Estás aquí/g).length, 1);
+
+    const cli = readFileSync(join(import.meta.dirname, '..', 'cli.mjs'), 'utf8');
+    const llamadas = cli.match(/renderizarMapa\(\{[^}]*/g);
+    assert.equal(llamadas.length, 2, 'cli.mjs llama dos veces a renderizarMapa');
+    for (const l of llamadas) assert.match(l, /\.\.\.opcionesDelMapa\(config\)/, l);
 });

@@ -492,3 +492,17 @@ test('navegador.args: --host-resolver-rules solo puede mapear a loopback (no des
         await assert.rejects(cargarConfig(proyecto({ ...minima, navegador: { args: [malo] } })), ErrorConfig, malo);
     }
 });
+
+test('superficies.<id>.presentar y video.presentacion.textoAqui se validan al cargar, no a mitad de la grabación', async () => {
+    const sup = (presentar) => ({ ...minima, superficies: { apk: { nombre: 'APK', tipo: 'telefono', presentar } } });
+    const ok = await cargarConfig(proyecto(sup({ posicion: 'arriba-derecha', evitar: ['#panico'] })));
+    assert.deepEqual(ok.superficies.apk.presentar, { posicion: 'arriba-derecha', evitar: ['#panico'] });
+    await assert.rejects(cargarConfig(proyecto(sup({ posicion: 'al-medio' }))), /superficies\.apk\.presentar/);
+    await assert.rejects(cargarConfig(proyecto(sup('arriba'))), /superficies\.apk\.presentar/);
+    await assert.rejects(cargarConfig(proyecto(sup({ evitar: '#panico' }))), /superficies\.apk\.presentar/);
+
+    const conTexto = (textoAqui) => ({ ...minima, video: { presentacion: { textoAqui } } });
+    assert.equal((await cargarConfig(proyecto(conTexto('Usted está aquí')))).video.presentacion.textoAqui, 'Usted está aquí');
+    assert.equal((await cargarConfig(proyecto({ ...minima, video: { presentacion: {} } }))).video.presentacion.textoAqui, null);
+    await assert.rejects(cargarConfig(proyecto(conTexto(''))), /textoAqui/);
+});

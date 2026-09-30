@@ -14,7 +14,7 @@ import { crearVoz } from './src/voz/index.mjs';
 import { auditarVideo, auditarCapturas } from './src/auditoria.mjs';
 import { listaEnmascarada } from './src/privacidad.mjs';
 import { ff, duracion, RUTA_FFMPEG } from './src/ffmpeg.mjs';
-import { renderizarMapa } from './src/mapa-superficies.mjs';
+import { renderizarMapa, opcionesDelMapa } from './src/mapa-superficies.mjs';
 import { renderizarLienzo } from './src/lienzo.mjs';
 import { componerEnLienzo, lienzoDe } from './src/composicion.mjs';
 import { cadenaDeMezcla } from './src/mezcla.mjs';
@@ -131,8 +131,8 @@ async function capituloMapa(config, voz, cap, { lienzo, temporal }) {
     const wav = cap.narrar && voz.disponible() ? voz.sintetizar(cap.narrar) : null;
     const segundos = Math.max((cap.ms ?? 6000) / 1000, wav ? duracion(wav) + 0.6 : 0);
     const mudo = await renderizarMapa({
-        superficies: config.superficies, flujo: config.flujo, activa: null, anterior: null,
-        lienzo, marca: config.marca, ms: Math.round(segundos * 1000), salida: temporal, nombre: `mapa-${cap.id}.mp4`,
+        ...opcionesDelMapa(config), activa: null, anterior: null,
+        lienzo, ms: Math.round(segundos * 1000), salida: temporal, nombre: `mapa-${cap.id}.mp4`,
     });
     const total = duracion(mudo);
     const mezcla = cadenaDeMezcla({
@@ -224,9 +224,9 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
             let tarjeta = null;
             if (superficie) {
                 tarjeta = await renderizarMapa({
-                    superficies: config.superficies, flujo: config.flujo,
+                    ...opcionesDelMapa(config),
                     activa: cap.superficie, anterior: superficiePrevia,
-                    lienzo, marca: config.marca, ms: presentacion?.mapaMs ?? 2500,
+                    lienzo, ms: presentacion?.mapaMs ?? 2500,
                     salida: temporal, nombre: `tarjeta-${cap.id}.mp4`,
                 });
                 superficiePrevia = cap.superficie;

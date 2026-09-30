@@ -6,6 +6,8 @@ import { alClicar, configurarCamara, configurarCursor, conCursorOculto, instalar
 import { actorConSesion, actorTactil, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { esPlano } from './rotulos.mjs';
+import { configurarPresentacion } from './explainer.mjs';
+import { superficieDe } from './configurar.mjs';
 import { duracion } from './ffmpeg.mjs';
 
 /**
@@ -96,6 +98,10 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         const page = await ctx.newPage();
         // Flecha o indicador de toque según el actor (superficie/dispositivo táctil).
         configurarCursor(page, { tactil: actorTactil(config, nombre) });
+        // Dónde va la ficha de `presentar` en esta superficie (`superficies.<id>.presentar`):
+        // el APK la quiere arriba porque abajo vive PÁNICO. La llamada del guion manda igual.
+        const presentarEn = superficieDe(config, nombre)?.presentar;
+        if (presentarEn) configurarPresentacion(presentarEn, page);
         await instalarCursor(page);
         // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
         // sobre el audio del video final, que corre en tiempo de relato.

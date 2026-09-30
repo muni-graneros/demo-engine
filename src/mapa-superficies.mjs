@@ -30,6 +30,19 @@ export { normalizarColor };
 export const TEXTO_AQUI = 'Estás aquí';
 
 /**
+ * Lo que la config le aporta a cada tarjeta del mapa que arma el CLI (capítulo `mapa` y
+ * tarjeta de entrada a una superficie): superficies, flujo, marca y el rótulo de la activa
+ * (`video.presentacion.textoAqui`). Un solo lugar, para que ninguna de las dos llamadas se
+ * olvide de una opción declarada.
+ */
+export function opcionesDelMapa(config) {
+    return {
+        superficies: config.superficies, flujo: config.flujo, marca: config.marca,
+        textoAqui: config.video?.presentacion?.textoAqui ?? TEXTO_AQUI,
+    };
+}
+
+/**
  * Renderiza la tarjeta «estás aquí» y la convierte en un clip de `ms` milisegundos.
  *
  * Es una imagen fija: la entrada animada queda fuera de alcance porque 2,5 s bastan y el
