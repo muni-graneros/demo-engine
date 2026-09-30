@@ -161,7 +161,10 @@ async function centrarVista(page, punto) {
         const cx = libreX ? x : limitar(x, scrollX + vv.width / 2, scrollX + raiz.clientWidth - vv.width / 2);
         const cy = libreY ? y : limitar(y, scrollY + vv.height / 2, scrollY + raiz.clientHeight - vv.height / 2);
         const marca = document.createElement('div');
-        marca.style.cssText = `position:absolute;left:${cx}px;top:${cy}px;width:1px;height:1px;`
+        // El marcador mide 1 px y `scrollIntoView` centra SU centro: se corre medio píxel para
+        // que ese centro caiga justo en el punto. Sin esto, con el punto limitado al borde, el
+        // encuadre se pasaba medio píxel (uno redondeado) y a escala 2 cortaba 2 px del objetivo.
+        marca.style.cssText = `position:absolute;left:${cx - 0.5}px;top:${cy - 0.5}px;width:1px;height:1px;`
             + 'margin:0;padding:0;border:0;visibility:hidden;pointer-events:none';
         const antes = { x: scrollX, y: scrollY };
         raiz.appendChild(marca);
@@ -188,8 +191,33 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
     }
 }
 
+/** Fracción de la pantalla que puede ocupar el objetivo tras el tope de escala: deja un 4 %
+ * de aire por lado para que el borde del elemento no quede pegado al borde del cuadro. Es el
+ * mismo 0,92 que ya usaban los guiones que se topaban la escala a mano. */
+const MARGEN_ENCUADRE = 0.92;
+
+/**
+ * La escala más cercana a la pedida con la que el objetivo entra ENTERO en pantalla, con margen.
+ *
+ * Con la escala fija, un elemento ancho (una franja de ancho completo, el botón de pánico fijo
+ * abajo en un teléfono) quedaba más grande que el cuadro y la cámara lo cortaba justo a él. Solo
+ * se BAJA una escala que cortaba —nunca se sube— y nunca por debajo de 1 (sin zoom): un objetivo
+ * que no cabe ni a escala 1 se muestra como está. Una escala pedida ≤ 1 se respeta tal cual.
+ */
+export function escalaQueCabe(escala, { ancho, alto, vistaAncho, vistaAlto }, margen = MARGEN_ENCUADRE) {
+    if (!(escala > 1) || !(ancho > 0) || !(alto > 0) || !(vistaAncho > 0) || !(vistaAlto > 0)) return escala;
+    const tope = Math.min((margen * vistaAncho) / ancho, (margen * vistaAlto) / alto);
+    return Math.max(1, Math.min(escala, tope));
+}
+
 /**
  * Acerca la vista sobre un elemento, dejándolo centrado.
+ *
+ * `escala` es un MÁXIMO: si a esa escala el objetivo no cabe entero (con `margen`, la fracción
+ * del cuadro que puede ocupar; 0,92 por defecto), se baja lo justo para que quepa (ver
+ * `escalaQueCabe`). `ajustar: false` vuelve al comportamiento anterior a 1.15 (escala exacta,
+ * aunque corte). Cerca de un borde, el encuadre no se centra más allá de la página: se detiene
+ * en el borde del viewport y el objetivo queda entero, descentrado hacia ese lado.
  *
  * Usa el zoom real del navegador (CDP `Emulation.setPageScaleFactor`, el mismo mecanismo
  * del pellizco en el móvil) y NO `transform: scale()` sobre `<html>`. Ese transform convierte
@@ -203,7 +231,7 @@ async function animarEscala(page, cdp, desde, hasta, punto) {
  * cuadro aunque la cámara apunte bien. Esos contenedores no se restauran al `alejar`
  * (restaurarlos daría un salto en el video sin nada que contar); el documento sí.
  */
-export async function acercarA(page, selector, { escala = 1.6 } = {}) {
+export async function acercarA(page, selector, { escala = 1.6, ajustar = true, margen = MARGEN_ENCUADRE } = {}) {
     // la hoja de estilos del cursor viaja con la cámara
     await instalarCursor(page);
     // centroDe falla con un mensaje claro si el objetivo no existe
@@ -236,7 +264,8 @@ export async function acercarA(page, selector, { escala = 1.6 } = {}) {
         }
         // overflow de la raíz: el de <html>, o el de <body> si <html> lo deja en visible
         // (el navegador propaga el de body al viewport en ese caso).
-        const raiz = getComputedStyle(document.documentElement);
+        const raizEl = document.documentElement;
+        const raiz = getComputedStyle(raizEl);
         const cuerpo = document.body ? getComputedStyle(document.body) : raiz;
         const libre = (eje) => {
             const v = raiz[eje] !== 'visible' ? raiz[eje] : cuerpo[eje];
@@ -248,10 +277,15 @@ export async function acercarA(page, selector, { escala = 1.6 } = {}) {
             y: r.top + r.height / 2 + window.scrollY,
             libreX: libre('overflowX'),
             libreY: libre('overflowY'),
+            ancho: r.width,
+            alto: r.height,
+            vistaAncho: raizEl.clientWidth,
+            vistaAlto: raizEl.clientHeight,
         };
     });
+    const destino = ajustar ? escalaQueCabe(escala, punto, margen) : escala;
     const escalaActual = await page.evaluate(() => window.visualViewport.scale);
-    await animarEscala(page, sesion.cdp, escalaActual, escala, punto);
+    await animarEscala(page, sesion.cdp, escalaActual, destino, punto);
 }
 
 /** Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento. */

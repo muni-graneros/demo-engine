@@ -331,3 +331,127 @@ test('acercarA en una página simple que se desplaza también centra en horizont
         assert.equal(await page.evaluate(() => scrollY), scrollAntes,'alejar restaura el desplazamiento original');
     });
 });
+
+// C7 (G8-08/09, G3-09): acercarA no recortaba en los bordes. Con un elemento ancho o fijo al
+// borde (el botón PÁNICO del APK, «Estado de la patrulla»), la escala pedida lo dejaba más
+// grande que la pantalla y el objetivo salía cortado. Ahora la escala se topa para que el
+// objetivo entre entero con margen, y el encuadre se ajusta a los bordes del viewport.
+
+/** Caja del objetivo en PANTALLA (lo que se ve en el video) y el tamaño de la pantalla. */
+async function cajaEnPantalla(page, selector) {
+    return page.evaluate((sel) => {
+        const r = document.querySelector(sel).getBoundingClientRect();
+        const vv = window.visualViewport;
+        return {
+            izq: (r.left - vv.offsetLeft) * vv.scale,
+            der: (r.right - vv.offsetLeft) * vv.scale,
+            arr: (r.top - vv.offsetTop) * vv.scale,
+            aba: (r.bottom - vv.offsetTop) * vv.scale,
+            ancho: document.documentElement.clientWidth,
+            alto: document.documentElement.clientHeight,
+            escala: vv.scale,
+        };
+    }, selector);
+}
+
+function exigirEntero(c, tolerancia = 1) {
+    assert.ok(c.izq >= -tolerancia, `el objetivo se corta por la izquierda: ${c.izq}`);
+    assert.ok(c.arr >= -tolerancia, `el objetivo se corta por arriba: ${c.arr}`);
+    assert.ok(c.der <= c.ancho + tolerancia, `el objetivo se corta por la derecha: ${c.der} > ${c.ancho}`);
+    assert.ok(c.aba <= c.alto + tolerancia, `el objetivo se corta por abajo: ${c.aba} > ${c.alto}`);
+}
+
+/** Cuántos píxeles magenta hay en una captura (el objetivo se pinta #ff00ff). */
+async function pixelesMagenta(navegador, png) {
+    const r = await centroMagenta(navegador, png);
+    return r?.n ?? 0;
+}
+
+async function conTelefono(html, fn) {
+    const navegador = await chromium.launch();
+    const ctx = await navegador.newContext({ viewport: { width: 412, height: 839 }, hasTouch: true, isMobile: true });
+    const page = await ctx.newPage();
+    try {
+        await page.setContent(html);
+        await instalarCursor(page);
+        await fn(page, navegador);
+    } finally {
+        await navegador.close();
+    }
+}
+
+test('acercarA topa la escala: un botón fijo abajo, casi de ancho completo, entra entero (PÁNICO del APK)', async () => {
+    await conTelefono(`<!doctype html><html><head><meta name="viewport" content="width=device-width"></head>
+        <body style="margin:0;height:2000px">
+            <p style="padding:16px">Inicio del turno</p>
+            <button id="objetivo" style="position:fixed;left:16px;right:16px;bottom:16px;height:72px;background:#ff00ff;border:0">PÁNICO</button>
+        </body></html>`, async (page, navegador) => {
+        const antes = await pixelesMagenta(navegador, await page.screenshot());
+        await acercarA(page, '#objetivo', { escala: 1.4 });
+        const c = await cajaEnPantalla(page, '#objetivo');
+        exigirEntero(c);
+        // por píxel: el botón completo sigue a la vista (con escala ≥ 1, nunca menos área)
+        const despues = await pixelesMagenta(navegador, await page.screenshot());
+        assert.ok(despues >= antes * 0.98, `se ven ${despues} px del botón, antes ${antes}`);
+        await alejar(page);
+    });
+});
+
+test('acercarA topa la escala con margen: el objetivo ocupa a lo más `margen` de la pantalla', async () => {
+    await conPagina(async (page) => {
+        await page.setViewportSize({ width: 1280, height: 720 });
+        await page.setContent(`<!doctype html><html><body style="margin:0">
+            <div id="objetivo" style="position:absolute;left:100px;top:200px;width:1000px;height:120px;background:#ff00ff"></div>
+        </body></html>`);
+        await instalarCursor(page);
+        await acercarA(page, '#objetivo', { escala: 1.8 });
+        const c = await cajaEnPantalla(page, '#objetivo');
+        exigirEntero(c);
+        const esperado = (0.92 * 1280) / 1000;
+        assert.ok(Math.abs(c.escala - esperado) < 0.03, `escala ${c.escala}, esperada ≈ ${esperado.toFixed(3)}`);
+        await alejar(page);
+    });
+});
+
+test('acercarA respeta la escala pedida cuando el objetivo ya cabe (no cambia lo que funcionaba)', async () => {
+    await conPagina(async (page) => {
+        await acercarA(page, '#entrar', { escala: 1.8 });
+        const escala = await page.evaluate(() => window.visualViewport.scale);
+        assert.ok(Math.abs(escala - 1.8) < 0.05, `escala ${escala}`);
+        await alejar(page);
+    });
+});
+
+test('acercarA con ajustar:false conserva la escala pedida aunque corte (compatibilidad explícita)', async () => {
+    await conPagina(async (page) => {
+        await page.setViewportSize({ width: 1280, height: 720 });
+        await page.setContent(`<!doctype html><html><body style="margin:0">
+            <div id="objetivo" style="position:absolute;left:100px;top:200px;width:1000px;height:120px;background:#ff00ff"></div>
+        </body></html>`);
+        await instalarCursor(page);
+        await acercarA(page, '#objetivo', { escala: 1.8, ajustar: false });
+        const escala = await page.evaluate(() => window.visualViewport.scale);
+        assert.ok(Math.abs(escala - 1.8) < 0.05, `escala ${escala}`);
+        await alejar(page);
+    });
+});
+
+test('acercarA sobre un objetivo pegado a la esquina (fijo o no) lo deja entero: el encuadre se ajusta al borde', async () => {
+    for (const posicion of ['fixed', 'absolute']) {
+        await conPagina(async (page) => {
+            await page.setViewportSize({ width: 1280, height: 720 });
+            await page.setContent(`<!doctype html><html><body style="margin:0;height:3000px;overflow-x:hidden">
+                <p>contenido</p>
+                <button id="objetivo" style="position:${posicion};right:0;top:0;width:220px;height:48px;background:#ff00ff;border:0">Salir</button>
+                <button id="abajo" style="position:${posicion};left:0;${posicion === 'fixed' ? 'bottom:0' : 'top:2952px'};width:220px;height:48px;background:#00ff00;border:0">Abajo</button>
+            </body></html>`);
+            await instalarCursor(page);
+            await acercarA(page, '#objetivo', { escala: 2 });
+            exigirEntero(await cajaEnPantalla(page, '#objetivo'));
+            await alejar(page);
+            await acercarA(page, '#abajo', { escala: 2 });
+            exigirEntero(await cajaEnPantalla(page, '#abajo'));
+            await alejar(page);
+        });
+    }
+});
