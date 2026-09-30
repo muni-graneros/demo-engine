@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
 import { iniciarJuguete } from './juguete/servidor.mjs';
-import { instalarCursor, moverCursorA, pulsar, acercarA, alejar, alClicar } from '../src/camara.mjs';
+import { instalarCursor, moverCursorA, pulsar, acercarA, alejar, alClicar, configurarCursor, conCursorOculto } from '../src/camara.mjs';
 
 async function conPagina(fn) {
     const juguete = await iniciarJuguete({ puerto: 0 });
@@ -454,4 +454,70 @@ test('acercarA sobre un objetivo pegado a la esquina (fijo o no) lo deja entero:
             await alejar(page);
         });
     }
+});
+
+// C9 (G2-38): en una app táctil se veía la flecha del ratón, que además tapaba texto. En
+// una superficie táctil el cursor es un indicador de toque (círculo centrado en el punto),
+// y las capturas que van al manual pueden salir sin cursor.
+
+test('en una página táctil el cursor es un círculo centrado en el punto, no una flecha', async () => {
+    await conTelefono(`<!doctype html><html><body style="margin:0">
+        <button id="objetivo" style="margin:200px 100px;width:120px;height:60px">Llegué</button>
+    </body></html>`, async (page) => {
+        configurarCursor(page, { tactil: true });
+        await instalarCursor(page);
+        await moverCursorA(page, '#objetivo');
+        const r = await page.evaluate(() => {
+            const c = document.getElementById('__cursor');
+            const cc = c.getBoundingClientRect();
+            const b = document.getElementById('objetivo').getBoundingClientRect();
+            const e = getComputedStyle(c);
+            return {
+                tipo: c.dataset.tipo, radio: e.borderRadius, fondo: e.backgroundImage,
+                centro: { x: cc.left + cc.width / 2, y: cc.top + cc.height / 2 },
+                boton: { x: b.x + b.width / 2, y: b.y + b.height / 2 }, ancho: cc.width,
+            };
+        });
+        assert.equal(r.tipo, 'toque');
+        assert.equal(r.radio, '50%');
+        assert.equal(r.fondo, 'none', 'sin la flecha de fondo');
+        assert.ok(r.ancho >= 24, `el indicador debe verse (≥ 24 px): ${r.ancho}`);
+        assert.ok(Math.abs(r.centro.x - r.boton.x) < 3, `x: ${r.centro.x} vs ${r.boton.x}`);
+        assert.ok(Math.abs(r.centro.y - r.boton.y) < 3, `y: ${r.centro.y} vs ${r.boton.y}`);
+    });
+});
+
+test('el modo táctil sobrevive a una navegación (instalarCursor lo repone igual)', async () => {
+    await conPagina(async (page) => {
+        configurarCursor(page, { tactil: true });
+        await page.goto(page.url());
+        await pulsar(page, '#entrar').catch(() => {});
+        assert.equal(await page.evaluate(() => document.getElementById('__cursor')?.dataset.tipo), 'toque');
+    });
+});
+
+test('sin configurar, el cursor sigue siendo la flecha de siempre', async () => {
+    await conPagina(async (page) => {
+        const r = await page.evaluate(() => {
+            const c = document.getElementById('__cursor');
+            return { tipo: c.dataset.tipo, fondo: getComputedStyle(c).backgroundImage };
+        });
+        assert.equal(r.tipo, 'flecha');
+        assert.match(r.fondo, /svg/);
+    });
+});
+
+test('conCursorOculto esconde cursor y halo solo mientras corre la captura', async () => {
+    await conPagina(async (page) => {
+        await moverCursorA(page, '#entrar');
+        await page.evaluate(() => {
+            const h = document.createElement('div'); h.className = '__halo'; h.id = 'halo';
+            document.documentElement.appendChild(h);
+        });
+        const visible = () => page.evaluate(() => [getComputedStyle(document.getElementById('__cursor')).visibility,
+            getComputedStyle(document.getElementById('halo')).visibility]);
+        const durante = await conCursorOculto(page, visible);
+        assert.deepEqual(durante, ['hidden', 'hidden']);
+        assert.deepEqual(await visible(), ['visible', 'visible'], 'después vuelve a verse');
+    });
 });

@@ -136,3 +136,36 @@ test('un actor CON sesión que falta en sesiones sigue fallando la pantalla', as
         await juguete.cerrar();
     }
 });
+
+// D96: el motor lanzaba `chromium.launch()` sin argumentos y el consumidor no podía pasar
+// `--host-resolver-rules` (para que el APK y «Enlace generado» muestren el dominio real y no
+// localhost). Ahora `navegador.args` de la config llega a cada lanzamiento que toca el sistema.
+test('navegador.args llega al Chromium: un dominio mapeado con --host-resolver-rules resuelve al servidor local', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const puerto = new URL(juguete.url).port;
+    const dominio = `http://seguridad.graneros.test:${puerto}/`;
+    const pantallas = [{ id: 'dominio', hacer: async (page) => { await page.goto(dominio, { timeout: 8000 }); } }];
+    try {
+        const base = { baseURL: juguete.url, actores: {}, video: { ancho: 800, alto: 600 } };
+        const sin = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
+        const r1 = await capturarContexto({ config: { ...base, contexto: { salida: sin, pantallas } }, sesiones: {}, salida: sin });
+        assert.equal(r1.fail, 1, 'sin la regla, el dominio no debería resolver (si resuelve, el test no prueba nada)');
+
+        const con = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
+        const navegador = { args: [`--host-resolver-rules=MAP seguridad.graneros.test 127.0.0.1`] };
+        const r2 = await capturarContexto({ config: { ...base, navegador, contexto: { salida: con, pantallas } }, sesiones: {}, salida: con });
+        assert.equal(r2.ok, 1, JSON.stringify(r2.manifest));
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('todos los lanzamientos de Chromium que tocan el sistema grabado pasan por opcionesDeLanzamiento', async () => {
+    const { readFileSync } = await import('node:fs');
+    for (const archivo of ['grabador.mjs', 'contexto.mjs', 'sesiones.mjs']) {
+        const fuente = readFileSync(new URL(`../src/${archivo}`, import.meta.url), 'utf8');
+        const lanzamientos = fuente.match(/chromium\.launch\([^)]*\)/g) ?? [];
+        assert.ok(lanzamientos.length > 0, archivo);
+        for (const l of lanzamientos) assert.match(l, /opcionesDeLanzamiento\(config\)/, `${archivo}: ${l}`);
+    }
+});

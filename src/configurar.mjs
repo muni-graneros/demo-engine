@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devices } from 'playwright';
+import { configurarSubtitulos } from './subtitulos.mjs';
 
 export class ErrorConfig extends Error {}
 
@@ -22,7 +23,7 @@ const DEFECTOS = {
     // Un tutorial que quiera ir más pausado sube estos dos en su config; lo que
     // no debería pasar es que un proyecto nuevo herede el ritmo lento sin
     // haberlo elegido.
-    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null },
+    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null, cursorEnCapturas: true },
     // `voz` y `vozRespaldo` son campos separados porque Kokoro y Piper nombran sus voces
     // distinto (ver el comentario de `crearVoz` en src/voz/index.mjs). Si `vozRespaldo`
     // queda en null, el respaldo usa su propio valor por defecto, no el del motor principal.
@@ -64,6 +65,13 @@ const DEFECTOS = {
     // volumen del clic tiene defecto aunque esté apagado para que activarlo sea un solo
     // `activo: true`, sin tener que adivinar un nivel razonable.
     audio: { musica: null, clic: { activo: false, volumen: 0.5 } },
+    // Subtítulos partidos en frases, 2 líneas de 42 (ver src/subtitulos.mjs). `partir: false`
+    // vuelve al cue por paso de antes de 1.15.
+    subtitulos: { partir: true, ancho: 42, lineas: 2 },
+    // Banderas extra de Chromium para los lanzamientos que tocan el sistema grabado (grabar,
+    // preparar sesiones, pack de contexto). Caso real: `--host-resolver-rules` para que la
+    // barra y los enlaces muestren el dominio público y no 127.0.0.1/localhost.
+    navegador: { args: [] },
 };
 
 const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
@@ -102,6 +110,25 @@ export function normalizarColor(color, id) {
 
 function exigir(condicion, mensaje) {
     if (!condicion) throw new ErrorConfig(`demo.config.mjs: ${mensaje}`);
+}
+
+/**
+ * `--host-resolver-rules` solo puede mandar nombres a esta misma máquina (127.x, localhost,
+ * ::1). El guardián de entorno (`exigirEntornoDeDesarrollo`) decide mirando el host de
+ * `baseURL`; una regla `MAP localhost 10.0.0.5` lo burlaría en silencio, porque el navegador
+ * iría a donde diga la regla y no a donde dice el host. El uso legítimo —que la barra y los
+ * enlaces muestren el dominio público mientras se graba en local— siempre apunta a loopback.
+ */
+function exigirReglasALoopback(arg) {
+    const m = /^--host-resolver-rules=(.*)$/s.exec(arg);
+    if (!m) return;
+    const loopback = /^(127(\.\d{1,3}){3}|localhost|\[::1\])(:\d{1,5})?$/i;
+    for (const regla of m[1].split(',').map((r) => r.trim()).filter(Boolean)) {
+        const partes = regla.split(/\s+/);
+        if (partes[0].toUpperCase() === 'EXCLUDE' && partes.length === 2) continue;
+        exigir(partes[0].toUpperCase() === 'MAP' && partes.length === 3 && loopback.test(partes[2]),
+            `navegador.args: la regla "${regla}" de --host-resolver-rules debe ser "MAP <nombre> <127.0.0.1|localhost|[::1]>[:puerto]" o "EXCLUDE <nombre>": mapear a otra máquina saltaría el guardián de entorno`);
+    }
 }
 
 /** Fusiona `video`, tratando `presentacion` (y su `salida`/`transicion3d`) como sub-bloques
@@ -231,6 +258,7 @@ export async function cargarConfig(rutaProyecto) {
         // Se valida contra el catálogo de Playwright acá y no al grabar: un nombre mal
         // escrito tiene que fallar antes de levantar el navegador, no a mitad del video.
         if (actor.dispositivo) exigir(devices[actor.dispositivo], `el actor "${nombre}" pide el dispositivo "${actor.dispositivo}", que Playwright no conoce`);
+        exigir(actor.tactil === undefined || typeof actor.tactil === 'boolean', `el actor "${nombre}": tactil debe ser true o false`);
         if (actor.baseURL) exigir(/^https?:\/\//.test(actor.baseURL), `la baseURL del actor "${nombre}" debe ser http(s) (recibí "${actor.baseURL}")`);
         // `preparar` (src/sesiones.mjs) loguea siempre contra la baseURL GLOBAL: un actor con
         // sesión y baseURL propia recibía cookies de otro host y grababa deslogueado sin avisar.
@@ -247,6 +275,7 @@ export async function cargarConfig(rutaProyecto) {
         for (const [id, s] of Object.entries(cruda.superficies)) {
             exigir(s?.nombre, `la superficie "${id}" no trae nombre (sale rotulado en el video)`);
             exigir(TIPOS_SUPERFICIE.includes(s.tipo), `la superficie "${id}" tiene tipo "${s.tipo}"; debe ser escritorio o telefono`);
+            exigir(s.tactil === undefined || typeof s.tactil === 'boolean', `la superficie "${id}": tactil debe ser true o false`);
             superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], ...s, color: normalizarColor(s.color ?? marca.color, id) };
         }
     }
@@ -273,6 +302,26 @@ export async function cargarConfig(rutaProyecto) {
         exigir(existsSync(archivo) && statSync(archivo).isFile(), `audio.musica.archivo no existe o no es un archivo: ${archivo}`);
     }
 
+    const video = fusionarVideo(DEFECTOS.video, cruda.video);
+    exigir(typeof video.cursorEnCapturas === 'boolean', 'video.cursorEnCapturas debe ser true o false');
+
+    exigir(cruda.subtitulos === undefined || (cruda.subtitulos && typeof cruda.subtitulos === 'object'), 'subtitulos debe ser un objeto { partir, ancho, lineas }');
+    const subtitulos = { ...DEFECTOS.subtitulos, ...cruda.subtitulos };
+    exigir(typeof subtitulos.partir === 'boolean', 'subtitulos.partir debe ser true o false');
+    exigir(Number.isInteger(subtitulos.ancho) && subtitulos.ancho >= 10, 'subtitulos.ancho debe ser un entero de al menos 10 caracteres');
+    exigir(Number.isInteger(subtitulos.lineas) && subtitulos.lineas >= 1, 'subtitulos.lineas debe ser un entero de al menos 1');
+    // Se aplica acá porque es el único punto por el que pasan todos los comandos: los .vtt se
+    // escriben en varios lugares del montaje que no reciben la config.
+    configurarSubtitulos(subtitulos);
+
+    exigir(cruda.navegador === undefined || (cruda.navegador && typeof cruda.navegador === 'object'), 'navegador debe ser un objeto { args: [...] }');
+    const navegador = { ...DEFECTOS.navegador, ...cruda.navegador };
+    // Solo banderas (`--algo`): un valor suelto se lo tomaría Chromium como URL a abrir.
+    exigir(Array.isArray(navegador.args) && navegador.args.every((a) => typeof a === 'string' && /^--[a-z0-9]/i.test(a)),
+        'navegador.args debe ser una lista de banderas de Chromium que empiecen con "--"');
+    navegador.args = [...navegador.args];
+    for (const arg of navegador.args) exigirReglasALoopback(arg);
+
     return {
         ...DEFECTOS,
         ...cruda,
@@ -280,7 +329,9 @@ export async function cargarConfig(rutaProyecto) {
         guiones,
         salida: absoluta(cruda.salida ?? './docs/manual'),
         marca,
-        video: fusionarVideo(DEFECTOS.video, cruda.video),
+        video,
+        subtitulos,
+        navegador,
         auditoria: { ...DEFECTOS.auditoria, ...cruda.auditoria },
         voz,
         actores,

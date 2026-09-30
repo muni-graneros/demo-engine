@@ -66,7 +66,22 @@ export default {
                                 // una capacitación con más aire.
     msCursor: 260,              // Lo que tarda el puntero en viajar a lo que va a pulsar
                                 // (defecto: 260)
-    presentacion: null          // Marco tipo navegador + transición 3D (defecto: null = crudo)
+    presentacion: null,         // Marco tipo navegador + transición 3D (defecto: null = crudo)
+    cursorEnCapturas: true      // false: las capturas por paso (las del manual) salen sin
+                                // cursor ni halo; el video lo sigue mostrando (desde 1.15)
+  },
+
+  // Subtítulos (.vtt y pista del MP4), desde 1.15: cada locución se parte en frases y en
+  // bloques de a lo más `lineas` líneas de `ancho` caracteres, con el tiempo repartido según
+  // el largo. `partir: false` vuelve al cue por paso de antes.
+  subtitulos: { partir: true, ancho: 42, lineas: 2 },
+
+  // Banderas extra de Chromium para grabar, preparar sesiones y el pack de contexto (1.15).
+  // Solo banderas `--…`; `--host-resolver-rules` solo puede mapear a 127.x/localhost/[::1]
+  // (mapear a otra máquina saltaría el guardián de entorno, que decide por el host de baseURL).
+  // Caso típico: que el APK y los enlaces muestren el dominio público grabando en local.
+  navegador: {
+    args: [],  // p. ej. ['--host-resolver-rules=MAP seguridad.ejemplo.cl 127.0.0.1:8071']
   },
 
   // Voz: síntesis de audio.
@@ -232,6 +247,10 @@ audio: {
   contraste de la etiqueta. Si no se declara, se usa `marca.color`.
 - **Un actor con `dispositivo`** graba a su viewport CSS real: un `Pixel 7` graba a 412×840.
   Sin `dispositivo`, graba a `video.ancho`×`video.alto` como siempre.
+- **`tactil`** (superficie o actor, booleano, desde 1.15): en una superficie táctil el cursor
+  es un indicador de toque (círculo centrado en el punto) en vez de la flecha del ratón. Manda
+  el `tactil` del actor, después el de su superficie; sin declarar, es táctil el actor cuyo
+  `dispositivo` lo es (`hasTouch`: Pixel 7, iPhone…). `tactil: false` lo apaga.
 - **Modo lienzo**: basta con declarar `superficies` o que algún paso use `dividir` para que
   cada tramo se componga en el lienzo, con el marco de la superficie de su actor. El lienzo
   mide `presentacion.salida` o, sin presentación, `video.ancho`×`video.alto`.

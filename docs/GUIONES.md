@@ -290,9 +290,17 @@ Todas estas funciones se reexportan desde `demo-engine`:
 - `configurarCamara({ msCursor }) → void` (fija cuánto tarda el puntero en viajar; lo llama
   `grabar()` con `config.video.msCursor`)
 - `instalarCursor(page) → Promise<void>` (dibuja cursor SVG, idempotente)
+- `configurarCursor(page, { tactil }) → void` (1.15: `tactil: true` dibuja un indicador de toque
+  en vez de la flecha; el grabador lo fija por actor con `tactil`/`dispositivo`)
+- `conCursorOculto(page, fn) → Promise` (1.15: corre `fn` —p. ej. una captura— sin cursor ni halo)
 - `moverCursorA(page, selector) → Promise<void>` (mueve con easing)
 - `pulsar(page, selector, { alPintar? }) → Promise<void>` (mueve, halo, clic)
-- `acercarA(page, selector, { escala? }) → Promise<void>` (zoom sobre elemento, escala defecto: 1.6)
+- `acercarA(page, selector, { escala?, ajustar?, margen? }) → Promise<void>` (zoom sobre elemento, escala defecto: 1.6)
+  — desde 1.15 `escala` es un MÁXIMO: si a esa escala el objetivo no cabe entero, se baja lo
+    justo para que ocupe a lo más `margen` (0,92) del cuadro, nunca por debajo de 1
+    (`escalaQueCabe`). Un botón fijo abajo o una franja de ancho completo ya no salen
+    cortados, así que los topes de escala escritos a mano en los guiones sobran (no molestan:
+    el motor nunca sube una escala). `ajustar: false` vuelve a la escala exacta.
   — deja el elemento centrado en pantalla también en paneles con barras fijas y contenido que
     se desplaza dentro de un contenedor propio (Filament 5 SPA) y en layouts de alto fijo (una
     sala React): primero lo centra dentro de sus contenedores con scroll (sin restaurarlos al

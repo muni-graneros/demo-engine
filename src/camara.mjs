@@ -15,16 +15,44 @@ export function configurarCamara({ msCursor } = {}) {
     if (Number.isFinite(msCursor) && msCursor > 0) MS_MOVIMIENTO = msCursor;
 }
 
+/*
+ * Cursor por página: flecha de ratón (escritorio) o indicador de toque (C9 / G2-38). En una
+ * app táctil la flecha no significa nada —nadie usa ratón en un teléfono— y además tapaba
+ * texto («Salir», «Llegué al lugar»). El toque es un círculo translúcido centrado en el punto,
+ * como el «mostrar toques» de Android. WeakMap por página por la misma razón que AVISOS_CLIC:
+ * los guiones llaman `instalarCursor(page)`/`pulsar(page, …)` sin más, y el modo tiene que
+ * sobrevivir a cada navegación, que se lleva el DOM y obliga a reinstalar.
+ */
+const MODOS_CURSOR = new WeakMap();
+
+/** Elige el cursor de una página: `{ tactil: true }` dibuja el indicador de toque. Lo llama
+ * el grabador por actor (ver `actorTactil`); un guion puede llamarlo a mano para una página
+ * que abra por su cuenta. Se aplica en el próximo `instalarCursor` (lo hacen todas las
+ * funciones de este módulo). */
+export function configurarCursor(page, { tactil = false } = {}) {
+    MODOS_CURSOR.set(page, { tactil: Boolean(tactil) });
+}
+
 /** Dibuja el cursor y el estilo de los halos. Idempotente.
  *
  * El cursor nace OCULTO (opacity:0): sin esto, cada documento nuevo (cada navegación) lo
  * instala visible en (0,0), y ahí se queda a la vista —saltando a la esquina superior
  * izquierda en el video— hasta el próximo `moverCursorA`. `moverCursorA` es quien lo hace
  * visible, justo cuando ya sabe adónde llevarlo.
+ *
+ * `data-tipo` dice cuál se dibuja (`flecha` o `toque`); se actualiza aunque el cursor ya
+ * exista, para que `configurarCursor` valga sin recargar la página. La flecha apunta con su
+ * esquina (el punto es su origen); el toque se centra en el punto con un margen negativo, así
+ * que el `translate` de `moverCursorA` sirve igual para los dos.
  */
 export async function instalarCursor(page) {
-    await page.evaluate((ms) => {
-        if (document.getElementById('__cursor')) return;
+    const tipo = MODOS_CURSOR.get(page)?.tactil ? 'toque' : 'flecha';
+    await page.evaluate(({ ms, tipo }) => {
+        const existente = document.getElementById('__cursor');
+        if (existente) {
+            existente.dataset.tipo = tipo;
+            return;
+        }
         const estilo = document.createElement('style');
         estilo.textContent = `
             #__cursor { position: fixed; top: 0; left: 0; width: 22px; height: 22px; z-index: 2147483646;
@@ -33,16 +61,35 @@ export async function instalarCursor(page) {
                 background: no-repeat center/contain url("data:image/svg+xml;utf8,\
 <svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'>\
 <path d='M5 2l14 9-6 1.5L15 20l-3 1-2-7-5 2z' fill='%23fff' stroke='%23111' stroke-width='1.5'/></svg>"); }
+            #__cursor[data-tipo="toque"] { width: 34px; height: 34px; margin: -17px 0 0 -17px; box-sizing: border-box;
+                border-radius: 50%; background: rgba(255,255,255,.35); border: 3px solid rgba(17,17,17,.7);
+                box-shadow: 0 0 0 2px rgba(255,255,255,.85), 0 1px 6px rgba(0,0,0,.35); }
             .__halo { position: fixed; width: 14px; height: 14px; margin: -7px 0 0 -7px; border-radius: 50%;
                 border: 3px solid #38bdf8; z-index: 2147483645; pointer-events: none;
                 animation: __pulso 600ms ease-out forwards; }
             @keyframes __pulso { from { transform: scale(1); opacity: .9 } to { transform: scale(4); opacity: 0 } }
+            html[data-demo-sin-cursor] #__cursor, html[data-demo-sin-cursor] .__halo { visibility: hidden !important; }
         `;
         document.head.appendChild(estilo);
         const cursor = document.createElement('div');
         cursor.id = '__cursor';
+        cursor.dataset.tipo = tipo;
         document.documentElement.appendChild(cursor);
-    }, MS_MOVIMIENTO);
+    }, { ms: MS_MOVIMIENTO, tipo });
+}
+
+/**
+ * Corre `fn` con el cursor y los halos ocultos, y los devuelve a como estaban (aunque `fn`
+ * falle). Para las capturas fijas que van al manual (`video.cursorEnCapturas: false`): en un
+ * video el cursor dice dónde se toca; en una imagen quieta solo tapa texto.
+ */
+export async function conCursorOculto(page, fn) {
+    await page.evaluate(() => document.documentElement.setAttribute('data-demo-sin-cursor', ''));
+    try {
+        return await fn();
+    } finally {
+        await page.evaluate(() => document.documentElement.removeAttribute('data-demo-sin-cursor')).catch(() => {});
+    }
 }
 
 /** El elemento a mirar: `dentro`, si viene, ACOTADO a `selector` (no un selector suelto de
