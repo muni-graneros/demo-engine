@@ -268,3 +268,16 @@ test('anotar no pone el globo sobre la etiqueta del campo si hay lugar libre (G7
         assert.equal(seCruzan(g, await rectDe(page, '#f')), false);
     });
 });
+
+test('en un teléfono el globo de un texto largo no se sale de la pantalla (412 px)', async () => {
+    // max-width descontaba el borde pero no el padding (content-box): en 412 px de ancho el globo
+    // medía 424 y se cortaba 20 px por la derecha. Visto en la demo integrada de la 1.15.
+    await conPaginaDe(async (page) => {
+        await page.setContent(`<body style="margin:0"><label for="x" style="display:block;margin:200px 12px 4px">Nota del turno</label>
+            <input id="x" style="margin:0 12px;width:200px"></body>`);
+        await anotar(page, '#x', 'La nota queda en el traspaso de turno para la sala', { permanecer: true });
+        const globo = await globoDe(page);
+        assert.ok(dentroDe(globo, 412, 839), `globo fuera de pantalla ${JSON.stringify(globo)}`);
+        assert.equal(seCruzan(globo, await rectDe(page, '#x')), false);
+    }, { ancho: 412, alto: 839 });
+});

@@ -342,7 +342,7 @@ export async function anotar(page, selector, texto, { esperaMs = 2200, permanece
         const label = document.createElement('div');
         label.dataset.demoGlobo = '';
         label.style.cssText = `position:absolute;left:0;top:0;visibility:hidden;
-            max-width:${Math.min(420, vw - borde * 2)}px;width:max-content;background:#f59e0b;color:#1f2937;
+            box-sizing:border-box;max-width:${Math.min(420, vw - borde * 2)}px;width:max-content;background:#f59e0b;color:#1f2937;
             font-family:system-ui;font-size:16px;font-weight:600;line-height:1.3;padding:8px 14px;border-radius:10px;
             box-shadow:0 8px 24px -10px rgba(0,0,0,.5)`;
         label.textContent = texto;  // textContent = a prueba de XSS, no necesita escape
