@@ -18,20 +18,123 @@ function reloj(segundos, separadorDecimal) {
     return `${dos(h)}:${dos(m)}:${dos(s)}${separadorDecimal}${String(ms).padStart(3, '0')}`;
 }
 
-const conNarracion = (segmentos) => segmentos.filter((s) => s.narrar?.trim());
+/*
+ * Subtítulos legibles (C2 / G8-02). Un cue por paso llevaba la locución entera —hasta 269
+ * caracteres en una sola línea—: no cabe en pantalla ni se alcanza a leer. Cada cue se parte
+ * en frases, y cada frase en bloques de a lo más `lineas` líneas de `ancho` caracteres (42 × 2
+ * es la convención de subtitulado de TV y de plataformas), con el tiempo del cue original
+ * repartido en proporción al largo de cada bloque: la voz tarda más en lo largo. Portado de
+ * seguridad-graneros (tools/demo/subtitulos-legibles.mjs), que lo resolvía en su montaje.
+ */
+export const ANCHO_SUBTITULO = 42;
+export const LINEAS_SUBTITULO = 2;
 
-/** @param {Array<{inicioSeg:number,finSeg:number,narrar?:string}>} segmentos */
-export function generarVtt(segmentos) {
-    const cuerpo = conNarracion(segmentos)
-        .map((s) => `${reloj(s.inicioSeg, '.')} --> ${reloj(s.finSeg, '.')}\n${s.narrar.trim()}`)
+const DEFECTOS_SUBTITULOS = { partir: true, ancho: ANCHO_SUBTITULO, lineas: LINEAS_SUBTITULO };
+let SUBTITULOS = { ...DEFECTOS_SUBTITULOS };
+
+/**
+ * Fija cómo parten los subtítulos en este proceso (`subtitulos` de demo.config.mjs; lo llama
+ * `cargarConfig`). Sin argumento vuelve a los defectos. Módulo y no parámetro porque los
+ * `.vtt` se escriben en varios puntos del montaje (clip, capítulo, curso) que no reciben la
+ * config, y todos tienen que partir igual.
+ */
+export function configurarSubtitulos(opciones = {}) {
+    SUBTITULOS = { ...DEFECTOS_SUBTITULOS, ...opciones };
+}
+
+/** Frases de un texto: corta en `.`, `!`, `?` o `…` seguidos de espacio; la puntuación queda con su frase. */
+function frases(texto) {
+    return texto.replace(/\s+/g, ' ').trim().split(/(?<=[.!?…])\s+/).filter(Boolean);
+}
+
+/** Reparte las palabras en líneas de a lo más `ancho` caracteres (una palabra más larga se corta). */
+function envolver(texto, ancho) {
+    const lineas = [];
+    let actual = '';
+    for (let palabra of texto.split(' ').filter(Boolean)) {
+        while (palabra.length > ancho) {
+            if (actual) {
+                lineas.push(actual);
+                actual = '';
+            }
+            lineas.push(palabra.slice(0, ancho));
+            palabra = palabra.slice(ancho);
+        }
+        if (!palabra) continue;
+        if (actual && actual.length + 1 + palabra.length > ancho) {
+            lineas.push(actual);
+            actual = palabra;
+        } else {
+            actual = actual ? `${actual} ${palabra}` : palabra;
+        }
+    }
+    if (actual) lineas.push(actual);
+    return lineas;
+}
+
+/** Bloques de texto (cada uno, hasta `lineas` líneas): un bloque nunca cruza el final de una frase. */
+function bloques(texto, { ancho, lineas }) {
+    const salida = [];
+    for (const frase of frases(texto)) {
+        const partes = envolver(frase, ancho);
+        for (let i = 0; i < partes.length; i += lineas) salida.push(partes.slice(i, i + lineas).join('\n'));
+    }
+    return salida;
+}
+
+/**
+ * Parte un cue `{ inicioSeg, finSeg, narrar }` en cues legibles que cubren el mismo intervalo
+ * sin huecos ni solapes. Un cue que ya cabe se devuelve tal cual (partir dos veces no cambia
+ * nada: `pegarCapitulos` relee los `.vtt` de cada capítulo y los vuelve a escribir).
+ */
+export function partirCue(cue, opciones = {}) {
+    const { ancho, lineas } = { ...SUBTITULOS, ...opciones };
+    const trozos = bloques(cue.narrar, { ancho, lineas });
+    if (trozos.length <= 1) return [{ ...cue, narrar: trozos[0] ?? cue.narrar }];
+
+    const pesos = trozos.map((t) => t.replace(/\n/g, ' ').length);
+    const total = pesos.reduce((suma, peso) => suma + peso, 0);
+    const duracion = cue.finSeg - cue.inicioSeg;
+    let marca = cue.inicioSeg;
+
+    return trozos.map((narrar, i) => {
+        const inicioSeg = marca;
+        marca = i === trozos.length - 1 ? cue.finSeg : marca + (pesos[i] / total) * duracion;
+        return { ...cue, inicioSeg, finSeg: marca, narrar };
+    });
+}
+
+export const partirCues = (cues, opciones) => cues.flatMap((cue) => partirCue(cue, opciones));
+
+/** Cues cuyo texto (sin saltos de línea) pasa de `maximo` caracteres. */
+export function cuesLargos(cues, maximo = ANCHO_SUBTITULO * LINEAS_SUBTITULO) {
+    return cues.filter((cue) => cue.narrar.replace(/\n/g, '').length > maximo);
+}
+
+/** Los cues con narración, ya partidos si corresponde (`opciones` pisa lo de `configurarSubtitulos`). */
+function cuesDe(segmentos, opciones) {
+    const efectivas = { ...SUBTITULOS, ...opciones };
+    const con = segmentos
+        .filter((s) => s.narrar?.trim())
+        .map((s) => ({ inicioSeg: s.inicioSeg, finSeg: s.finSeg, narrar: s.narrar.trim() }));
+    return efectivas.partir ? partirCues(con, efectivas) : con;
+}
+
+/**
+ * @param {Array<{inicioSeg:number,finSeg:number,narrar?:string}>} segmentos
+ * @param {{partir?:boolean, ancho?:number, lineas?:number}} [opciones] pisa la config del proceso
+ */
+export function generarVtt(segmentos, opciones = {}) {
+    const cuerpo = cuesDe(segmentos, opciones)
+        .map((s) => `${reloj(s.inicioSeg, '.')} --> ${reloj(s.finSeg, '.')}\n${s.narrar}`)
         .join('\n\n');
     return `WEBVTT\n\n${cuerpo}\n`;
 }
 
-/** @param {Array<{inicioSeg:number,finSeg:number,narrar?:string}>} segmentos */
-export function generarSrt(segmentos) {
-    return conNarracion(segmentos)
-        .map((s, i) => `${i + 1}\n${reloj(s.inicioSeg, ',')} --> ${reloj(s.finSeg, ',')}\n${s.narrar.trim()}`)
+/** Igual que `generarVtt`, para la pista `mov_text` del MP4 (parte igual). */
+export function generarSrt(segmentos, opciones = {}) {
+    return cuesDe(segmentos, opciones)
+        .map((s, i) => `${i + 1}\n${reloj(s.inicioSeg, ',')} --> ${reloj(s.finSeg, ',')}\n${s.narrar}`)
         .join('\n\n') + '\n';
 }
 
