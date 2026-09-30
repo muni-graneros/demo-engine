@@ -5,23 +5,46 @@
 
 import { contarIdentificadores } from './auditoria.mjs';
 
+/** Los únicos valores que se aceptan como «esto es una máquina de desarrollo». */
+const ENTORNOS_DE_DESARROLLO = ['local', 'testing', 'development'];
+
 /**
- * Aborta si hay cualquier señal de que esto no es un entorno de desarrollo.
+ * Un host que NO puede ser el sistema real publicado en internet. Ojo: esto NO dice
+ * «es desarrollo» —eso lo decide la declaración explícita, ver abajo—, solo descarta lo
+ * que con certeza es público. Se usa únicamente para NEGAR, nunca para permitir.
+ */
+function hostNoPublico(host) {
+    return host === 'localhost' || host === '::1' || host.endsWith('.lan') ||
+        host.endsWith('.local') || host.endsWith('.test') ||
+        /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
+        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+}
+
+/**
+ * Aborta si el entorno no está DECLARADO como de desarrollo.
  *
- * Falla CERRADO a propósito. `APP_ENV` casi nunca está en el entorno del proceso Node —lo
- * lee PHP de su .env, no nosotros—, así que confiar en su ausencia sería permitir grabar
- * contra producción por omisión. Por eso la señal principal es el HOST de baseURL, que el
- * motor sí conoce siempre: solo se graba contra la máquina propia o la red privada.
+ * Antes esto se deducía del host: cualquier dirección de red privada —10.x, 192.168.x,
+ * 172.16-31.x, `.lan`, y también el loopback— se daba por «desarrollo» y con eso el
+ * guardián se relajaba solo. Está mal justamente acá: en el despliegue municipal la VPN
+ * interna Y LOS SISTEMAS EN PRODUCCIÓN viven en esos mismos rangos privados (VPS por islas,
+ * cada sistema tras su propio Docker rootless), así que la inferencia bajaba la guardia
+ * exactamente donde había datos reales de vecinos. Y el loopback no es mejor señal: parado
+ * dentro de la isla, `http://localhost:8031` ES el sistema en producción.
+ *
+ * Por eso la IP dejó de ser una señal de permiso. El entorno se declara a mano, con
+ * `DEMO_ENTORNO` (la del motor) o, para quien ya exporta la del sistema PHP, con `APP_ENV`;
+ * sin ninguna de las dos NO SE GRABA. El comportamiento por omisión es el seguro: quien no
+ * dijo nada no autorizó nada. El host se sigue mirando, pero solo para NEGAR —un dominio
+ * público no es desarrollo aunque alguien lo declare— nunca para permitir, y lo mismo vale
+ * entre las dos variables: si CUALQUIERA de las dos dice producción, no se graba.
+ *
+ * `DEMO_FORZAR=1` sigue siendo el único escape, y hay que pedirlo a propósito.
  *
  * @param {string} baseURL destino de la grabación
  * @param {NodeJS.ProcessEnv} [env]
  */
 export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
     if (env.DEMO_FORZAR === '1') return;
-
-    if (env.APP_ENV && !['local', 'testing', 'development'].includes(env.APP_ENV)) {
-        throw new Error(`APP_ENV="${env.APP_ENV}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
-    }
 
     let host;
     try {
@@ -30,13 +53,36 @@ export function exigirEntornoDeDesarrollo(baseURL, env = process.env) {
         throw new Error(`baseURL inválida para decidir si el entorno es seguro: "${baseURL}"`);
     }
 
-    const local = host === 'localhost' || host === '::1' || host.endsWith('.lan') ||
-        host.endsWith('.local') || host.endsWith('.test') ||
-        /^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host) ||
-        /^172\.(1[6-9]|2\d|3[01])\./.test(host);
-
-    if (!local) {
+    if (!hostNoPublico(host)) {
         throw new Error(`"${host}" no es una dirección local ni de red privada: grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
+    }
+
+    // Se miran las DOS variables, no solo la primera que esté puesta. Una presente pero
+    // vacía no dice nada, así que no cuenta como declaración.
+    const declaraciones = [['DEMO_ENTORNO', env.DEMO_ENTORNO], ['APP_ENV', env.APP_ENV]]
+        .map(([nombre, valor]) => [nombre, valor?.trim()])
+        .filter(([, valor]) => valor);
+
+    // Una señal de producción NIEGA aunque la otra variable diga desarrollo, igual que el
+    // host: acá las declaraciones se combinan como restricciones, no por precedencia. Si
+    // ganara la más específica, un `DEMO_ENTORNO=local` heredado de la shell —el que el
+    // README pide exportar para trabajar, y que termina en el .envrc o el .bashrc de
+    // cualquiera— taparía el `APP_ENV=production` que el proceso tiene en su entorno DENTRO
+    // de una isla del VPS municipal, donde además el sistema real se ve como `localhost`.
+    // Ahí el guardián dejaría grabar contra producción, que es justo lo que no puede pasar.
+    const produccion = declaraciones.find(([, valor]) => !ENTORNOS_DE_DESARROLLO.includes(valor.toLowerCase()));
+    if (produccion) {
+        throw new Error(`${produccion[0]}="${produccion[1]}" no es un entorno de desarrollo; grabar ahí expondría datos reales (usa DEMO_FORZAR=1 si sabes lo que haces)`);
+    }
+
+    if (!declaraciones.length) {
+        throw new Error(
+            `el entorno está sin declarar y "${host}" podría ser producción: en la red municipal ` +
+            'la VPN y los sistemas en producción usan los mismos rangos privados que el ' +
+            'desarrollo, así que la dirección no alcanza para saberlo. Declara ' +
+            `DEMO_ENTORNO=${ENTORNOS_DE_DESARROLLO[0]} si de verdad es tu máquina de desarrollo ` +
+            '(o DEMO_FORZAR=1 si sabes lo que haces)',
+        );
     }
 }
 
@@ -277,10 +323,75 @@ export async function exigirUnaSolaPersona(page, auditoria) {
         // la pantalla real a la vista ni un instante más de lo necesario mientras el error se
         // propaga hacia arriba.
         await cubrir(page);
+        // Enmascarados: este error sube hasta la consola y, en CI, hasta el log.
+        // El portero salta justamente cuando hay datos reales a la vista, que es
+        // el peor momento para copiarlos a otro sitio. Con DEMO_DEPURAR=1 salen
+        // completos, para poder investigar un falso positivo.
         throw new Error(
             `la pantalla muestra ${identificadores.length} identificadores distintos ` +
-            `(${identificadores.join(', ')}): sin abrirFiltrado/abrirVerificado ni ` +
+            `(${listaEnmascarada(identificadores)}): sin abrirFiltrado/abrirVerificado ni ` +
             'paso.variasPersonas = true, no se graba (falla cerrado)',
         );
     }
+}
+
+/**
+ * Deja de un identificador lo justo para reconocerlo, sin escribirlo entero.
+ *
+ * El portero se dispara justamente cuando algo salió mal y hay datos reales a la
+ * vista. Escribir los RUT completos en ese momento —a stdout, al mensaje del
+ * error, y de ahí al log de CI o a un `tee`— es copiarlos a otro sitio en el peor
+ * instante posible.
+ *
+ * Se conservan los primeros dos tercios porque lo que hace falta para depurar es
+ * saber CUÁNTOS eran y poder distinguirlos entre sí: enmascarar de más volvería
+ * el portero inútil, porque dos personas distintas se verían iguales en el log.
+ *
+ * @param {string} identificador
+ * @returns {string}
+ */
+export function enmascararIdentificador(identificador) {
+    const texto = String(identificador ?? '');
+    if (!texto) return '';
+
+    // Se tapan los CUATRO ÚLTIMOS alfanuméricos: en un RUT chileno eso es el
+    // dígito verificador y los tres anteriores, o sea `12.345.678-5` sale como
+    // `12.345.***-*`. Los separadores se dejan para que siga leyéndose como un
+    // RUT y no como una cadena cualquiera.
+    //
+    // Cuatro y no más: lo que hace falta para depurar es saber cuántos eran y
+    // poder distinguirlos entre sí. Tapando más, dos personas distintas se verían
+    // iguales en el log y el portero dejaría de servir para lo que existe.
+    const esAlfanumerico = (c) => /[0-9a-zA-Z]/.test(c);
+    const total = texto.split('').filter(esAlfanumerico).length;
+    const visibles = Math.max(total - 4, 0);
+
+    let vistos = 0;
+
+    return texto
+        .split('')
+        .map((caracter) => {
+            if (!esAlfanumerico(caracter)) return caracter;
+            vistos += 1;
+            return vistos <= visibles ? caracter : '*';
+        })
+        .join('');
+}
+
+/**
+ * Los identificadores listos para escribir en un log o en un mensaje de error.
+ *
+ * Con `DEMO_DEPURAR=1` salen completos: depurar un falso positivo del portero
+ * exige ver qué encontró, pero eso se pide a propósito y no es lo que pasa por
+ * omisión.
+ *
+ * @param {string[]} identificadores
+ * @returns {string}
+ */
+export function listaEnmascarada(identificadores) {
+    const lista = identificadores ?? [];
+
+    if (process.env.DEMO_DEPURAR === '1') return lista.join(', ');
+
+    return lista.map(enmascararIdentificador).join(', ');
 }

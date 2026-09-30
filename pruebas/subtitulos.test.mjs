@@ -59,3 +59,88 @@ test('parseVtt entiende horas de más de un dígito de reloj (curso largo)', () 
     assert.equal(cues[0].inicioSeg, 3725.5);
     assert.equal(cues[0].finSeg, 3727);
 });
+
+// C2 (G8-02): `generarVtt` escribía UN cue por paso con toda la locución (hasta 269
+// caracteres en una sola línea): ilegible en cualquier reproductor. Ahora parte cada cue en
+// frases y cada frase en bloques de a lo más 2 líneas de 42 caracteres, con el tiempo
+// repartido en proporción al largo. Lógica portada de seguridad-graneros
+// (tools/demo/subtitulos-legibles.mjs, a99bf657) con sus mismas pruebas.
+import { ANCHO_SUBTITULO, partirCue, partirCues, cuesLargos, configurarSubtitulos } from '../src/subtitulos.mjs';
+
+const LARGO = 'Vuelve a marcar «Cerrar sus sesiones de la app de terreno»: la app de ese teléfono se cierra. '
+    + 'Ojo: con su contraseña podría volver a entrar. Si el teléfono no aparece, también se le quita el rol Patrullero.';
+
+test('un cue que ya cabe se devuelve tal cual', () => {
+    const cue = { inicioSeg: 1, finSeg: 3, narrar: 'Guarda, y queda en el historial.' };
+    assert.deepEqual(partirCue(cue), [cue]);
+});
+
+test('un cue largo se parte en bloques de a lo más 2 líneas de 42 caracteres', () => {
+    assert.equal(ANCHO_SUBTITULO, 42);
+    const partidos = partirCue({ inicioSeg: 0, finSeg: 20, narrar: LARGO });
+    assert.ok(partidos.length > 1);
+    for (const { narrar } of partidos) {
+        const lineas = narrar.split('\n');
+        assert.ok(lineas.length <= 2, narrar);
+        for (const linea of lineas) assert.ok(linea.length <= 42, `${linea.length}: ${linea}`);
+    }
+});
+
+test('cubre el mismo intervalo, sin huecos ni solapes, y no pierde palabras', () => {
+    const partidos = partirCue({ inicioSeg: 5, finSeg: 25, narrar: LARGO });
+    assert.equal(partidos[0].inicioSeg, 5);
+    assert.equal(partidos.at(-1).finSeg, 25);
+    partidos.slice(1).forEach((cue, i) => assert.equal(cue.inicioSeg, partidos[i].finSeg));
+    assert.equal(partidos.map((c) => c.narrar.replace(/\s+/g, ' ')).join(' '), LARGO);
+});
+
+test('el tiempo de cada bloque es proporcional a su largo', () => {
+    const partidos = partirCue({ inicioSeg: 0, finSeg: 30, narrar: 'Corta. ' + 'Esta frase es bastante más larga que la otra.' });
+    const [a, b] = partidos.map((c) => c.finSeg - c.inicioSeg);
+    assert.ok(b > a * 3, `la frase larga debe durar más: ${a} vs ${b}`);
+});
+
+test('un bloque no cruza el final de una frase', () => {
+    const partidos = partirCue({ inicioSeg: 0, finSeg: 10, narrar: 'Uno corto. Dos también. Tres igual de corto.' });
+    assert.deepEqual(partidos.map((c) => c.narrar), ['Uno corto.', 'Dos también.', 'Tres igual de corto.']);
+});
+
+test('una palabra más larga que el ancho se corta en vez de desbordar', () => {
+    const [cue] = partirCue({ inicioSeg: 0, finSeg: 1, narrar: 'x'.repeat(100) });
+    assert.ok(cue.narrar.split('\n').every((linea) => linea.length <= 42));
+});
+
+test('generarVtt y generarSrt ya parten las locuciones largas: ningún cue pasa de 84 caracteres', () => {
+    const segmentos = [{ inicioSeg: 0, finSeg: 20, narrar: LARGO }, { inicioSeg: 20, finSeg: 22, narrar: 'Listo.' }];
+    const cues = parseVtt(generarVtt(segmentos));
+    assert.ok(cues.length > 2, 'la locución larga debía partirse');
+    assert.equal(cuesLargos(cues).length, 0);
+    assert.equal(cues[0].inicioSeg, 0);
+    assert.equal(cues.at(-1).finSeg, 22);
+    const srt = generarSrt(segmentos);
+    assert.equal((srt.match(/-->/g) ?? []).length, cues.length, 'el SRT (pista del MP4) parte igual que el VTT');
+});
+
+test('partir de nuevo un VTT ya partido no cambia nada (pegarCapitulos lo relee y reescribe)', () => {
+    const una = generarVtt([{ inicioSeg: 0, finSeg: 20, narrar: LARGO }]);
+    assert.equal(generarVtt(parseVtt(una)), una);
+    assert.deepEqual(partirCues(parseVtt(una)), parseVtt(una));
+});
+
+test('partir:false conserva un cue por paso (compatibilidad), y el ancho/líneas se pueden cambiar', () => {
+    const segmentos = [{ inicioSeg: 0, finSeg: 20, narrar: LARGO }];
+    assert.equal((generarVtt(segmentos, { partir: false }).match(/-->/g) ?? []).length, 1);
+    const angosto = parseVtt(generarVtt(segmentos, { ancho: 30, lineas: 1 }));
+    assert.ok(angosto.every((c) => !c.narrar.includes('\n') && c.narrar.length <= 30));
+});
+
+test('configurarSubtitulos fija el defecto del proceso (lo llama cargarConfig) y se puede volver atrás', () => {
+    const segmentos = [{ inicioSeg: 0, finSeg: 20, narrar: LARGO }];
+    try {
+        configurarSubtitulos({ partir: false });
+        assert.equal((generarVtt(segmentos).match(/-->/g) ?? []).length, 1);
+    } finally {
+        configurarSubtitulos();
+    }
+    assert.ok((generarVtt(segmentos).match(/-->/g) ?? []).length > 1);
+});

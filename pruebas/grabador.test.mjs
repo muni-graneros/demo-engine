@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdtempSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { grabar } from '../src/grabador.mjs';
 
-import { ff, duracion } from '../src/ffmpeg.mjs';
+import { ff, duracion, RUTA_FFMPEG as ffmpegPath } from '../src/ffmpeg.mjs';
+import { pulsar } from '../src/camara.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 // Voz de mentira que devuelve un .wav REAL de la duración pedida: así el grabador ejercita
 // el mismo camino que en producción (sintetizar → medir → esperar), sin depender de que
@@ -443,4 +449,314 @@ test('las locuciones se sintetizan ANTES de grabar, y una repetida se sintetiza 
         rmSync(salida, { recursive: true, force: true });
         rmSync(dirSesiones, { recursive: true, force: true });
     }
+});
+
+// --- Actores con dispositivo, sin sesión, pantalla dividida y clics ------------------------
+//
+// Todos estos usan actores `sesion: false`: no hace falta loguear para probar el contexto,
+// el tamaño de la pista ni la pantalla dividida, y así cada test se ahorra el login.
+
+function configMulti(url, actores) {
+    return {
+        baseURL: url,
+        video: { ancho: 800, alto: 500, pausaMinima: 100, calidad: 80, fps: 25, msCursor: 50 },
+        auditoria: { patron: 'x^', chequeoEnVivo: false },
+        actores,
+    };
+}
+
+const SIN_VOZ = { disponible: () => false };
+
+test('actor con dispositivo graba a su tamaño y actor sin sesión no pide storageState', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { vecina: { sesion: false, dispositivo: 'Pixel 7' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'vecina', hacer: async (page) => { await page.goto(`${url}/panel`); } }] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        // Pixel 7: viewport CSS 412×839, redondeado a par → 412×840.
+        assert.deepEqual(r.dimensiones.vecina, { ancho: 412, alto: 840 });
+        assert.equal(r.origenes.vecina >= 0, true);
+        const info = spawnSync(ffmpegPath, ['-i', r.pistas.vecina]).stderr.toString();
+        assert.match(info, /412x840/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('la pista de un teléfono no se agranda: mide lo que su viewport CSS, redondeado a par', async () => {
+    // El screencast de Chromium headless entrega frames en píxeles CSS (412×839 en un
+    // Pixel 7) aunque el dispositivo tenga densidad 2,625. Pedir una pista más grande solo
+    // hacía que ffmpeg estirara esos frames: más peso, cero nitidez real.
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const { devices } = await import('playwright');
+        const par = (n) => Math.round(n / 2) * 2;
+        for (const dispositivo of ['Pixel 7', 'iPhone 13']) {
+            const vp = devices[dispositivo].viewport;
+            const config = configMulti(url, { tel: { sesion: false, dispositivo } });
+            const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+                { actor: 'tel', hacer: async (page) => { await page.goto(`${url}/`); } }] }] };
+            const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+            const esperado = { ancho: par(vp.width), alto: par(vp.height) };
+            assert.deepEqual(r.dimensiones.tel, esperado, dispositivo);
+            const info = spawnSync(ffmpegPath, ['-i', r.pistas.tel]).stderr.toString();
+            const [, w, h] = info.match(/, (\d+)x(\d+)/);
+            assert.deepEqual({ ancho: Number(w), alto: Number(h) }, esperado,
+                `${dispositivo}: la pista no debe ser más grande que el viewport del teléfono`);
+        }
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dividir abre el contexto del otro actor antes del paso y viaja en el paso', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false, dispositivo: 'Pixel 7' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'b', hacer: async (page) => { await page.goto(`${url}/`); } },
+            { actor: 'a', dividir: ['b', 'a'], hacer: async (page) => { await page.goto(`${url}/`); } },
+        ] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(r.pasos[1].dividir, ['b', 'a']);
+        assert.equal(r.pasos[0].dividir, null, 'antes de declararlo, el paso no va dividido');
+        assert.ok(existsSync(r.pistas.b), 'la pista del otro actor tiene que existir');
+        assert.ok(r.origenes.b <= r.pasos[1].tGlobal,
+            'el otro actor tiene que estar grabando desde antes del tramo dividido');
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('dividir queda vigente hasta un paso con dividir:null y no cruza de escena', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false } });
+        const ir = async (page) => { await page.goto(`${url}/`); };
+        const guion = { id: 'm', escenas: [
+            { id: 'e1', titulo: 'E1', pasos: [
+                { actor: 'b', hacer: ir },
+                { actor: 'a', dividir: ['a', 'b'], hacer: ir },
+                { actor: 'b', hacer: ir },
+                { actor: 'a', dividir: null, hacer: ir },
+                { actor: 'a', dividir: ['a', 'b'], hacer: ir },
+            ] },
+            { id: 'e2', titulo: 'E2', pasos: [{ actor: 'a', hacer: ir }] },
+        ] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(r.pasos.map((p) => p.dividir),
+            [null, ['a', 'b'], ['a', 'b'], null, ['a', 'b'], null]);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Review Focus #2: dividir con un actor que no navegó avisa por stderr', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    const avisos = [];
+    const warnOriginal = console.warn;
+    console.warn = (...args) => { avisos.push(args.join(' ')); };
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'a', dividir: ['a', 'b'], hacer: async (page) => { await page.goto(`${url}/`); } },
+        ] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.ok(avisos.some((m) => /dividir: el actor "b"/.test(m)),
+            `debió avisar que el panel de "b" sale en blanco; avisos: ${JSON.stringify(avisos)}`);
+        assert.ok(!avisos.some((m) => /dividir: el actor "a"/.test(m)),
+            'el actor del paso navega en su propio `hacer`: no hay que avisar por él');
+    } finally {
+        console.warn = warnOriginal;
+        await cerrar(); rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('dividir inválido (un solo actor, o sin el actor del paso) falla con escena y paso', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false }, b: { sesion: false }, c: { sesion: false } });
+        const ir = async (page) => { await page.goto(`${url}/`); };
+        for (const dividir of [['a'], ['b', 'c'], ['a', 'a'], ['a', 'b', 'c'], 'b', false, '', 0]) {
+            const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', dividir, hacer: ir }] }] };
+            await assert.rejects(
+                () => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+                (error) => {
+                    assert.match(error.message, /dividir/);
+                    assert.match(error.message, /escena "e"/);
+                    assert.match(error.message, /paso 1/);
+                    return true;
+                },
+                `dividir ${JSON.stringify(dividir)} debió rechazarse`,
+            );
+        }
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('los clics hechos con pulsar() quedan en clics con tiempo global', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false } });
+        // Sin sesión, el juguete muestra el login: su botón «Entrar» es el clic a registrar.
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'a', hacer: async (page) => { await page.goto(`${url}/`); await pulsar(page, '#entrar'); } },
+        ] }] };
+        const r = await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.equal(r.clics.length, 1);
+        assert.ok(r.clics[0] > 0, `el clic tiene que caer después del cero global (${r.clics[0]})`);
+        assert.ok(r.clics[0] >= r.pasos[0].tGlobal && r.clics[0] <= r.pasos[0].tGlobal + r.pasos[0].duracionMs,
+            'el clic cae dentro del paso que lo hizo, en el reloj global');
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('un actor con sesión que falta en sesiones sigue siendo un error', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: {} });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', hacer: async () => {} }] }] };
+        await assert.rejects(() => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+            /no está en la config/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('la baseURL de un actor también pasa por el guardián de entorno', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { a: { sesion: false, baseURL: 'https://www.graneros.cl' } });
+        const guion = { id: 'm', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'a', hacer: async () => {} }] }] };
+        await assert.rejects(() => grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ }),
+            /no es una dirección local/);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('Ley 21.719: en un tramo dividido, la pantalla del OTRO actor también pasa por la auditoría', async () => {
+    // El panel pasivo está a la vista en el video igual que el activo: si solo se auditara
+    // la página del actor que actúa, el listado completo del otro saldría sin control.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-grab-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = configConAuditoria(juguete, {
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' }, vecina: { sesion: false } },
+        });
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+
+        const guionCon = (variasPersonas) => ({
+            id: 'dividido',
+            escenas: [{ id: 'traspaso', titulo: 'Traspaso', pasos: [
+                // El funcionario deja abierto el listado completo (excepción declarada en SU paso).
+                { actor: 'funcionario', variasPersonas: true,
+                  hacer: async (page) => { await page.goto(`${juguete.url}/panel`); } },
+                // La vecina actúa en una pantalla limpia, pero con el listado al lado.
+                { actor: 'vecina', dividir: ['vecina', 'funcionario'], variasPersonas,
+                  hacer: async (page) => { await page.goto(`${juguete.url}/`); } },
+            ] }],
+        });
+
+        await assert.rejects(
+            () => grabar(guionCon(false), { config, sesiones, salida, voz: vozDe(1, salida) }),
+            (error) => {
+                assert.match(error.message, /traspaso/);
+                assert.match(error.message, /paso 2/);
+                assert.match(error.message, /identificadores distintos/);
+                return true;
+            },
+        );
+
+        const { pasos } = await grabar(guionCon(true), { config, sesiones, salida, voz: vozDe(1, salida) });
+        assert.equal(pasos.length, 2, 'con variasPersonas:true el tramo dividido graba');
+    } finally {
+        await juguete.cerrar();
+        rmSync(salida, { recursive: true, force: true });
+        rmSync(dirSesiones, { recursive: true, force: true });
+    }
+});
+
+// C9 (G2-38): el grabador decide el cursor por actor (actorTactil) y, con
+// video.cursorEnCapturas:false, deja las capturas del manual sin cursor.
+test('un actor con dispositivo táctil graba con indicador de toque; uno de escritorio, con flecha', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' }, pc: { sesion: false } });
+        const tipos = {};
+        const paso = (actor) => ({ actor, hacer: async (page) => {
+            await page.goto(`${url}/`);
+            await pulsar(page, '#entrar');
+            tipos[actor] = await page.evaluate(() => document.getElementById('__cursor')?.dataset.tipo);
+        } });
+        const guion = { id: 't', escenas: [{ id: 'e', titulo: 'E', pasos: [paso('tel'), paso('pc')] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        assert.deepEqual(tipos, { tel: 'toque', pc: 'flecha' });
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('video.cursorEnCapturas:false: la captura del manual sale sin cursor (y el video lo sigue mostrando)', async () => {
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const { chromium } = await import('playwright');
+        // Página con fondo liso y el cursor táctil (círculo) en un punto conocido: se mide
+        // por píxel si el círculo aparece en la captura.
+        const hacer = async (page) => {
+            await page.setContent('<body style="margin:0;background:#ff00ff"><button id="b" style="margin:200px;width:100px;height:40px;background:#ff00ff;color:#ff00ff;border:0">x</button></body>');
+            const { moverCursorA } = await import('../src/camara.mjs');
+            await moverCursorA(page, '#b');
+        };
+        const guion = { id: 'c', escenas: [{ id: 'e', titulo: 'E', pasos: [{ actor: 'tel', hacer }] }] };
+        const noMagenta = async (png) => {
+            const nav = await chromium.launch();
+            try {
+                const p = await nav.newPage();
+                return await p.evaluate(async (b64) => {
+                    const img = new Image(); img.src = `data:image/png;base64,${b64}`; await img.decode();
+                    const c = document.createElement('canvas'); c.width = img.width; c.height = img.height;
+                    const ctx = c.getContext('2d'); ctx.drawImage(img, 0, 0);
+                    const { data } = ctx.getImageData(0, 0, c.width, c.height);
+                    let n = 0;
+                    for (let i = 0; i < data.length; i += 4) if (!(data[i] > 240 && data[i + 1] < 20 && data[i + 2] > 240)) n++;
+                    return n;
+                }, png.toString('base64'));
+            } finally { await nav.close(); }
+        };
+        const { readFileSync } = await import('node:fs');
+        const conCursor = await grabar(guion, { config: configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' } }), sesiones: {}, salida: join(dir, 'a'), voz: SIN_VOZ });
+        const sinCursorCfg = configMulti(url, { tel: { sesion: false, dispositivo: 'Pixel 7' } });
+        sinCursorCfg.video.cursorEnCapturas = false;
+        const sinCursor = await grabar(guion, { config: sinCursorCfg, sesiones: {}, salida: join(dir, 'b'), voz: SIN_VOZ });
+        const a = await noMagenta(readFileSync(join(dir, 'a', conCursor.pasos[0].captura)));
+        const b = await noMagenta(readFileSync(join(dir, 'b', sinCursor.pasos[0].captura)));
+        assert.ok(a > 200, `con el defecto, el cursor sale en la captura (${a} px distintos del fondo)`);
+        assert.equal(b, 0, `con cursorEnCapturas:false no debe haber nada más que el fondo (${b} px)`);
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('superficies.<id>.presentar fija la ficha de presentar para los actores de esa superficie (C3)', async () => {
+    // configurarPresentacion(opciones, page) existía, pero nadie la llamaba: declarar en la
+    // config que el APK quiere la ficha arriba (abajo vive PÁNICO) no hacía nada.
+    const { url, cerrar } = await iniciarJuguete();
+    const dir = mkdtempSync(join(tmpdir(), 'grab-'));
+    try {
+        const config = {
+            ...configMulti(url, { tel: { sesion: false, superficie: 'apk' }, pc: { sesion: false, superficie: 'sala' } }),
+            superficies: {
+                apk: { nombre: 'APK', tipo: 'escritorio', presentar: { posicion: 'arriba-derecha' } },
+                sala: { nombre: 'Sala', tipo: 'escritorio' },
+            },
+        };
+        const { presentar } = await import('../src/explainer.mjs');
+        const posiciones = {};
+        const paso = (actor) => ({ actor, hacer: async (page) => {
+            await page.goto(`${url}/`);
+            await presentar(page, { nombre: actor, posicion: actor === 'pc' ? 'abajo-izquierda' : undefined });
+            posiciones[actor] = await page.evaluate(() => document.getElementById('demo-lower-third')?.dataset.posicion);
+        } });
+        const guion = { id: 't', escenas: [{ id: 'e', titulo: 'E', pasos: [paso('tel'), paso('pc')] }] };
+        await grabar(guion, { config, sesiones: {}, salida: dir, voz: SIN_VOZ });
+        // La superficie manda sobre el defecto; la llamada, sobre la superficie.
+        assert.deepEqual(posiciones, { tel: 'arriba-derecha', pc: 'abajo-izquierda' });
+    } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
 });

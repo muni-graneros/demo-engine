@@ -13,3 +13,7 @@ salida/
 
 # Artefactos temporales de tests (assets/escudos/fotos de prueba)
 pruebas/tmp-*
+
+# direnv (tokens por frente; NUNCA versionar)
+.envrc
+.direnv/

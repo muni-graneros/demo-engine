@@ -1,8 +1,16 @@
 import * as piper from './piper.mjs';
 import * as kokoro from './kokoro.mjs';
+import * as pocket from './pocket.mjs';
+import * as chatterbox from './chatterbox.mjs';
 import { resolverVenvYVoces } from './resolver.mjs';
 
-const MOTORES = { piper, kokoro };
+// Se exporta para que las pruebas comprueben el registro sin tener que instalar cada motor.
+export const MOTORES = { piper, kokoro, pocket, chatterbox };
+
+// Motores con venv propio que no comparten `voz.venv` ni la voz por omisión de la config.
+const VENV_PROPIO = new Set(['pocket', 'chatterbox']);
+// Voz por omisión de `configurar.mjs` (una voz de Kokoro): solo tiene sentido para kokoro.
+const VOZ_POR_OMISION_CONFIG = 'ef_dora';
 
 /**
  * Avisa por stderr que se pidió voz pero no se encontró ningún motor instalado. No es un
@@ -90,7 +98,16 @@ export function crearVoz({ motor = 'kokoro', voz, respaldo = 'piper', vozRespald
         const { nombre, voz: vozCandidato } = candidato;
         const modulo = MOTORES[nombre];
         if (!modulo) continue;
-        const instancia = modulo.crear({ voz: vozCandidato, venv, voces, velocidad });
+        // Pocket y Chatterbox viven en sus propios venvs (<caché>/demo-engine/venv-<motor>):
+        // `voz.venv` de la config es el de kokoro/piper y con él fallarían al arrancar. Tampoco
+        // reciben 'ef_dora', el default GLOBAL de la config, que es una voz de Kokoro: con ese
+        // id pocket buscaría una voz inexistente y chatterbox un .wav llamado así.
+        const propio = VENV_PROPIO.has(nombre);
+        const instancia = modulo.crear({
+            voz: propio && vozCandidato === VOZ_POR_OMISION_CONFIG ? undefined : vozCandidato,
+            venv: propio ? undefined : venv,
+            voces, velocidad,
+        });
         if (instancia.disponible()) {
             if (indice > 0) avisarCaidaARespaldo({ motor, usado: nombre, errores });
             return instancia;

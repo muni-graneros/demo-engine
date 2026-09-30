@@ -7,7 +7,7 @@
  * (`desdeSeg`/`hastaSeg`, en su reloj local) y en qué lugar del relato va (`tGlobal`).
  *
  * @param {Array<{escena:string,actor:string,tLocal:number,tGlobal:number,duracionMs:number,narrar?:string,wav?:string|null}>} pasos
- * @returns {Array<{actor:string,escena:string,desdeSeg:number,hastaSeg:number,tGlobal:number,narrar?:string,wav?:string|null}>}
+ * @returns {Array<{actor:string,escena:string,desdeSeg:number,hastaSeg:number,tGlobal:number,narrar?:string,wav?:string|null,dividir:string[]|null,plano:string|null}>}
  */
 export function construirLineaDeTiempo(pasos) {
     for (const p of pasos) {
@@ -29,5 +29,12 @@ export function construirLineaDeTiempo(pasos) {
             // `wav` acá, montar() nunca se enteraba de ese trabajo y sintetizaba TODO de
             // nuevo, duplicando el paso más caro del pipeline en cada corrida.
             wav: p.wav,
+            // Pantalla dividida: el montaje necesita saber en qué tramos componer las dos
+            // pistas lado a lado. `null` explícito, no ausente, para que el montaje no tenga
+            // que distinguir «sin dividir» de «pasos grabados antes de que existiera».
+            dividir: p.dividir ?? null,
+            // Rótulo plano ('portada' | 'cierre' | null): el montaje lo saca a pantalla
+            // completa, sin marco de navegador (ver `esPlano` en src/rotulos.mjs).
+            plano: p.plano || null,
         }));
 }

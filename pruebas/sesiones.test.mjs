@@ -6,6 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { iniciarJuguete } from './juguete/servidor.mjs';
 import { prepararSesiones, prepararSesionesParaGuion, sesionSigueViva, actoresDeGuion, totp } from '../src/sesiones.mjs';
+import { declararEntornoDePruebas } from './entorno.mjs';
+
+// El guardián de privacidad ya no infiere el entorno por la IP: hay que declararlo.
+declararEntornoDePruebas();
 
 test('genera el TOTP de referencia del RFC 6238', () => {
     // Secreto oficial del RFC 6238 (Apéndice B): "12345678901234567890" (20 bytes ASCII)
@@ -93,6 +97,34 @@ test('pasa por el guardián de entorno antes de loguear: con host público no es
     };
     await assert.rejects(() => prepararSesiones(config, { dirSesiones: dir }), /no es una dirección local/);
     assert.deepEqual(readdirSync(dir), [], 'no debe quedar ningún archivo de sesión en disco');
+});
+
+test('sin entorno declarado, tampoco escribe sesiones contra un 127.0.0.1: la dirección privada ya no autoriza', async () => {
+    // El defecto de la auditoría visto desde el flujo real, no desde la función suelta: la
+    // versión vieja daba por «desarrollo» cualquier host privado, así que esto logueaba con
+    // credenciales reales y dejaba las cookies en disco contra un 10.x, un 192.168.x o un
+    // 127.x que en la red municipal puede ser perfectamente producción. Acá se quita la
+    // declaración que puso `declararEntornoDePruebas()` para reproducir la máquina de quien
+    // no declaró nada, que es el caso por omisión.
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const dir = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    const declarado = process.env.DEMO_ENTORNO;
+    const appEnv = process.env.APP_ENV;
+    delete process.env.DEMO_ENTORNO;
+    delete process.env.APP_ENV;
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+        };
+        await assert.rejects(() => prepararSesiones(config, { dirSesiones: dir }), /sin declarar/);
+        assert.deepEqual(readdirSync(dir), [], 'no debe quedar ningún archivo de sesión en disco');
+    } finally {
+        if (declarado === undefined) delete process.env.DEMO_ENTORNO; else process.env.DEMO_ENTORNO = declarado;
+        if (appEnv === undefined) delete process.env.APP_ENV; else process.env.APP_ENV = appEnv;
+        await juguete.cerrar();
+    }
 });
 
 test('sesionSigueViva pasa por el guardián de entorno antes de abrir el navegador', async () => {
@@ -278,4 +310,21 @@ test('prepararSesionesParaGuion reutiliza el storageState que ya está en disco,
     } finally {
         await juguete.cerrar();
     }
+});
+
+test('prepararSesionesParaGuion no intenta loguear a un actor sesion:false', async () => {
+    // El vecino anónimo y el APK (que pide su token dentro del guion) no tienen cuenta que
+    // loguear: un baseURL inalcanzable demuestra que ni siquiera se intenta.
+    const guion = { escenas: [{ pasos: [{ actor: 'vecina' }] }] };
+    const config = { baseURL: 'http://127.0.0.1:1', actores: { vecina: { sesion: false } }, login: {} };
+    const sesiones = await prepararSesionesParaGuion(guion, config, { dirSesiones: mkdtempSync(join(tmpdir(), 's-')) });
+    assert.equal(sesiones.vecina, null);
+});
+
+test('prepararSesiones salta al actor sesion:false y lo deja en null', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 's-'));
+    const config = { baseURL: 'http://127.0.0.1:1', actores: { vecina: { sesion: false } }, login: {} };
+    const sesiones = await prepararSesiones(config, { dirSesiones: dir });
+    assert.deepEqual(sesiones, { vecina: null });
+    assert.equal(existsSync(join(dir, 'vecina.json')), false);
 });

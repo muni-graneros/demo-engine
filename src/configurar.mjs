@@ -1,6 +1,10 @@
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { devices } from 'playwright';
+import { validarDividida } from './lienzo.mjs';
+import { configurarSubtitulos } from './subtitulos.mjs';
+import { POSICIONES_FICHA } from './explainer.mjs';
 
 export class ErrorConfig extends Error {}
 
@@ -21,7 +25,16 @@ const DEFECTOS = {
     // Un tutorial que quiera ir más pausado sube estos dos en su config; lo que
     // no debería pasar es que un proyecto nuevo herede el ritmo lento sin
     // haberlo elegido.
-    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260 },
+    //
+    // `rotulos`: cómo salen las portadas y cierres (`portada()`/`cierre()`) cuando hay marco o
+    // lienzo. 'plano' (defecto) = a pantalla completa, sin ventana, barra de URL ni chip: son
+    // tarjetas del video, no páginas del sistema. 'marco' = dentro del marco, como en 1.14.
+    // `dividida`: disposición de la pantalla dividida. 'foco' (defecto) agranda la mitad del
+    // actor que actúa (`foco` del ancho); 'igual' es la de 1.14 (mismo alto, ancho por aspecto).
+    video: {
+        ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null,
+        rotulos: 'plano', dividida: { modo: 'foco', foco: 0.72 }, cursorEnCapturas: true,
+    },
     // `voz` y `vozRespaldo` son campos separados porque Kokoro y Piper nombran sus voces
     // distinto (ver el comentario de `crearVoz` en src/voz/index.mjs). Si `vozRespaldo`
     // queda en null, el respaldo usa su propio valor por defecto, no el del motor principal.
@@ -34,7 +47,10 @@ const DEFECTOS = {
     marca: { color: '#1e3a8a', escudo: null },
     // `ocr` queda sin defecto a propósito: es el host al que el proceso se conecta, y eso
     // decide quien configura el sistema, no el motor (ver src/auditoria.mjs). `patron`,
-    // `cada` y `maximo` sí tienen un valor razonable porque no comprometen a ningún host.
+    // `cada` sí tiene un valor razonable porque no compromete a ningún host; `maximo` queda
+    // en null (sin tope) para que `demo auditar` cubra el video entero (ver auditoria.mjs).
+    // `token` (header X-Service-Token del OCR) tampoco tiene defecto: es un secreto y lo pone
+    // el consumidor desde su entorno (`process.env.DEMO_OCR_TOKEN`), nunca escrito en claro.
     // `validar` también queda sin defecto: es un filtro OPCIONAL (por ejemplo, el dígito
     // verificador de un RUT chileno) que solo quien configura el sistema puede aportar — el
     // motor no sabe qué hace válido a un identificador. Sin declararlo, se sigue contando
@@ -53,13 +69,180 @@ const DEFECTOS = {
     // (desde v1.1.1: `\d{7,8}-[\dkK]` sin anclar mordía dentro de cadenas más largas). Hay
     // un test en pruebas/configurar.test.mjs que compara ambos literales para detectar que
     // se desincronicen.
-    auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: 20, validar: null, chequeoEnVivo: true },
+    auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: null, token: null, validar: null, chequeoEnVivo: true },
     sembrar: null,
     limpiar: null,
+    // Audio opt-in: sin música y sin clic, un video de 1.13 suena igual que antes. El
+    // volumen del clic tiene defecto aunque esté apagado para que activarlo sea un solo
+    // `activo: true`, sin tener que adivinar un nivel razonable.
+    audio: { musica: null, clic: { activo: false, volumen: 0.5 } },
+    // Subtítulos partidos en frases, 2 líneas de 42 (ver src/subtitulos.mjs). `partir: false`
+    // vuelve al cue por paso de antes de 1.15.
+    subtitulos: { partir: true, ancho: 42, lineas: 2 },
+    // Banderas extra de Chromium para los lanzamientos que tocan el sistema grabado (grabar,
+    // preparar sesiones, pack de contexto). Caso real: `--host-resolver-rules` para que la
+    // barra y los enlaces muestren el dominio público y no 127.0.0.1/localhost.
+    navegador: { args: [] },
 };
+
+const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
+const ROTULOS = ['plano', 'marco'];
+const ICONO_POR_TIPO = { escritorio: 'monitor', telefono: 'phone' };
+
+// `presentacion` queda en null a propósito: es OPT-IN. Hay más de diez proyectos usando el
+// motor y ninguno debe cambiar de aspecto sin declararlo. Los defectos de adentro viven
+// aparte porque solo se aplican si el bloque existe; fusionarlos siempre convertiría la
+// ausencia del bloque en "presentación con todo por defecto", que es justo lo contrario.
+const DEFECTOS_PRESENTACION = {
+    fondo: null,        // null = gradiente derivado de marca.color
+    url: null,          // null = la barra rotula baseURL; declarar la URL pública para publicar
+    padding: 80,
+    radio: 16,
+    sombra: true,
+    barra: true,
+    salida: { ancho: 1920, alto: 1080 },
+    transicion3d: { activa: true, ms: 900, gradosMax: 12 },
+    // Cuánto dura en pantalla el mapa de superficies antes de la primera escena: lo
+    // bastante para leer los rótulos, no tanto como para que parezca una diapositiva.
+    mapaMs: 2500,
+    // Rótulo de la superficie activa en el mapa. null = `TEXTO_AQUI` («Estás aquí»); cada
+    // superficie puede traer el suyo en `superficies.<id>.aqui`.
+    textoAqui: null,
+};
+
+/**
+ * Normaliza un color de superficie a `#rrggbb`. El cálculo de contraste de la etiqueta solo
+ * sabe leer hexadecimal; aceptar `rgb()` o nombres CSS en silencio producía un NaN y la
+ * etiqueta caía en tinta oscura sin avisar. Se valida al cargar la config (y no recién al
+ * renderizar el mapa, a mitad del curso) para fallar antes de levantar un navegador.
+ */
+export function normalizarColor(color, id) {
+    const m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(String(color).trim());
+    if (!m) throw new ErrorConfig(`demo.config.mjs: superficies.${id}.color debe ser hexadecimal (#rgb o #rrggbb), llegó "${color}"`);
+    const h = m[1].length === 3 ? [...m[1]].map((c) => c + c).join('') : m[1];
+    return '#' + h.toLowerCase();
+}
 
 function exigir(condicion, mensaje) {
     if (!condicion) throw new ErrorConfig(`demo.config.mjs: ${mensaje}`);
+}
+
+/**
+ * `superficies.<id>.presentar`: las opciones de la ficha de `presentar` para los actores de
+ * esa superficie (el grabador las pasa a `configurarPresentacion` con su página). Se validan
+ * al cargar: una posición mal escrita reventaría recién al abrir el contexto del actor.
+ */
+function validarPresentar(presentar, id) {
+    if (presentar === undefined) return;
+    const donde = `superficies.${id}.presentar`;
+    exigir(presentar !== null && typeof presentar === 'object' && !Array.isArray(presentar),
+        `${donde} debe ser un objeto { posicion, evitar, margen }`);
+    exigir(presentar.posicion === undefined || POSICIONES_FICHA.includes(presentar.posicion),
+        `${donde}.posicion "${presentar.posicion}" no existe; usá una de ${POSICIONES_FICHA.join(', ')}`);
+    exigir(presentar.evitar === undefined || (Array.isArray(presentar.evitar) && presentar.evitar.every((e) => typeof e === 'string')),
+        `${donde}.evitar debe ser una lista de selectores`);
+    exigir(presentar.margen === undefined || (Number.isFinite(presentar.margen) && presentar.margen >= 0),
+        `${donde}.margen debe ser un número de px >= 0`);
+}
+
+/**
+ * `--host-resolver-rules` solo puede mandar nombres a esta misma máquina (127.x, localhost,
+ * ::1). El guardián de entorno (`exigirEntornoDeDesarrollo`) decide mirando el host de
+ * `baseURL`; una regla `MAP localhost 10.0.0.5` lo burlaría en silencio, porque el navegador
+ * iría a donde diga la regla y no a donde dice el host. El uso legítimo —que la barra y los
+ * enlaces muestren el dominio público mientras se graba en local— siempre apunta a loopback.
+ */
+function exigirReglasALoopback(arg) {
+    const m = /^--host-resolver-rules=(.*)$/s.exec(arg);
+    if (!m) return;
+    const loopback = /^(127(\.\d{1,3}){3}|localhost|\[::1\])(:\d{1,5})?$/i;
+    for (const regla of m[1].split(',').map((r) => r.trim()).filter(Boolean)) {
+        const partes = regla.split(/\s+/);
+        if (partes[0].toUpperCase() === 'EXCLUDE' && partes.length === 2) continue;
+        exigir(partes[0].toUpperCase() === 'MAP' && partes.length === 3 && loopback.test(partes[2]),
+            `navegador.args: la regla "${regla}" de --host-resolver-rules debe ser "MAP <nombre> <127.0.0.1|localhost|[::1]>[:puerto]" o "EXCLUDE <nombre>": mapear a otra máquina saltaría el guardián de entorno`);
+    }
+}
+
+/** Fusiona `video`, tratando `presentacion` (y su `salida`/`transicion3d`) como sub-bloques
+ *  opt-in: ausentes se quedan en null, presentes reciben sus defectos. */
+function fusionarVideo(defectos, cruda = {}) {
+    const video = { ...defectos, ...cruda, dividida: { ...defectos.dividida, ...cruda.dividida } };
+    exigir(ROTULOS.includes(video.rotulos), `video.rotulos debe ser ${ROTULOS.join(' o ')}, llegó "${video.rotulos}"`);
+    try {
+        validarDividida(video.dividida);
+    } catch (error) {
+        throw new ErrorConfig(`demo.config.mjs: video.${error.message}`);
+    }
+    if (!cruda.presentacion) {
+        video.presentacion = null;
+        return video;
+    }
+    video.presentacion = {
+        ...DEFECTOS_PRESENTACION,
+        ...cruda.presentacion,
+        salida: { ...DEFECTOS_PRESENTACION.salida, ...cruda.presentacion.salida },
+        transicion3d: { ...DEFECTOS_PRESENTACION.transicion3d, ...cruda.presentacion.transicion3d },
+    };
+    const { textoAqui } = video.presentacion;
+    exigir(textoAqui === null || (typeof textoAqui === 'string' && textoAqui.trim() !== ''),
+        'video.presentacion.textoAqui debe ser un texto no vacío (o null para «Estás aquí»)');
+    return video;
+}
+
+/**
+ * Una contraseña escrita como literal: `password: 'algo'` o `"password": "algo"`.
+ *
+ * Deja fuera cualquier cosa que no sea una comilla justo después de los dos puntos,
+ * que es lo que descarta `password: process.env.DEMO_CLAVE ?? 'password'` — ahí el
+ * valor lo pone el entorno y el `'password'` final es solo el respaldo del seeder.
+ */
+const CLAVE_LITERAL = /\bpassword["']?\s*:\s*(["'])(.*?)\1/;
+
+/** El valor que deja el seeder de demo en todos los sistemas: público, no identifica a nadie. */
+const CLAVE_DEL_SEEDER = 'password';
+
+/**
+ * Avisa por consola cuando el archivo trae la contraseña de un actor escrita en claro.
+ *
+ * Cuatro sistemas la tenían versionada porque la plantilla lo enseñaba así. Se
+ * corrigió en los cinco, pero eso no impide que vuelva: el próximo `demo init` copia
+ * la plantilla y quien agregue un actor escribe la clave a mano. Este aviso es lo que
+ * hace que el arreglo se sostenga, y va acá porque la carga de la config es el único
+ * punto por el que pasan todos los consumidores.
+ *
+ * Se mira el TEXTO del archivo y no el valor ya cargado a propósito: en ejecución un
+ * literal y `process.env.DEMO_CLAVE` son los dos un string y no se distinguen. Lo que
+ * importa no es qué clave se usa, sino si quedó escrita en el repositorio.
+ *
+ * Avisa, no falla: romper la carga dejaría sin videos a cualquiera que actualice el
+ * motor, y el riesgo real de una clave de seeder no justifica ese costo.
+ *
+ * @param {string} archivo ruta del demo.config.mjs, para nombrarla en el aviso
+ * @param {string} texto contenido del archivo
+ */
+function avisarClavesEnClaro(archivo, texto) {
+    const nombre = archivo.split('/').slice(-1)[0];
+
+    texto.split('\n').forEach((linea, i) => {
+        const sinComentario = linea.trim();
+        if (sinComentario.startsWith('//') || sinComentario.startsWith('*')) {
+            return;
+        }
+
+        const hallazgo = CLAVE_LITERAL.exec(linea);
+        if (!hallazgo || hallazgo[2] === CLAVE_DEL_SEEDER) {
+            return;
+        }
+
+        // Se nombra la línea, nunca el valor: imprimirlo filtraría al log justo lo
+        // que este aviso existe para sacar del repositorio.
+        console.warn(
+            `[demo-engine] ${nombre}:${i + 1} trae la contraseña de un actor escrita en claro, ` +
+                'y este archivo está versionado.\n' +
+                "              Usá `password: process.env.DEMO_CLAVE ?? 'password'` y pasá la clave por el entorno.",
+        );
+    });
 }
 
 /**
@@ -70,6 +253,8 @@ function exigir(condicion, mensaje) {
 export async function cargarConfig(rutaProyecto) {
     const archivo = resolve(rutaProyecto, 'demo.config.mjs');
     exigir(existsSync(archivo), `no se encontró el archivo en ${rutaProyecto}`);
+
+    avisarClavesEnClaro(archivo, readFileSync(archivo, 'utf8'));
 
     const { default: cruda } = await import(pathToFileURL(archivo).href);
     exigir(cruda && typeof cruda === 'object', 'debe exportar por defecto un objeto');
@@ -84,13 +269,6 @@ export async function cargarConfig(rutaProyecto) {
     }
 
     exigir(cruda.marca?.nombre, 'marca.nombre es obligatorio (sale en las portadas)');
-
-    const actores = cruda.actores ?? {};
-    exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');
-    for (const [nombre, datos] of Object.entries(actores)) {
-        exigir(datos?.email, `el actor "${nombre}" no trae email`);
-        exigir(datos?.password, `el actor "${nombre}" no trae password`);
-    }
 
     const absoluta = (p) => (isAbsolute(p) ? p : resolve(rutaProyecto, p));
     const guiones = absoluta(cruda.guiones ?? './demo/guiones');
@@ -109,6 +287,87 @@ export async function cargarConfig(rutaProyecto) {
     const marca = { ...DEFECTOS.marca, ...cruda.marca };
     if (marca.escudo) marca.escudo = absoluta(marca.escudo);
 
+    // Un actor `sesion:false` es el vecino anónimo, o la app que se loguea DENTRO del guion
+    // (el APK pide su propio token). Exigirle email/password obligaba a inventar credenciales
+    // que nadie usa, y `preparar` intentaba loguearlo contra /login y fallaba.
+    const actores = {};
+    for (const [nombre, datos] of Object.entries(cruda.actores ?? {})) {
+        const actor = { sesion: true, ...datos };
+        if (actor.sesion) {
+            exigir(actor.email, `el actor "${nombre}" no trae email`);
+            exigir(actor.password, `el actor "${nombre}" no trae password`);
+        }
+        // Se valida contra el catálogo de Playwright acá y no al grabar: un nombre mal
+        // escrito tiene que fallar antes de levantar el navegador, no a mitad del video.
+        if (actor.dispositivo) exigir(devices[actor.dispositivo], `el actor "${nombre}" pide el dispositivo "${actor.dispositivo}", que Playwright no conoce`);
+        exigir(actor.tactil === undefined || typeof actor.tactil === 'boolean', `el actor "${nombre}": tactil debe ser true o false`);
+        if (actor.baseURL) exigir(/^https?:\/\//.test(actor.baseURL), `la baseURL del actor "${nombre}" debe ser http(s) (recibí "${actor.baseURL}")`);
+        // `preparar` (src/sesiones.mjs) loguea siempre contra la baseURL GLOBAL: un actor con
+        // sesión y baseURL propia recibía cookies de otro host y grababa deslogueado sin avisar.
+        exigir(!(actor.baseURL && actor.sesion), `el actor "${nombre}": la baseURL por actor solo se admite con sesion:false (la sesión se prepara contra baseURL global)`);
+        // `rotulo`: quién es, en la pantalla dividida («Camila · operadora»). Sale en el chip
+        // de su mitad, legible aunque esa mitad esté achicada.
+        if ('rotulo' in actor) exigir(typeof actor.rotulo === 'string' && actor.rotulo.trim(), `el actor "${nombre}": rotulo debe ser un texto`);
+        actores[nombre] = actor;
+    }
+    exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');
+
+    // `superficies` queda en null si no se declara (y no en {}), para que el resto del motor
+    // distinga "tutorial de una sola superficie, como siempre" de "declaró superficies".
+    let superficies = null;
+    if (cruda.superficies) {
+        superficies = {};
+        for (const [id, s] of Object.entries(cruda.superficies)) {
+            exigir(s?.nombre, `la superficie "${id}" no trae nombre (sale rotulado en el video)`);
+            exigir(TIPOS_SUPERFICIE.includes(s.tipo), `la superficie "${id}" tiene tipo "${s.tipo}"; debe ser escritorio o telefono`);
+            exigir(s.tactil === undefined || typeof s.tactil === 'boolean', `la superficie "${id}": tactil debe ser true o false`);
+            validarPresentar(s.presentar, id);
+            superficies[id] = { icono: ICONO_POR_TIPO[s.tipo], ...s, color: normalizarColor(s.color ?? marca.color, id) };
+        }
+    }
+    for (const [nombre, a] of Object.entries(actores)) {
+        if (a.superficie) exigir(superficies?.[a.superficie], `el actor "${nombre}" usa la superficie "${a.superficie}", que no está en superficies`);
+    }
+    const flujo = cruda.flujo ?? [];
+    // Sin esta forma exigida, `'a>b'` reventaba con un TypeError crudo y `[['a']]` culpaba a
+    // una superficie "undefined": ninguno de los dos dice qué se escribió mal.
+    exigir(Array.isArray(flujo) && flujo.every((p) => Array.isArray(p) && p.length === 2), 'flujo debe ser una lista de pares [desde, hasta]');
+    for (const [desde, hasta] of flujo) {
+        for (const s of [desde, hasta]) exigir(superficies?.[s], `flujo menciona la superficie "${s}", que no está en superficies`);
+    }
+
+    // La música se comprueba al cargar: un archivo que no existe descubierto recién en la
+    // mezcla final tira a la basura una grabación entera.
+    const audio = { ...DEFECTOS.audio, ...cruda.audio, clic: { ...DEFECTOS.audio.clic, ...cruda.audio?.clic } };
+    if (audio.musica) {
+        // Se exige `archivo` ANTES de resolverlo: `absoluta('')` da la raíz del proyecto, que
+        // existe, y un `musica: {}` o un `musica: './x.mp3'` (string, typo frecuente) pasaban.
+        exigir(typeof audio.musica === 'object' && audio.musica.archivo, 'audio.musica.archivo es obligatorio cuando se declara música');
+        audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo) };
+        const { archivo } = audio.musica;
+        exigir(existsSync(archivo) && statSync(archivo).isFile(), `audio.musica.archivo no existe o no es un archivo: ${archivo}`);
+    }
+
+    const video = fusionarVideo(DEFECTOS.video, cruda.video);
+    exigir(typeof video.cursorEnCapturas === 'boolean', 'video.cursorEnCapturas debe ser true o false');
+
+    exigir(cruda.subtitulos === undefined || (cruda.subtitulos && typeof cruda.subtitulos === 'object'), 'subtitulos debe ser un objeto { partir, ancho, lineas }');
+    const subtitulos = { ...DEFECTOS.subtitulos, ...cruda.subtitulos };
+    exigir(typeof subtitulos.partir === 'boolean', 'subtitulos.partir debe ser true o false');
+    exigir(Number.isInteger(subtitulos.ancho) && subtitulos.ancho >= 10, 'subtitulos.ancho debe ser un entero de al menos 10 caracteres');
+    exigir(Number.isInteger(subtitulos.lineas) && subtitulos.lineas >= 1, 'subtitulos.lineas debe ser un entero de al menos 1');
+    // Se aplica acá porque es el único punto por el que pasan todos los comandos: los .vtt se
+    // escriben en varios lugares del montaje que no reciben la config.
+    configurarSubtitulos(subtitulos);
+
+    exigir(cruda.navegador === undefined || (cruda.navegador && typeof cruda.navegador === 'object'), 'navegador debe ser un objeto { args: [...] }');
+    const navegador = { ...DEFECTOS.navegador, ...cruda.navegador };
+    // Solo banderas (`--algo`): un valor suelto se lo tomaría Chromium como URL a abrir.
+    exigir(Array.isArray(navegador.args) && navegador.args.every((a) => typeof a === 'string' && /^--[a-z0-9]/i.test(a)),
+        'navegador.args debe ser una lista de banderas de Chromium que empiecen con "--"');
+    navegador.args = [...navegador.args];
+    for (const arg of navegador.args) exigirReglasALoopback(arg);
+
     return {
         ...DEFECTOS,
         ...cruda,
@@ -116,9 +375,21 @@ export async function cargarConfig(rutaProyecto) {
         guiones,
         salida: absoluta(cruda.salida ?? './docs/manual'),
         marca,
-        video: { ...DEFECTOS.video, ...cruda.video },
+        video,
+        subtitulos,
+        navegador,
         auditoria: { ...DEFECTOS.auditoria, ...cruda.auditoria },
         voz,
         actores,
+        superficies,
+        flujo,
+        audio,
     };
+}
+
+/** La superficie en la que vive `actor`, con su id, o null si la config no declara superficies. */
+export function superficieDe(config, actor) {
+    const id = config.actores?.[actor]?.superficie;
+    if (!id || !config.superficies?.[id]) return null;
+    return { id, ...config.superficies[id] };
 }

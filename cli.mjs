@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { execSync } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { execSync, spawnSync } from 'node:child_process';
+import { copyFileSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { cargarConfig, ErrorConfig } from './src/configurar.mjs';
@@ -12,6 +12,14 @@ import { generarManual } from './src/manual.mjs';
 import { capturarContexto } from './src/contexto.mjs';
 import { crearVoz } from './src/voz/index.mjs';
 import { auditarVideo, auditarCapturas } from './src/auditoria.mjs';
+import { listaEnmascarada } from './src/privacidad.mjs';
+import { ff, duracion, RUTA_FFMPEG } from './src/ffmpeg.mjs';
+import { renderizarMapa, opcionesDelMapa } from './src/mapa-superficies.mjs';
+import { renderizarLienzo } from './src/lienzo.mjs';
+import { componerEnLienzo, lienzoDe } from './src/composicion.mjs';
+import { cadenaDeMezcla } from './src/mezcla.mjs';
+import { generarVtt } from './src/subtitulos.mjs';
+import { variante } from './src/formatos.mjs';
 
 const [orden, argumento] = process.argv.slice(2);
 const raiz = process.cwd();
@@ -43,6 +51,11 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
     // propios; entra como una nota en el manual en vez de desaparecer en silencio.
     const pasos = [];
     for (const cap of guion.capitulos) {
+        // El capítulo mapa no tiene guion que grabar: entra al manual con su narración.
+        if (cap.tipo === 'mapa') {
+            pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: cap.narrar ?? '', captura: null });
+            continue;
+        }
         if (cap.fuente === 'video') {
             pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: `(Ver video: ${cap.archivo})`, captura: null });
             continue;
@@ -58,32 +71,211 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
     return { id: guion.id, titulo: guion.titulo, pasos };
 }
 
+/** Lo que `grabar()` devuelve y `montar()` necesita, más lo que la config aporta. */
+async function grabarYMontar(config, voz, sesionesDe, guion, nombre) {
+    const { pistas, pasos, origenes, clics, dimensiones } = await grabar(guion,
+        { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
+    const { mp4 } = await montar({
+        pistas, pasos, voz, video: config.video,
+        presentacion: config.video.presentacion, marca: config.marca, baseURL: config.baseURL,
+        superficies: config.superficies, actores: config.actores,
+        origenes, clics, dimensiones, audio: config.audio,
+    }, { salida: config.salida, nombre });
+    return { mp4, pasos };
+}
+
+/**
+ * Ancho, alto y si trae audio, leídos del propio archivo (el binario estático no trae ffprobe).
+ *
+ * Las dimensiones son las que se VEN, no las guardadas: scrcpy y los teléfonos graban a veces
+ * apaisado con una matriz de rotación (`displaymatrix: rotation of 90 degrees`), y ffmpeg
+ * endereza el cuadro al decodificar. Con ±90° se intercambian ancho y alto; si no, un clip
+ * vertical se compondría en un hueco apaisado, achicado entre bandas negras.
+ */
+function sondear(archivo) {
+    const info = spawnSync(RUTA_FFMPEG, ['-i', archivo], { encoding: 'utf8' }).stderr ?? '';
+    const m = info.match(/Stream #.*Video:.*?(\d{2,5})x(\d{2,5})(?=[\s,])/);
+    if (!m) throw new ErrorConfig(`no pude leer las dimensiones del video ${archivo}`);
+    const giro = Number(info.match(/displaymatrix: rotation of (-?[\d.]+) degrees/)?.[1]
+        ?? info.match(/^\s*rotate\s*:\s*(-?\d+)/m)?.[1] ?? 0);
+    const vertical = Math.abs(Math.round(giro / 90)) % 2 === 1;
+    return { ancho: vertical ? +m[2] : +m[1], alto: vertical ? +m[1] : +m[2], audio: /Stream #.*Audio:/.test(info) };
+}
+
+/**
+ * La superficie que declara un capítulo, validada contra la config. Un capítulo con
+ * `superficie` en un proyecto sin `superficies` es un error de configuración, no algo que
+ * ignorar: el autor pidió una tarjeta y un marco, y un curso que sale sin ellos en silencio
+ * se descubre recién al mirarlo entero.
+ */
+function superficieDeCapitulo(config, cap) {
+    if (!cap.superficie) return null;
+    if (!config.superficies) {
+        throw new ErrorConfig(`el capítulo "${cap.id}" declara superficie "${cap.superficie}", pero demo.config.mjs no declara superficies`);
+    }
+    const s = config.superficies[cap.superficie];
+    if (!s) throw new ErrorConfig(`el capítulo "${cap.id}" usa la superficie "${cap.superficie}", que no está en superficies`);
+    return s;
+}
+
+/**
+ * Capítulo `tipo: 'mapa'`: la tarjeta de superficies a pantalla completa, sin resaltar, con su
+ * locución. Dura `max(ms, voz + 600 ms)`: la tarjeta no puede cortar la frase a la mitad, y
+ * los 600 ms de aire evitan que la voz termine pegada al corte al capítulo siguiente.
+ * Deja su .vtt al lado, como `montar()`, para que el curso lo combine con los demás.
+ */
+async function capituloMapa(config, voz, cap, { lienzo, temporal }) {
+    if (!config.superficies) {
+        throw new ErrorConfig(`el capítulo "${cap.id}" es de tipo mapa, pero demo.config.mjs no declara superficies`);
+    }
+    const wav = cap.narrar && voz.disponible() ? voz.sintetizar(cap.narrar) : null;
+    const segundos = Math.max((cap.ms ?? 6000) / 1000, wav ? duracion(wav) + 0.6 : 0);
+    const mudo = await renderizarMapa({
+        ...opcionesDelMapa(config), activa: null, anterior: null,
+        lienzo, ms: Math.round(segundos * 1000), salida: temporal, nombre: `mapa-${cap.id}.mp4`,
+    });
+    const total = duracion(mudo);
+    const mezcla = cadenaDeMezcla({
+        total, locuciones: wav ? [{ wav, inicioSeg: 0 }] : [],
+        musica: config.audio?.musica ?? null, clics: [], clic: { activo: false },
+    });
+    mkdirSync(config.salida, { recursive: true });
+    const mp4 = join(config.salida, `${cap.id}.mp4`);
+    ff(['-y', '-i', mudo, ...mezcla.entradas, '-filter_complex', mezcla.filtro,
+        '-map', '0:v', '-map', mezcla.salida, '-c:v', 'copy', '-c:a', 'aac', mp4]);
+    const vtt = mp4.replace(/\.mp4$/, '.vtt');
+    // Sin narración no hay .vtt: un archivo viejo de otra corrida pondría subtítulos que ya
+    // no se dicen.
+    rmSync(vtt, { force: true });
+    if (cap.narrar) writeFileSync(vtt, generarVtt([{ inicioSeg: 0, finSeg: total, narrar: cap.narrar }]));
+    return mp4;
+}
+
+/**
+ * Video nativo (`fuente: 'video'`, un clip de `scrcpy`) con superficie: se compone en el
+ * lienzo con el marco y el chip de su superficie, para que entre indistinguible de lo grabado
+ * en Chromium (regla 5). El aspecto se mide del propio archivo: el emulador no siempre graba
+ * al tamaño que uno cree. El audio del clip se conserva (componerEnLienzo sale mudo); si no
+ * trae, se pone silencio, porque el concat del curso exige los mismos streams en cada trozo.
+ */
+async function videoEnLienzo(config, cap, superficie, archivo, { lienzo, temporal }) {
+    const { ancho, alto, audio } = sondear(archivo);
+    const dura = duracion(archivo);
+    const panel = {
+        tipo: superficie.tipo === 'telefono' ? 'telefono' : 'ventana',
+        aspecto: ancho / alto,
+        chip: { nombre: superficie.nombre, icono: superficie.icono, color: superficie.color },
+        url: config.video.presentacion?.url ?? config.baseURL,
+    };
+    const { png, huecos } = await renderizarLienzo({ lienzo, paneles: [panel], marca: config.marca, salida: temporal, nombre: `lienzo-${cap.id}.png` });
+    const compuesto = componerEnLienzo([{ mp4: archivo, desdeSeg: 0, hastaSeg: dura }],
+        { png, huecos, lienzo, salida: join(temporal, `video-${cap.id}-mudo.mp4`), duracion: dura });
+    const destino = join(temporal, `video-${cap.id}.mp4`);
+    const fuenteAudio = audio ? ['-i', archivo] : ['-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo'];
+    ff(['-y', '-i', compuesto, ...fuenteAudio, '-map', '0:v', '-map', '1:a', '-t', String(dura),
+        '-c:v', 'copy', '-c:a', 'aac', '-ar', '48000', '-ac', '2', destino]);
+    return destino;
+}
+
 /**
  * Graba un curso maestro en UNA sola pasada: monta cada capítulo (video) y, de paso, junta los
  * pasos de todos para poder generar el manual sin re-grabar. Devuelve `{ mp4, md, maestro, pasos }`.
+ *
+ * Con superficies, cada capítulo que declare `superficie` lleva antes su tarjeta «usted está
+ * aquí» (la superficie activa resaltada, la del capítulo previo que declaró una atenuada con
+ * la flecha del traspaso). La tarjeta viaja como `tarjeta` de la parte y `pegarCapitulos` la
+ * cuenta dentro del capítulo que entra, igual que la transición 3D.
  */
 async function grabarCurso(config, voz, sesionesDe, idCurso) {
+    const maestro = await cargarGuion(config, idCurso);
+    // Todo el maestro se valida ANTES de grabar nada: un error de config en el último
+    // capítulo, descubierto recién al llegar a él, tiraba a la basura la grabación de todos
+    // los anteriores.
+    for (const cap of maestro.capitulos) {
+        if (cap.tipo === 'mapa' && !config.superficies) {
+            throw new ErrorConfig(`el capítulo "${cap.id}" es de tipo mapa, pero demo.config.mjs no declara superficies`);
+        }
+        superficieDeCapitulo(config, cap);
+        if (cap.fuente === 'video' && !existsSync(join(raiz, cap.archivo))) {
+            throw new ErrorConfig(`el capítulo "${cap.id}" apunta a un video que no existe: ${join(raiz, cap.archivo)}`);
+        }
+    }
     limpiarCapturas(config);
     if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
-    const maestro = await cargarGuion(config, idCurso);
+    const presentacion = config.video.presentacion;
+    const lienzo = lienzoDe({ presentacion, video: config.video });
+    // Tarjetas y compuestos viven hasta que el curso está pegado: `.tmp-curso` no sirve,
+    // porque `pegarCapitulos` lo vacía al empezar.
+    const temporal = join(config.salida, '.tmp-superficies');
+    rmSync(temporal, { recursive: true, force: true });
+    mkdirSync(temporal, { recursive: true });
     const partes = [];
     const pasos = [];
-    for (const cap of maestro.capitulos) {
-        if (cap.fuente === 'video') {
-            partes.push({ id: cap.id, titulo: cap.titulo, archivo: join(raiz, cap.archivo) });
-            pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: `(Ver video: ${cap.archivo})`, captura: null });
-            continue;
+    let superficiePrevia = null;
+    try {
+        for (const cap of maestro.capitulos) {
+            const ctx = { lienzo, temporal };
+            if (cap.tipo === 'mapa') {
+                partes.push({ id: cap.id, titulo: cap.titulo, archivo: await capituloMapa(config, voz, cap, ctx) });
+                pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: cap.narrar ?? '', captura: null });
+                continue;
+            }
+            const superficie = superficieDeCapitulo(config, cap);
+            let tarjeta = null;
+            if (superficie) {
+                tarjeta = await renderizarMapa({
+                    ...opcionesDelMapa(config),
+                    activa: cap.superficie, anterior: superficiePrevia,
+                    lienzo, ms: presentacion?.mapaMs ?? 2500,
+                    salida: temporal, nombre: `tarjeta-${cap.id}.mp4`,
+                });
+                superficiePrevia = cap.superficie;
+            }
+            if (cap.fuente === 'video') {
+                const original = join(raiz, cap.archivo);
+                if (!existsSync(original)) throw new ErrorConfig(`el capítulo "${cap.id}" apunta a un video que no existe: ${original}`);
+                const archivo = superficie ? await videoEnLienzo(config, cap, superficie, original, ctx) : original;
+                partes.push({ id: cap.id, titulo: cap.titulo, archivo, tarjeta });
+                pasos.push({ escena: cap.id, titulo: cap.titulo, actor: '', narrar: `(Ver video: ${cap.archivo})`, captura: null });
+                continue;
+            }
+            const guion = await cargarGuion(config, cap.guion);
+            const { mp4, pasos: pasosCap } = await grabarYMontar(config, voz, sesionesDe, guion, `${cap.id}.mp4`);
+            partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4, tarjeta });
+            for (const p of pasosCap) pasos.push({ ...p, escena: `${cap.id}-${p.escena}` });
         }
-        const guion = await cargarGuion(config, cap.guion);
-        const { pistas, pasos: pasosCap } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
-        const { mp4 } = await montar({ pistas, pasos: pasosCap, voz, video: config.video },
-            { salida: config.salida, nombre: `${cap.id}.mp4` });
-        partes.push({ id: cap.id, titulo: cap.titulo, archivo: mp4 });
-        for (const p of pasosCap) pasos.push({ ...p, escena: `${cap.id}-${p.escena}` });
+        const { mp4, md } = await pegarCapitulos(partes,
+            { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video,
+                presentacion, marca: config.marca });
+        return { mp4, md, maestro, pasos };
+    } finally {
+        rmSync(temporal, { recursive: true, force: true });
     }
-    const { mp4, md } = await pegarCapitulos(partes,
-        { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video });
-    return { mp4, md, maestro, pasos };
+}
+
+/**
+ * `demo formatos <video.mp4> [--vertical] [--cuadrado]`: variantes para redes, escritas al
+ * lado del video. Sin banderas, las dos. No carga demo.config.mjs: es un post-proceso de un
+ * archivo ya montado, y exigir un proyecto impediría usarlo sobre un mp4 suelto.
+ */
+function ejecutarFormatos(args) {
+    const USO = 'Uso: demo formatos <video.mp4> [--vertical] [--cuadrado]';
+    const posicionales = args.filter((a) => !a.startsWith('--'));
+    const archivo = posicionales[0];
+    const desconocidas = args.filter((a) => a.startsWith('--') && !['--vertical', '--cuadrado'].includes(a));
+    // Un solo video por llamada: dos posicionales son casi siempre un error de tipeo, y
+    // procesar el primero en silencio lo escondería.
+    if (posicionales.length !== 1 || desconocidas.length) {
+        console.log(desconocidas.length ? `Bandera desconocida: ${desconocidas.join(' ')}\n${USO}` : USO);
+        process.exitCode = 1;
+        return;
+    }
+    const video = resolve(raiz, archivo);
+    if (!existsSync(video)) throw new ErrorConfig(`no encontré el video: ${video}`);
+    const pedidos = ['vertical', 'cuadrado'].filter((f) => args.includes(`--${f}`));
+    for (const formato of pedidos.length ? pedidos : ['vertical', 'cuadrado']) {
+        console.log(variante(video, { formato, salida: dirname(video) }));
+    }
 }
 
 /**
@@ -124,6 +316,9 @@ async function main() {
     // `init` corre ANTES de cargar la config: justamente sirve para crearla.
     if (orden === 'init') {
         return ejecutarInit();
+    }
+    if (orden === 'formatos') {
+        return ejecutarFormatos(process.argv.slice(3));
     }
     const config = await cargarConfig(raiz);
     const voz = crearVoz(config.voz);
@@ -191,10 +386,10 @@ async function ejecutarOrden(config, voz) {
         // primero que coincide es uno viejo. Cuesta horas de diagnosticar,
         // porque cada síntoma parece un selector roto y en realidad es el estado.
         if (config.sembrar) execSync(config.sembrar, { stdio: 'inherit' });
+        // Mismo cableado que el curso (superficies, dividir, clics, audio); la tarjeta de
+        // superficies no: es la entrada a un capítulo, y un guion suelto no tiene capítulos.
         const guion = await cargarGuion(config, argumento);
-        const { pistas, pasos } = await grabar(guion, { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
-        const { mp4 } = await montar({ pistas, pasos, voz, video: config.video },
-            { salida: config.salida, nombre: `${guion.id}.mp4` });
+        const { mp4 } = await grabarYMontar(config, voz, sesionesDe, guion, `${guion.id}.mp4`);
         return console.log(mp4);
     }
 
@@ -269,10 +464,10 @@ async function ejecutarOrden(config, voz) {
             await auditarCapturas(join(config.salida, 'capturas'), config);
 
         for (const s of sospechosos) {
-            console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — frame guardado en: ${s.archivo}`);
+            console.log(`[SOSPECHOSO] segundo ${s.segundo}s — ${s.identificadores.length} identificadores distintos (${listaEnmascarada(s.identificadores)}) — frame guardado en: ${s.archivo}`);
         }
         for (const s of sospechososCapturas) {
-            console.log(`[SOSPECHOSO CAPTURA] ${s.identificadores.length} identificadores distintos (${s.identificadores.join(', ')}) — imagen: ${s.archivo}`);
+            console.log(`[SOSPECHOSO CAPTURA] ${s.identificadores.length} identificadores distintos (${listaEnmascarada(s.identificadores)}) — imagen: ${s.archivo}`);
         }
         console.log(`\n${video}: ${sospechosos.length} de ${total} frames sospechosos.`);
         console.log(`${join(config.salida, 'capturas')}: ${sospechososCapturas.length} de ${totalCapturas} capturas sospechosas.`);
@@ -281,7 +476,7 @@ async function ejecutarOrden(config, voz) {
         return;
     }
 
-    console.log('Uso: demo <init|preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>>');
+    console.log('Uso: demo <init|preparar|grabar <guion>|curso [maestro]|manual [guion]|contexto|todo [maestro]|auditar <guion|video>|formatos <video> [--vertical] [--cuadrado]>');
     process.exitCode = 1;
 }
 

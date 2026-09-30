@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
+import { opcionesDeLanzamiento } from './contexto-actor.mjs';
 
 /** Decodifica base32 (RFC 4648) sin dependencias. */
 function base32ABuffer(secreto) {
@@ -60,11 +61,19 @@ export async function prepararSesiones(config, { dirSesiones }) {
 
     mkdirSync(dirSesiones, { recursive: true });
     const loginGlobal = config.login ?? {};
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     const sesiones = {};
 
     try {
         for (const [actor, datos] of Object.entries(config.actores)) {
+            // Un actor sin sesión (vecino anónimo, o el APK que pide su token dentro del
+            // guion) no tiene formulario que llenar: loguearlo fallaría contra /login. Queda
+            // en null para que quien arme el contexto sepa que arranca sin storageState.
+            if (datos.sesion === false) {
+                sesiones[actor] = null;
+                continue;
+            }
+
             // Cada actor puede traer su propio bloque `login`, fusionado SOBRE el global: el
             // sistema real tiene dos superficies de autenticación (panel de personal vs.
             // portal del ciudadano), y un único `login` en la config obligaría a elegir una
@@ -139,7 +148,7 @@ export async function sesionSigueViva(archivo, config, login = {}) {
     // ese host antes de que nada abortara.
     exigirEntornoDeDesarrollo(config.baseURL);
 
-    const navegador = await chromium.launch();
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
     try {
         const ctx = await navegador.newContext({ baseURL: config.baseURL, storageState: archivo });
         try {
@@ -193,6 +202,12 @@ export async function prepararSesionesParaGuion(guion, config, { dirSesiones }) 
     const faltantes = [];
 
     for (const actor of necesarios) {
+        // Sin sesión que reutilizar ni que crear: ni se mira el disco ni se abre un
+        // navegador para comprobarla.
+        if (config.actores?.[actor]?.sesion === false) {
+            sesiones[actor] = null;
+            continue;
+        }
         const archivo = join(dirSesiones, `${actor}.json`);
         // No basta con que el archivo EXISTA: la sesión pudo haber caducado del lado del
         // servidor entre una grabación y la siguiente (pasa de verdad). Reutilizarla a

@@ -1,6 +1,8 @@
 import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
+import { actorConSesion, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
 
 /**
  * Captura el "pack de contexto" de un sistema: un screenshot por pantalla declarada, para
@@ -8,9 +10,11 @@ import { join, resolve } from 'node:path';
  * lo que cambia es la lista `config.contexto.pantallas`.
  *
  * Cada pantalla: `{ id, url?, actor?, esperaTexto?, hacer?, completa?, esperaMs? }`.
- * - `actor`: nombre de un actor de `config.actores` (usa su sesión). Omitido/null = PÚBLICO
- *   (contexto nuevo SIN sesión): landing, login, pantallas de error.
- * - `url`: ruta relativa a `config.baseURL` a la que navegar (opcional si `hacer` ya navega).
+ * - `actor`: nombre de un actor de `config.actores` (usa su sesión, su dispositivo y su
+ *   baseURL, igual que al grabar). Un actor `sesion: false` abre sin storageState. Omitido/
+ *   null = PÚBLICO (contexto nuevo SIN sesión): landing, login, pantallas de error.
+ * - `url`: ruta relativa a la baseURL del actor (o `config.baseURL`) a la que navegar
+ *   (opcional si `hacer` ya navega).
  * - `esperaTexto`: texto que confirma que la pantalla cargó antes de capturar.
  * - `hacer(page)`: interacción antes del screenshot (llenar un campo, abrir un panel, provocar
  *   un error). Mismo idioma que los guiones.
@@ -28,6 +32,14 @@ import { join, resolve } from 'node:path';
  * @param {string} args.salida carpeta del pack (se crea `pantallas/` dentro)
  */
 export async function capturarContexto({ config, sesiones, salida }) {
+    // Mismo guardián que `prepararSesiones` (commit 6d4dfec) y `sesionSigueViva`: esto abre
+    // un navegador contra `config.baseURL` con las sesiones reales de los actores y deja un
+    // PNG por pantalla en disco. Faltaba acá, y el camino del CLI solo lo tapaba de casualidad
+    // —`demo contexto` loguea justo antes, y ese login sí pasa por el guardián—; con las
+    // sesiones ya cacheadas en `.sesiones/`, o llamando a esta función desde la API del
+    // paquete, no quedaba nada que impidiera fotografiar el sistema real.
+    exigirEntornoDeDesarrollo(config.baseURL);
+
     const cfg = config.contexto ?? {};
     const pantallas = cfg.pantallas ?? [];
     const dir = resolve(salida, 'pantallas');
@@ -36,22 +48,29 @@ export async function capturarContexto({ config, sesiones, salida }) {
     const ancho = config.video?.ancho ?? 1600;
     const alto = config.video?.alto ?? 1000;
 
-    const navegador = await chromium.launch();
-    const paginas = new Map(); // clave de actor → page (una por actor, reutilizada)
+    const navegador = await chromium.launch(opcionesDeLanzamiento(config));
+    const paginas = new Map(); // clave de actor → { page, baseURL } (una por actor, reutilizada)
 
     const paginaDe = async (actor) => {
         const clave = actor ?? '__publico__';
         if (paginas.has(clave)) return paginas.get(clave);
-        const opciones = { baseURL: config.baseURL, viewport: { width: ancho, height: alto } };
-        // Con actor: su sesión. Público: contexto nuevo, SIN storageState (no autenticado).
+        let opciones = { baseURL: config.baseURL, viewport: { width: ancho, height: alto } };
+        // Con actor: el MISMO contexto que le arma el grabador (sesión, dispositivo, baseURL,
+        // permisos), para que el pack muestre lo que después sale en el video. Público:
+        // contexto nuevo, SIN storageState (no autenticado).
         if (actor) {
-            if (!sesiones[actor]) throw new Error(`la pantalla usa el actor "${actor}" pero no hay sesión suya`);
-            opciones.storageState = sesiones[actor];
+            // Solo exige sesión el actor que la tiene: uno `sesion: false` (app del vecino,
+            // APK) no tiene nada guardado, y antes esto lo hacía fallar en cada pantalla.
+            if (actorConSesion(config, actor) && !sesiones[actor]) {
+                throw new Error(`la pantalla usa el actor "${actor}" pero no hay sesión suya`);
+            }
+            ({ opciones } = opcionesDeContexto(config, actor, sesiones, { ancho, alto }));
         }
         const ctx = await navegador.newContext(opciones);
         const page = await ctx.newPage();
-        paginas.set(clave, page);
-        return page;
+        const datos = { page, baseURL: opciones.baseURL };
+        paginas.set(clave, datos);
+        return datos;
     };
 
     const manifest = [];
@@ -60,9 +79,9 @@ export async function capturarContexto({ config, sesiones, salida }) {
 
     for (const p of pantallas) {
         try {
-            const page = await paginaDe(p.actor ?? null);
+            const { page, baseURL } = await paginaDe(p.actor ?? null);
             if (p.url) {
-                await page.goto(config.baseURL + p.url, { waitUntil: 'networkidle', timeout: 20000 });
+                await page.goto(baseURL + p.url, { waitUntil: 'networkidle', timeout: 20000 });
             }
             if (p.esperaTexto) {
                 await page.locator(`text=${p.esperaTexto}`).first().waitFor({ state: 'visible', timeout: 12000 });

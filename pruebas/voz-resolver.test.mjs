@@ -64,6 +64,76 @@ test('sin config, usa las variables de entorno', () => {
     }
 });
 
+test('sin instalación en el paquete, encuentra los modelos en ~/.cache/demo-engine', () => {
+    // Desde que `instalar-voces.sh` dejó de escribir dentro del repo (eran 669 MB en el
+    // árbol de trabajo), el destino por omisión es ~/.cache/demo-engine. Si el resolver no
+    // mirara ahí, una instalación nueva quedaría con los modelos en disco y el motor
+    // buscándolos en otro lado: exactamente la degradación muda que ya costó un curso.
+    const casa = mkdtempSync(join(tmpdir(), 'demo-casa-'));
+    const cache = join(casa, '.cache', 'demo-engine');
+    mkdirSync(join(cache, 'venv', 'bin'), { recursive: true });
+    mkdirSync(join(cache, 'voces'), { recursive: true });
+
+    // Un paquete SIN .venv/.voces: es el caso de un consumidor que instaló demo-engine
+    // desde npm y corrió el instalador, que ya no toca el directorio del paquete.
+    const paqueteVacio = mkdtempSync(join(tmpdir(), 'demo-paquete-vacio-'));
+    const homeOriginal = process.env.HOME;
+    const xdgOriginal = process.env.XDG_CACHE_HOME;
+    process.env.HOME = casa;
+    delete process.env.XDG_CACHE_HOME;
+    try {
+        const { venv, voces } = resolverVenvYVoces({}, { raizPaquete: paqueteVacio });
+        assert.equal(venv, join(cache, 'venv'));
+        assert.equal(voces, join(cache, 'voces'));
+    } finally {
+        if (homeOriginal === undefined) delete process.env.HOME;
+        else process.env.HOME = homeOriginal;
+        if (xdgOriginal !== undefined) process.env.XDG_CACHE_HOME = xdgOriginal;
+        rmSync(casa, { recursive: true, force: true });
+        rmSync(paqueteVacio, { recursive: true, force: true });
+    }
+});
+
+test('XDG_CACHE_HOME manda sobre ~/.cache', () => {
+    const xdg = mkdtempSync(join(tmpdir(), 'demo-xdg-'));
+    mkdirSync(join(xdg, 'demo-engine', 'voces'), { recursive: true });
+    const paqueteVacio = mkdtempSync(join(tmpdir(), 'demo-paquete-vacio-'));
+    const xdgOriginal = process.env.XDG_CACHE_HOME;
+    process.env.XDG_CACHE_HOME = xdg;
+    try {
+        const { voces } = resolverVenvYVoces({}, { raizPaquete: paqueteVacio });
+        assert.equal(voces, join(xdg, 'demo-engine', 'voces'));
+    } finally {
+        if (xdgOriginal === undefined) delete process.env.XDG_CACHE_HOME;
+        else process.env.XDG_CACHE_HOME = xdgOriginal;
+        rmSync(xdg, { recursive: true, force: true });
+        rmSync(paqueteVacio, { recursive: true, force: true });
+    }
+});
+
+test('el .venv del paquete sigue ganándole a la caché: no obliga a migrar lo ya instalado', () => {
+    // César tiene 669 MB instalados dentro del repo. Mover eso es decisión suya, así que el
+    // cambio de destino por omisión NO puede romperle la instalación que ya funciona.
+    const paquete = mkdtempSync(join(tmpdir(), 'demo-paquete-lleno-'));
+    mkdirSync(join(paquete, '.voces'), { recursive: true });
+    const casa = mkdtempSync(join(tmpdir(), 'demo-casa-'));
+    mkdirSync(join(casa, '.cache', 'demo-engine', 'voces'), { recursive: true });
+    const homeOriginal = process.env.HOME;
+    const xdgOriginal = process.env.XDG_CACHE_HOME;
+    process.env.HOME = casa;
+    delete process.env.XDG_CACHE_HOME;
+    try {
+        const { voces } = resolverVenvYVoces({}, { raizPaquete: paquete });
+        assert.equal(voces, join(paquete, '.voces'));
+    } finally {
+        if (homeOriginal === undefined) delete process.env.HOME;
+        else process.env.HOME = homeOriginal;
+        if (xdgOriginal !== undefined) process.env.XDG_CACHE_HOME = xdgOriginal;
+        rmSync(paquete, { recursive: true, force: true });
+        rmSync(casa, { recursive: true, force: true });
+    }
+});
+
 test('las rutas relativas (de config o de env) se resuelven contra el cwd actual', () => {
     const cwdOriginal = process.cwd();
     const otro = mkdtempSync(join(tmpdir(), 'demo-relativo-cwd-'));
