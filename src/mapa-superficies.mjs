@@ -26,8 +26,11 @@ const ICONOS = {
 // porque el mapa lo sigue aplicando a superficies que no pasaron por cargarConfig.
 export { normalizarColor };
 
+/** Rótulo de la superficie activa. Tuteado, como los sistemas del ecosistema (G8-15). */
+export const TEXTO_AQUI = 'Estás aquí';
+
 /**
- * Renderiza la tarjeta «usted está aquí» y la convierte en un clip de `ms` milisegundos.
+ * Renderiza la tarjeta «estás aquí» y la convierte en un clip de `ms` milisegundos.
  *
  * Es una imagen fija: la entrada animada queda fuera de alcance porque 2,5 s bastan y el
  * curso ya envuelve cada capítulo con su transición 3D. El clip sale SIN pista de audio a
@@ -36,6 +39,10 @@ export { normalizarColor };
  *
  * Los textos (nombre, quién) vienen de la config y se insertan con textContent, nunca como
  * HTML: un nombre con `<` no puede inyectar marcado en la página que se captura.
+ *
+ * El rótulo de la activa es `superficies.<id>.aqui` si la config lo declara; si no,
+ * `textoAqui`; si no, `TEXTO_AQUI` («Estás aquí»). Antes era «Usted está aquí» fijo: quien
+ * quiera el ustedeo de vuelta lo declara en la superficie o lo pasa en `textoAqui`.
  *
  * Con `devolverTexto` devuelve el innerText; con `devolverContrastes`, por cada texto
  * (`.nombre`, `.quien`, `.etiqueta`) su contraste real y la opacidad mínima de sus ancestros;
@@ -47,6 +54,7 @@ export { normalizarColor };
  */
 export async function renderizarMapa({
     superficies, flujo = [], activa = null, anterior = null, lienzo, marca, ms, salida, nombre,
+    textoAqui = TEXTO_AQUI,
     devolverTexto = false, devolverContrastes = false, devolverCajas = false, devolverFlechas = false,
 }) {
     const { ancho, alto } = lienzo;
@@ -56,7 +64,7 @@ export async function renderizarMapa({
     const fondo = fondoDelMarco({}, marca);
     const nodos = Object.entries(superficies).map(([id, s]) => ({
         id, nombre: s.nombre ?? id, quien: s.quien ?? null, color: normalizarColor(s.color ?? '#1e3a8a', id),
-        icono: ICONOS[s.icono] ?? ICONOS.globo,
+        icono: ICONOS[s.icono] ?? ICONOS.globo, aqui: String(s.aqui ?? textoAqui ?? TEXTO_AQUI),
     }));
 
     const resultado = await conPagina({ '/superficies.html': PLANTILLA }, async (page, baseUrl) => {
@@ -117,7 +125,7 @@ export async function renderizarMapa({
                     el.style.borderColor = n.color;
                     const et = document.createElement('div');
                     et.className = 'etiqueta';
-                    et.textContent = 'Usted está aquí';
+                    et.textContent = n.aqui;
                     et.style.background = n.color;
                     et.style.color = tintaSobre(n.color);
                     el.appendChild(et);
