@@ -91,8 +91,9 @@ export function componerPlano(entrada, { lienzo, salida, duracion }) {
     const f = [
         `color=c=black:s=${W}x${H}:r=25:d=${duracion}[b0]`,
         '[0:v]split[m][v]',
-        `[m]crop=2:2:4:(ih/2),scale=${W}:${H},setsar=1,fps=25[fondo]`,
-        `[v]scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=25[tarjeta]`,
+        // `start_time=0`: mismo destello de un cuadro negro que en `componerEnLienzo` (G8-01).
+        `[m]crop=2:2:4:(ih/2),scale=${W}:${H},setsar=1,fps=25:start_time=0[fondo]`,
+        `[v]scale=${W}:${H}:force_original_aspect_ratio=decrease:force_divisible_by=2,setsar=1,fps=25:start_time=0[tarjeta]`,
         '[b0][fondo]overlay=0:0:eof_action=repeat[b1]',
         '[b1][tarjeta]overlay=(W-w)/2:(H-h)/2:eof_action=repeat,format=yuv420p[s]',
     ];

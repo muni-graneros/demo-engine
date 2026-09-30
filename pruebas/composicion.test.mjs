@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ff, duracion, RUTA_FFMPEG } from '../src/ffmpeg.mjs';
 import { renderizarLienzo } from '../src/lienzo.mjs';
-import { componerEnLienzo, lienzoDe } from '../src/composicion.mjs';
+import { componerEnLienzo, componerPlano, lienzoDe } from '../src/composicion.mjs';
 
 const temporal = (t) => {
     const dir = mkdtempSync(join(tmpdir(), 'demo-comp-'));
@@ -164,4 +164,22 @@ test('en un tramo dividido, el panel del OTRO actor tampoco arranca en negro (G8
     // blackdetect mide luminancia: el rojo puro (Y≈0,3) y el azul (Y≈0,1) quedan sobre 0,05.
     assert.deepEqual(negrosEnHueco(salida, huecos[0]), [], 'el teléfono arrancó en negro');
     assert.deepEqual(negrosEnHueco(salida, huecos[1]), [], 'la ventana arrancó en negro');
+});
+
+test('un tramo de rótulo plano tampoco arranca con un cuadro negro (G8-01 en componerPlano)', (t) => {
+    // `componerPlano` (portadas y cierres a pantalla completa) corta la pista igual que
+    // `componerEnLienzo`, en un ms arbitrario: sin `start_time=0` su primer cuadro también
+    // dejaba ver el fondo negro, justo al entrar a la portada o al cierre.
+    const dir = temporal(t);
+    const gris = join(dir, 'gris.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0xdddddd:s=640x400:r=25:d=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', gris]);
+    const lienzo = { ancho: 1280, alto: 720 };
+    const conNegro = [];
+    for (const desde of [0, 1.01, 1.02, 1.03, 2.519, 3.333, 4.999]) {
+        const salida = componerPlano({ mp4: gris, desdeSeg: desde, hastaSeg: desde + 1 },
+            { lienzo, salida: join(dir, `p-${desde}.mp4`), duracion: 1 });
+        const negros = negrosEnHueco(salida, { x: 0, y: 0, ...lienzo });
+        if (negros.length) conNegro.push(`${desde}s → negro en ${negros.join(', ')}`);
+    }
+    assert.deepEqual(conNegro, [], `planos con destello negro: ${conNegro.join('; ')}`);
 });
