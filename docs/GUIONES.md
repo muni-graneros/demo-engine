@@ -223,6 +223,11 @@ Todas estas funciones se reexportan desde `demo-engine`:
 ### Configuración
 - `cargarConfig(rutaProyecto: string) → Promise<config>`
 - `ErrorConfig` — la clase de error que lanza `cargarConfig` cuando la config es inválida.
+- `CAPACIDADES` (1.15) — lista congelada de lo que sabe hacer el motor instalado, para decidir
+  sin comparar versiones: `motor.CAPACIDADES?.includes('cursor-tactil')`. Hoy:
+  `acercar-ajustado`, `cursor-tactil`, `subtitulos-partidos`, `navegador-args`,
+  `planos-pantalla-completa`, `dividida-con-foco`, `ficha-sin-tapar`, `anotar-al-lado`,
+  `sin-destellos`. Una capacidad sólo se declara cuando está implementada.
 
 ### Sesiones
 - `prepararSesiones(config, { dirSesiones }) → Promise<Record<actor, rutaSesion>>` — loguea a
