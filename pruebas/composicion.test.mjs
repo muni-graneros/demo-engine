@@ -120,3 +120,48 @@ test('sin duración explícita, componerEnLienzo falla en vez de adivinarla', ()
     assert.throws(() => componerEnLienzo([{ mp4: 'x.mp4', desdeSeg: 0, hastaSeg: 1 }],
         { png: 'x.png', huecos: [{ x: 0, y: 0, ancho: 2, alto: 2 }], lienzo: { ancho: 4, alto: 4 }, salida: 'y.mp4' }), /duracion/);
 });
+
+/** Instantes (s) donde blackdetect ve negro DENTRO del hueco `h` del compuesto. */
+function negrosEnHueco(mp4, h) {
+    const r = spawnSync(RUTA_FFMPEG, ['-v', 'info', '-i', mp4,
+        '-vf', `crop=${h.ancho}:${h.alto}:${h.x}:${h.y},blackdetect=d=0.01:pix_th=0.05`, '-f', 'null', '-'],
+    { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+    return (r.stderr.match(/black_start:[\d.]+/g) ?? []).map((s) => Number(s.split(':')[1]));
+}
+
+test('ningún tramo arranca con un cuadro negro en el hueco, corte donde corte la pista (G8-01)', async (t) => {
+    // El corte de cada tramo cae en un ms arbitrario de la pista (donde empezó el paso), casi
+    // nunca en el borde de un cuadro de 40 ms. Tras `-ss` el primer cuadro decodificado llega
+    // unos ms DESPUÉS del cero del tramo, y el overlay mostraba el fondo `color=black` en ese
+    // primer cuadro: el destello de un cuadro negro que el tutorial tenía 61 veces.
+    const dir = temporal(t);
+    const gris = join(dir, 'gris.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=0xdddddd:s=640x400:r=25:d=10', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', gris]);
+    const lienzo = { ancho: 1280, alto: 720 };
+    const { png, huecos } = await renderizarLienzo({ lienzo, paneles: [{ tipo: 'ventana', aspecto: 1.6 }], marca: null, salida: dir });
+    const cortes = [0, 1.01, 1.02, 1.03, 2.519, 3.333, 4.999];
+    const conNegro = [];
+    for (const desde of cortes) {
+        const salida = componerEnLienzo([{ mp4: gris, desdeSeg: desde, hastaSeg: desde + 1 }],
+            { png, huecos, lienzo, salida: join(dir, `t-${desde}.mp4`), duracion: 1 });
+        const negros = negrosEnHueco(salida, huecos[0]);
+        if (negros.length) conNegro.push(`${desde}s → negro en ${negros.join(', ')}`);
+    }
+    assert.deepEqual(conNegro, [], `tramos con destello negro: ${conNegro.join('; ')}`);
+});
+
+test('en un tramo dividido, el panel del OTRO actor tampoco arranca en negro (G8-01)', async (t) => {
+    const dir = temporal(t);
+    const rojo = join(dir, 'rojo.mp4'), azul = join(dir, 'azul.mp4');
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=red:s=412x840:r=25:d=6', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', rojo]);
+    ff(['-y', '-f', 'lavfi', '-i', 'color=c=blue:s=1280x800:r=25:d=6', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', azul]);
+    const lienzo = { ancho: 1280, alto: 720 };
+    const paneles = [{ tipo: 'telefono', aspecto: 412 / 840 }, { tipo: 'ventana', aspecto: 1.6 }];
+    const { png, huecos } = await renderizarLienzo({ lienzo, paneles, marca: null, salida: dir });
+    const salida = componerEnLienzo(
+        [{ mp4: rojo, desdeSeg: 1.01, hastaSeg: 2.01 }, { mp4: azul, desdeSeg: 3.333, hastaSeg: 4.333 }],
+        { png, huecos, lienzo, salida: join(dir, 'dividido.mp4'), duracion: 1 });
+    // blackdetect mide luminancia: el rojo puro (Y≈0,3) y el azul (Y≈0,1) quedan sobre 0,05.
+    assert.deepEqual(negrosEnHueco(salida, huecos[0]), [], 'el teléfono arrancó en negro');
+    assert.deepEqual(negrosEnHueco(salida, huecos[1]), [], 'la ventana arrancó en negro');
+});

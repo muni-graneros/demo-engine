@@ -47,8 +47,15 @@ export function componerEnLienzo(entradas, { png, huecos, lienzo, salida, duraci
     const f = [`color=c=black:s=${lienzo.ancho}x${lienzo.alto}:r=25:d=${dura}[b0]`];
     entradas.forEach((_, i) => {
         const h = huecos[i];
+        // `start_time=0` en el `fps`: el tramo se corta en un ms arbitrario de la pista (donde
+        // empezó el paso), casi nunca en el borde de un cuadro de 40 ms, así que tras `-ss` el
+        // primer cuadro decodificado llega unos ms DESPUÉS del cero. Sin esto el `fps` lo
+        // redondeaba al cuadro 1 y el overlay dejaba ver el fondo negro en el cuadro 0: un
+        // destello de un cuadro negro al empezar tramos (G8-01, 61 en un tutorial de 28 min,
+        // casi siempre al cambiar de actor o de página, que es donde cae un corte). Con
+        // `start_time=0` el `fps` rellena ese hueco repitiendo el primer cuadro REAL del tramo.
         f.push(`[${i}:v]scale=${h.ancho}:${h.alto}:force_original_aspect_ratio=decrease,`
-            + `pad=${h.ancho}:${h.alto}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25[e${i}]`);
+            + `pad=${h.ancho}:${h.alto}:(ow-iw)/2:(oh-ih)/2:color=black,setsar=1,fps=25:start_time=0[e${i}]`);
         f.push(`[b${i}][e${i}]overlay=${h.x}:${h.y}:eof_action=repeat[b${i + 1}]`);
     });
     const n = entradas.length;
