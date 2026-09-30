@@ -7,7 +7,7 @@ export { generarManual } from './manual.mjs';
 export { capturarContexto } from './contexto.mjs';
 export { crearVoz } from './voz/index.mjs';
 export { portada, cierre } from './rotulos.mjs';
-export { elenco, presentar, quitarPresentacion, anotar } from './explainer.mjs';
+export { elenco, presentar, quitarPresentacion, anotar, configurarPresentacion, POSICIONES_FICHA } from './explainer.mjs';
 export {
     abrirFiltrado, abrirVerificado, cubrir, descubrir, exigirEntornoDeDesarrollo,
     identificadoresEnPantalla, exigirUnaSolaPersona,
