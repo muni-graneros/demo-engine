@@ -235,6 +235,14 @@ audio: {
 - **Modo lienzo**: basta con declarar `superficies` o que algún paso use `dividir` para que
   cada tramo se componga en el lienzo, con el marco de la superficie de su actor. El lienzo
   mide `presentacion.salida` o, sin presentación, `video.ancho`×`video.alto`.
+- **`video.dividida`**: `{ modo: 'foco', foco: 0.72 }` por defecto. `foco` (entre 0,5
+  y 0,85) es la parte del ancho que se lleva la mitad del actor que actúa en el paso; la otra
+  queda de contexto. Cada panel crece hasta su propio alto (un teléfono no achica a la sala).
+  `{ modo: 'igual' }` es la disposición de la 1.14 (mismo alto, ancho en proporción al aspecto).
+- **`actores.<id>.rotulo`** (opcional): quién es, para el chip de su mitad en pantalla dividida.
+- **`video.rotulos`**: `'plano'` por defecto, las portadas y cierres salen a pantalla
+  completa sin marco de navegador; `'marco'` los deja dentro del marco, como en la 1.14. Vale
+  también con `presentacion` sin superficies.
 - **`audio`** solo cambia la mezcla si trae música o `clic.activo`. En ese caso la mezcla
   pasa a estéreo 48 kHz y la voz se normaliza a -16 LUFS. Sin nada de eso, `demo grabar`
   mantiene la cadena mono de siempre. El curso (`demo curso`) sale siempre en estéreo 48 kHz.

@@ -52,6 +52,59 @@ function huecoEnCaja(caja, panel) {
     return ubicar(caja, panel, par(ancho), par(alto));
 }
 
+/** Modos de la pantalla dividida: `igual` (la geometría de 1.14) y `foco` (la activa grande). */
+export const MODOS_DIVIDIDA = ['igual', 'foco'];
+/** Rango admitido para `foco`: por debajo de 0,5 la «activa» sería la chica. */
+export const FOCO_MIN = 0.5, FOCO_MAX = 0.85;
+
+export function validarDividida(d) {
+    if (!MODOS_DIVIDIDA.includes(d.modo)) {
+        throw new Error(`dividida.modo debe ser ${MODOS_DIVIDIDA.join(' o ')}, llegó «${d.modo}»`);
+    }
+    if (d.modo === 'foco' && !(typeof d.foco === 'number' && d.foco >= FOCO_MIN && d.foco <= FOCO_MAX)) {
+        throw new Error(`dividida.foco debe ser un número entre ${FOCO_MIN} y ${FOCO_MAX}, llegó ${d.foco}`);
+    }
+}
+
+/**
+ * Pantalla dividida con foco: la mitad del actor que ACTÚA en el paso se lleva `foco` del
+ * ancho disponible y la otra queda como vista de contexto. Los paneles NO comparten alto:
+ * cada uno crece hasta donde le deja el lienzo, y lo que uno no puede usar (un teléfono, que
+ * topa con el alto mucho antes de gastar su parte) pasa al otro.
+ *
+ * Por qué así y no columnas iguales: dos salas de escritorio de 1600 px lado a lado quedan
+ * a 0,55× en 1920×1080 —un texto de 14 px sale a 7,7 px— y no se lee ninguna de las dos. Lo
+ * que el espectador tiene que leer es lo que hace el actor del paso; del otro basta ver que
+ * está ahí y qué tiene abierto. El orden izquierda/derecha del `dividir` no cambia nunca: al
+ * pasar la acción al otro actor sólo cambian los tamaños, así nadie pierde de vista quién es
+ * quién. Sin `activo` (no se sabe quién actúa), las dos partes pesan lo mismo.
+ */
+function geometriaConFoco({ util, paneles, e, sep, dividida }) {
+    const disponible = util.ancho - sep - e.reduce((s, x) => s + x.ancho, 0);
+    const maximo = paneles.map((p, i) => (util.alto - e[i].alto) * p.aspecto);
+    const activo = paneles[dividida.activo] ? dividida.activo : null;
+    const parte = paneles.map((_, i) => (activo === null ? 0.5 : i === activo ? dividida.foco : 1 - dividida.foco));
+    // Primero cada uno toma su parte (topada por su alto); después el sobrante vuelve al que
+    // todavía puede crecer, empezando por el activo.
+    const w = paneles.map((_, i) => Math.min(maximo[i], disponible * parte[i]));
+    const orden = activo === null ? [0, 1] : [activo, 1 - activo];
+    for (const i of orden) {
+        const sobra = disponible - w[0] - w[1];
+        if (sobra > 0) w[i] = Math.min(maximo[i], w[i] + sobra);
+    }
+    // Se redondea desde el ALTO: un teléfono topado por el alto tiene que llegar justo a su
+    // tope, y redondear primero el ancho lo dejaba unos píxeles más bajo que en modo igual.
+    const altos = paneles.map((p, i) => par(Math.min(w[i] / p.aspecto, util.alto - e[i].alto)));
+    const anchos = paneles.map((p, i) => par(altos[i] * p.aspecto));
+    const resto = disponible - anchos[0] - anchos[1];
+    let cursor = util.x + resto / 2;
+    return paneles.map((p, i) => {
+        const caja = { x: cursor, y: util.y, ancho: anchos[i] + e[i].ancho, alto: util.alto };
+        cursor += caja.ancho + sep;
+        return ubicar(caja, p, anchos[i], altos[i]);
+    });
+}
+
 /**
  * Dónde queda la "pantalla" (el hueco donde ffmpeg pega el video) de cada panel. Es PURA y
  * es la única fuente de verdad de esa geometría: el render del PNG y el compuesto la leen de
@@ -60,19 +113,25 @@ function huecoEnCaja(caja, panel) {
  * Con dos paneles el ancho se reparte EN PROPORCIÓN al aspecto y ambas pantallas comparten
  * alto. Con columnas iguales, un teléfono angosto desperdiciaba media pantalla y la ventana
  * quedaba encogida a ~864 px; así el grupo llena el ancho útil y queda centrado.
+ *
+ * `dividida` (opcional, sólo cuenta con dos paneles): `{ modo: 'igual' }` o sin él es esa
+ * geometría de siempre; `{ modo: 'foco', foco, activo }` agranda el panel `activo` (ver
+ * `geometriaConFoco`).
  */
-export function geometriaLienzo({ lienzo, paneles, padding = 64 }) {
+export function geometriaLienzo({ lienzo, paneles, padding = 64, dividida = null }) {
     if (!Array.isArray(paneles) || paneles.length < 1 || paneles.length > 2) {
         throw new Error(`geometriaLienzo: se esperan 1 o 2 paneles, llegaron ${paneles?.length}`);
     }
     for (const p of paneles) {
         if (!TIPOS.includes(p.tipo)) throw new Error(`geometriaLienzo: tipo de panel desconocido «${p.tipo}» (válidos: ${TIPOS.join(', ')})`);
     }
+    if (dividida) validarDividida(dividida);
     const util = { x: padding, y: padding, ancho: lienzo.ancho - padding * 2, alto: lienzo.alto - padding * 2 };
     if (paneles.length === 1) return [huecoEnCaja(util, paneles[0])];
 
     const sep = padding / 2;
     const e = paneles.map(extras);
+    if (dividida?.modo === 'foco') return geometriaConFoco({ util, paneles, e, sep, dividida });
     const sumaExtrasAncho = e.reduce((s, x) => s + x.ancho, 0);
     const sumaAspectos = paneles.reduce((s, p) => s + p.aspecto, 0);
     const H = Math.min(
@@ -108,8 +167,8 @@ export function geometriaLienzo({ lienzo, paneles, padding = 64 }) {
  * rectángulo de cada chip junto al de su panel y si el texto quedó recortado, para poder
  * comprobar que un nombre largo no se sale de su columna (`columna`: el espacio libre del panel).
  */
-export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre = 'lienzo.png', padding = 64, devolverContraste = false }) {
-    const huecos = geometriaLienzo({ lienzo, paneles, padding });
+export async function renderizarLienzo({ lienzo, paneles, marca, salida, nombre = 'lienzo.png', padding = 64, dividida = null, devolverContraste = false }) {
+    const huecos = geometriaLienzo({ lienzo, paneles, padding, dividida });
     const fondo = fondoDelMarco({}, marca);
     const png = join(salida, nombre);
 

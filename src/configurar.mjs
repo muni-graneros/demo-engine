@@ -2,6 +2,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { isAbsolute, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { devices } from 'playwright';
+import { validarDividida } from './lienzo.mjs';
 
 export class ErrorConfig extends Error {}
 
@@ -22,7 +23,16 @@ const DEFECTOS = {
     // Un tutorial que quiera ir más pausado sube estos dos en su config; lo que
     // no debería pasar es que un proyecto nuevo herede el ritmo lento sin
     // haberlo elegido.
-    video: { ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null },
+    //
+    // `rotulos`: cómo salen las portadas y cierres (`portada()`/`cierre()`) cuando hay marco o
+    // lienzo. 'plano' (defecto) = a pantalla completa, sin ventana, barra de URL ni chip: son
+    // tarjetas del video, no páginas del sistema. 'marco' = dentro del marco, como en 1.14.
+    // `dividida`: disposición de la pantalla dividida. 'foco' (defecto) agranda la mitad del
+    // actor que actúa (`foco` del ancho); 'igual' es la de 1.14 (mismo alto, ancho por aspecto).
+    video: {
+        ancho: 1600, alto: 1000, pausaMinima: 350, calidad: 90, fps: 25, msCursor: 260, presentacion: null,
+        rotulos: 'plano', dividida: { modo: 'foco', foco: 0.72 },
+    },
     // `voz` y `vozRespaldo` son campos separados porque Kokoro y Piper nombran sus voces
     // distinto (ver el comentario de `crearVoz` en src/voz/index.mjs). Si `vozRespaldo`
     // queda en null, el respaldo usa su propio valor por defecto, no el del motor principal.
@@ -67,6 +77,7 @@ const DEFECTOS = {
 };
 
 const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
+const ROTULOS = ['plano', 'marco'];
 const ICONO_POR_TIPO = { escritorio: 'monitor', telefono: 'phone' };
 
 // `presentacion` queda en null a propósito: es OPT-IN. Hay más de diez proyectos usando el
@@ -107,7 +118,13 @@ function exigir(condicion, mensaje) {
 /** Fusiona `video`, tratando `presentacion` (y su `salida`/`transicion3d`) como sub-bloques
  *  opt-in: ausentes se quedan en null, presentes reciben sus defectos. */
 function fusionarVideo(defectos, cruda = {}) {
-    const video = { ...defectos, ...cruda };
+    const video = { ...defectos, ...cruda, dividida: { ...defectos.dividida, ...cruda.dividida } };
+    exigir(ROTULOS.includes(video.rotulos), `video.rotulos debe ser ${ROTULOS.join(' o ')}, llegó "${video.rotulos}"`);
+    try {
+        validarDividida(video.dividida);
+    } catch (error) {
+        throw new ErrorConfig(`demo.config.mjs: video.${error.message}`);
+    }
     if (!cruda.presentacion) {
         video.presentacion = null;
         return video;
@@ -235,6 +252,9 @@ export async function cargarConfig(rutaProyecto) {
         // `preparar` (src/sesiones.mjs) loguea siempre contra la baseURL GLOBAL: un actor con
         // sesión y baseURL propia recibía cookies de otro host y grababa deslogueado sin avisar.
         exigir(!(actor.baseURL && actor.sesion), `el actor "${nombre}": la baseURL por actor solo se admite con sesion:false (la sesión se prepara contra baseURL global)`);
+        // `rotulo`: quién es, en la pantalla dividida («Camila · operadora»). Sale en el chip
+        // de su mitad, legible aunque esa mitad esté achicada.
+        if ('rotulo' in actor) exigir(typeof actor.rotulo === 'string' && actor.rotulo.trim(), `el actor "${nombre}": rotulo debe ser un texto`);
         actores[nombre] = actor;
     }
     exigir(Object.keys(actores).length > 0, 'actores no puede estar vacío: sin actores no hay a quién grabar');

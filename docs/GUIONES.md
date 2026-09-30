@@ -105,6 +105,31 @@ pasos: [
 - Queda vigente en los pasos siguientes hasta un paso con `dividir: null`, y nunca pasa a la
   escena siguiente.
 - El chequeo de privacidad revisa **los dos** paneles, porque los dos se ven en el video.
+- **Disposición (`video.dividida`):** por defecto `foco`: la mitad del actor
+  que actúa en el paso ocupa el 72 % del ancho y la otra queda como vista de contexto; cuando
+  el paso siguiente es del otro actor, se invierten los tamaños (el orden izquierda/derecha no
+  cambia). Medido en 1920×1080 con dos salas de 1600 px: un texto de 14 px pasa de 7,6 px
+  (columnas iguales) a 11 px en la mitad activa. Un teléfono y una sala ya no comparten alto:
+  cada uno llega a su tamaño natural (sala a 0,84×, teléfono a 0,93×). `{ modo: 'igual' }`
+  vuelve a la disposición de la 1.14. Ver [CONFIGURACION.md](CONFIGURACION.md#tutorial-multi-superficie).
+- **Quién es quién:** con dos mitades de la misma superficie, declará `rotulo` en cada actor
+  (`operador: { …, rotulo: 'Camila · operadora' }`): en pantalla dividida el chip de su mitad
+  dice «Sala de operaciones · Camila · operadora», a tamaño fijo, legible aunque su mitad esté
+  achicada. Un rótulo pintado dentro de la página (p. ej. un `rotularPuesto` propio) sigue
+  viéndose, pero en la mitad de contexto queda a ~0,3× de su tamaño.
+
+## Portadas y cierres a pantalla completa
+
+`portada()` y `cierre()` marcan la página como rótulo «plano»: el paso que TERMINA mostrando
+una portada o un cierre sale a pantalla completa en el video, sin ventana de navegador, barra
+de URL ni chip de superficie, con el color y la identidad de `config.marca`. El sobrante (la
+grabación no tiene el aspecto del lienzo) se rellena con el propio color de la tarjeta.
+
+- Un paso puede forzarlo: `marco: false` saca a pantalla completa cualquier paso (una lámina
+  propia); `marco: true` deja la portada dentro del marco.
+- En toda la config: `video.rotulos: 'marco'` vuelve al aspecto de la 1.14.
+- Si el paso navega a otra página después de la portada, deja de contar como plano (la marca
+  vive en el DOM y se va con la navegación).
 
 ## Capítulos de un curso multi-superficie
 
@@ -305,6 +330,7 @@ Todas estas funciones se reexportan desde `demo-engine`:
 ### Portadas
 - `portada(page, { titulo, subtitulo?, capitulo?, marca?, esperaMs? }) → Promise<void>`
 - `cierre(page, { mensaje, marca?, esperaMs? }) → Promise<void>` (simétrico a `portada`)
+- `esPlano(page) → Promise<'portada'|'cierre'|null>` (lo usa el grabador; ver «Portadas y cierres a pantalla completa»)
 
 ### Explainer (personajes y anotaciones)
 Para el estilo onboarding corporativo: presentar a los personajes ficticios que atraviesan

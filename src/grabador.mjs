@@ -5,6 +5,7 @@ import { exigirEntornoDeDesarrollo, exigirUnaSolaPersona } from './privacidad.mj
 import { alClicar, configurarCamara, instalarCursor } from './camara.mjs';
 import { actorConSesion, opcionesDeContexto } from './contexto-actor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
+import { esPlano } from './rotulos.mjs';
 import { duracion } from './ffmpeg.mjs';
 
 /**
@@ -22,6 +23,8 @@ import { duracion } from './ffmpeg.mjs';
  * - `dimensiones[actor]`: el tamaño real de su pista (un teléfono no mide lo que la config).
  * - cada paso lleva `dividir: [actor, actor] | null`, vigente desde el paso que lo declara
  *   hasta uno con `dividir: null`, y nunca más allá de su escena.
+ * - cada paso lleva `plano: 'portada' | 'cierre' | 'paso' | null`: si terminó mostrando un
+ *   rótulo plano (ver `esPlano` en src/rotulos.mjs) o lo forzó con `marco: false`.
  */
 export async function grabar(guion, { config, sesiones, salida, voz }) {
     exigirEntornoDeDesarrollo(config.baseURL);
@@ -217,6 +220,11 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                     // correcto para el manual. Nunca `fullPage` (Playwright no garantiza que los
                     // elementos `position:fixed` —el cubridor— cubran una captura de página
                     // completa) ni por selector (saltaría el overlay de privacidad).
+                    // ¿El paso terminó en una portada o un cierre? El montaje saca ese tramo a
+                    // pantalla completa, sin marco de navegador. `paso.marco` lo fuerza:
+                    // `false` = plano aunque no haya portada, `true` = con marco aunque la haya.
+                    const plano = paso.marco === true ? null : paso.marco === false ? 'paso' : await esPlano(page);
+
                     const nombreCaptura = `${escena.id}-${indiceCaptura++}.png`;
                     await page.screenshot({ path: join(dirCapturas, nombreCaptura) });
 
@@ -231,6 +239,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                         wav,
                         captura: `capturas/${nombreCaptura}`,
                         dividir: dividirVigente,
+                        plano,
                     });
                 } catch (error) {
                     // Se identifica CON PRECISIÓN qué paso y qué escena fallaron: en un guion
