@@ -16,6 +16,9 @@ export { auditarVideo, auditarCapturas, muestrearFrames, contarIdentificadores, 
 export {
     instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara, configurarCursor, conCursorOculto, escalaQueCabe,
 } from './camara.mjs';
+export { ejecutarGuion, Interrupcion, pasosEnOrden } from './ejecutor.mjs';
+export { vivo, capitulosDe, buscarClip, exigirEntornoEnVivo, disposicionVentanas } from './vivo/index.mjs';
+export { comandoDeSembrado } from './sembrar.mjs';
 export { partirCue, partirCues, configurarSubtitulos } from './subtitulos.mjs';
 
 /**

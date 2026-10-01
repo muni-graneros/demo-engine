@@ -12,6 +12,24 @@ const AQUI = dirname(fileURLToPath(import.meta.url));
 const PLANTILLA = join(AQUI, 'escenario', 'escena.html');
 
 /**
+ * Corre un paso de la escena y, si falla, lo informa como falla de la transición 3D con su
+ * motivo. Sin esto el error llegaba —cuando llegaba— como un `page.evaluate: Error: ...`
+ * suelto, sin decir que era la transición ni qué hacer al respecto.
+ */
+async function enEscena(paso, accion) {
+    try {
+        return await accion();
+    } catch (error) {
+        const motivo = String(error?.message ?? error).split('\n')[0]
+            .replace(/^page\.evaluate:\s*(Error:\s*)?/, '');
+        throw new Error(`transición 3D: no se pudo ${paso}. ${motivo}. Si el navegador no `
+            + 'decodifica el MP4 (p. ej. un Chromium sin H.264), desactiva '
+            + '`video.presentacion.transicion3d.activa` o instala el Chromium de Playwright.',
+        { cause: error });
+    }
+}
+
+/**
  * Renderiza la transición 3D de entrada a un capítulo, frame a frame.
  *
  * NO se graba el canvas en tiempo real, y esa es la decisión central: el screencast por CDP
@@ -29,7 +47,9 @@ const PLANTILLA = join(AQUI, 'escenario', 'escena.html');
  * BT.709 donde el motor codifica desde RGB (pantalla.mjs, presentacion.mjs, escenario3d.mjs)—
  * y queda fuera de esta rama.
  */
-export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion, marca = null, fps = 25 }) {
+export async function renderizarTransicion({
+    mp4, desdeSeg, salida, presentacion, marca = null, fps = 25, codecEscena = 'auto',
+}) {
     const { ancho, alto } = presentacion.salida;
     const { ms, gradosMax } = presentacion.transicion3d;
     const total = Math.max(1, Math.round((ms / 1000) * fps));
@@ -42,22 +62,44 @@ export async function renderizarTransicion({ mp4, desdeSeg, salida, presentacion
     // trabajo que los produce y consume va en try/finally: el clip solo se devuelve si todo
     // salió bien, pero la limpieza corre siempre, haya éxito o error.
     try {
-        await conPagina({ '/escena.html': PLANTILLA, '/cap.mp4': mp4 }, async (page, baseUrl) => {
+        // El extracto VP9 se sirve desde dirFrames y se escribe SOLO si hace falta: el servidor
+        // lee cada archivo al pedirlo, así que la ruta puede declararse antes de que exista.
+        const extracto = join(dirFrames, 'cap.webm');
+        await conPagina({ '/escena.html': PLANTILLA, '/cap.mp4': mp4, '/cap.webm': extracto }, async (page, baseUrl) => {
             await page.setViewportSize({ width: ancho, height: alto });
             await page.goto(baseUrl + '/escena.html');
             await page.waitForFunction(() => typeof window.__preparar === 'function');
+
+            // Todos los MP4 del motor son H.264, y no todo Chromium lo decodifica: el de
+            // algunos contenedores (build open source) devuelve canPlayType('avc1') vacío y el
+            // <video> falla con DEMUXER_ERROR_NO_SUPPORTED_STREAMS. En ese caso la escena
+            // recibe un extracto VP9 (libvpx viene en ffmpeg-static, VP9 lo decodifica
+            // cualquier Chromium) del tramo que la transición necesita, sin pérdida para no
+            // correr colores; el tiempo pasa a contarse desde el inicio del extracto.
+            const sinH264 = codecEscena === 'vp9' || !(await page.evaluate(() =>
+                document.createElement('video').canPlayType('video/mp4; codecs="avc1.64001F"')));
+            let src = '/cap.mp4';
+            let origen = desdeSeg;
+            if (sinH264) {
+                await enEscena(`preparar el extracto VP9 de ${mp4}`, async () => ff(['-y',
+                    '-ss', String(desdeSeg), '-i', mp4, '-t', String(ms / 1000 + 1),
+                    '-an', '-c:v', 'libvpx-vp9', '-lossless', '1', '-pix_fmt', 'yuv420p',
+                    '-deadline', 'realtime', '-cpu-used', '8', extracto]));
+                src = '/cap.webm';
+                origen = 0;
+            }
             // El fondo sale de la MISMA función que usa el marco: si acá se resolviera aparte
             // (antes: `presentacion.fondo ?? '#0f172a'`), con el defecto `fondo:null` el video
             // saltaba del gradiente de marca al gris en cada transición.
-            await page.evaluate((args) => window.__preparar(args),
-                { ancho, alto, src: '/cap.mp4', fondo: fondoDelMarco(presentacion, marca) });
+            await enEscena(`preparar la escena con ${mp4}`, () => page.evaluate((args) => window.__preparar(args),
+                { ancho, alto, src, fondo: fondoDelMarco(presentacion, marca) }));
 
             for (let i = 0; i < total; i++) {
-                await page.evaluate((args) => window.__frame(args), {
-                    t: desdeSeg + i / fps,
+                await enEscena(`renderizar el frame ${i + 1}/${total}`, () => page.evaluate((args) => window.__frame(args), {
+                    t: origen + i / fps,
                     p: total === 1 ? 1 : i / (total - 1),
                     gradosMax,
-                });
+                }));
                 await page.locator('canvas').screenshot({
                     path: join(dirFrames, `f-${String(i).padStart(5, '0')}.jpg`),
                     type: 'jpeg', quality: 92,

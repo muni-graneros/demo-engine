@@ -19,7 +19,7 @@
     "docs/*.md"
   ],
   "scripts": {
-    "test": "node --test pruebas/"
+    "test": "node pruebas/correr.mjs"
   },
   "engines": {
     "node": ">=20"

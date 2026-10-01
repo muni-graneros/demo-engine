@@ -75,6 +75,17 @@ test('contraprueba: con desarrollo declarado, el flujo local sigue funcionando',
     assert.doesNotThrow(() => exigirEntornoDeDesarrollo('https://licencias-graneros.lan', { DEMO_ENTORNO: 'Development' }));
 });
 
+test('el loopback IPv6 ([::1]) cuenta como no público, igual que 127.0.0.1', () => {
+    // `new URL('http://[::1]:8071').hostname` es «[::1]», con corchetes: comparar contra «::1»
+    // no coincidía nunca y el loopback IPv6 se rechazaba como si fuera un host público.
+    assert.doesNotThrow(() => exigirEntornoDeDesarrollo('http://[::1]:8071', { DEMO_ENTORNO: 'local' }));
+    // Sigue haciendo falta declararlo: el host solo niega, nunca autoriza.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://[::1]:8071', {}), /sin declarar/);
+    // Y una IPv6 que no es loopback sigue siendo pública.
+    assert.throws(() => exigirEntornoDeDesarrollo('http://[2001:db8::1]:8071', { DEMO_ENTORNO: 'local' }),
+        /no es una dirección local/);
+});
+
 test('un host público es un NO incluso con desarrollo declarado', () => {
     assert.throws(() => exigirEntornoDeDesarrollo('https://licencias.graneros.cl', { DEMO_ENTORNO: 'local' }),
         /no es una dirección local/);

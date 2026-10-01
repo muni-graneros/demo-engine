@@ -70,8 +70,33 @@ const DEFECTOS = {
     // un test en pruebas/configurar.test.mjs que compara ambos literales para detectar que
     // se desincronicen.
     auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: null, token: null, validar: null, chequeoEnVivo: true },
+    // `sembrar`: un string (el comando de siempre) o una función `({ escena, guion }) =>
+    // string`, para la demo en vivo que siembra cada capítulo con su escena (src/sembrar.mjs).
     sembrar: null,
     limpiar: null,
+    // Demo en vivo (`demo vivo`, src/vivo/). Nada de esto cambia grabar/curso/manual.
+    // - `pantalla`: el rectángulo donde se reparten las ventanas de los actores (el
+    //   proyector). Con dos monitores, `x` corre la zona al segundo.
+    // - `puerto`: el de la consola del presentador, siempre en 127.0.0.1.
+    // - `timeoutPaso`: si se declara, el `setDefaultTimeout` de cada página (los timeouts
+    //   explícitos de los guiones lo ignoran).
+    // - `velocidad`: multiplica el ritmo del cursor falso (0.8 = más lento para ensayar).
+    // - `clips`: dónde buscar el MP4 grabado de un capítulo para el modo seguro; una
+    //   función `(guion) => ruta` o una lista de plantillas con `{guion}`, relativas a
+    //   `salida`. Sin declarar: `final/{guion}/{guion}.mp4` y `{guion}.mp4`.
+    // - `reproductor`: el comando que abre ese clip (`mpv --fs`, por defecto; si no hay
+    //   mpv, `xdg-open`). El Chromium de Playwright no reproduce H.264.
+    // - `permitirHosts`: hosts extra que el modo en vivo acepta además de loopback,
+    //   `localhost` y `*.test` (igual deben pasar `exigirEntornoDeDesarrollo`).
+    vivo: {
+        pantalla: { x: 0, y: 0, ancho: 1920, alto: 1080 },
+        puerto: 8190,
+        timeoutPaso: null,
+        velocidad: 1,
+        clips: null,
+        reproductor: null,
+        permitirHosts: [],
+    },
     // Audio opt-in: sin música y sin clic, un video de 1.13 suena igual que antes. El
     // volumen del clic tiene defecto aunque esté apagado para que activarlo sea un solo
     // `activo: true`, sin tener que adivinar un nivel razonable.
@@ -368,9 +393,17 @@ export async function cargarConfig(rutaProyecto) {
     navegador.args = [...navegador.args];
     for (const arg of navegador.args) exigirReglasALoopback(arg);
 
+    exigir(cruda.sembrar == null || ['string', 'function'].includes(typeof cruda.sembrar),
+        `sembrar debe ser un string o una función ({ escena }) => string (recibí ${typeof cruda.sembrar})`);
+    const vivo = { ...DEFECTOS.vivo, ...cruda.vivo, pantalla: { ...DEFECTOS.vivo.pantalla, ...cruda.vivo?.pantalla } };
+    exigir(['x', 'y', 'ancho', 'alto'].every((k) => Number.isFinite(vivo.pantalla[k])), 'vivo.pantalla debe traer x, y, ancho y alto numéricos');
+    exigir(Number.isFinite(vivo.velocidad) && vivo.velocidad > 0, 'vivo.velocidad debe ser un número mayor que cero');
+    exigir(Array.isArray(vivo.permitirHosts), 'vivo.permitirHosts debe ser una lista de hosts');
+
     return {
         ...DEFECTOS,
         ...cruda,
+        vivo,
         raiz: rutaProyecto,
         guiones,
         salida: absoluta(cruda.salida ?? './docs/manual'),
