@@ -521,3 +521,38 @@ test('conCursorOculto esconde cursor y halo solo mientras corre la captura', asy
         assert.deepEqual(await visible(), ['visible', 'visible'], 'después vuelve a verse');
     });
 });
+
+// 1.16: en el APK (teléfono) `acercarA` centra el objetivo dentro del contenedor con scroll
+// propio (`.marco__contenido`) y `alejar` no lo devolvía: tras el acercamiento la pantalla
+// quedaba corrida ~40 px y el encabezado de la tarjeta casi cortado en el resto del paso.
+test('en un teléfono, acercarA + alejar deja la pantalla como estaba (también el contenedor con scroll propio)', async () => {
+    const css = `html,body{height:100%;margin:0}body{overflow:hidden}
+        .marco{display:flex;flex-direction:column;height:100vh;height:100dvh;overflow:hidden}
+        header{flex:none;height:56px;background:#355a63}
+        .marco__contenido{flex:1 1 auto;min-height:0;overflow-y:auto}
+        section{margin:12px;padding:12px;border:1px solid #ccc}
+        #cabeza{background:#ff00ff;margin:0;height:40px}`;
+    await conTelefono(`<!doctype html><html><head><meta name="viewport" content="width=device-width, initial-scale=1"><style>${css}</style></head>
+        <body><div class="marco"><header>Turno</header><main class="marco__contenido">
+            <section><h2 id="cabeza">Incidente asignado</h2>${'<p>linea</p>'.repeat(12)}
+            <p id="objetivo" style="width:180px">1,8 km · 4 min</p></section>${'<p>mas</p>'.repeat(20)}
+        </main></div></body></html>`, async (page, navegador) => {
+        const medir = () => page.evaluate(() => ({
+            contenedor: document.querySelector('.marco__contenido').scrollTop,
+            cabeza: document.getElementById('cabeza').getBoundingClientRect().top,
+            scrollY, escala: visualViewport.scale, offset: visualViewport.offsetTop,
+        }));
+        const antes = await medir();
+        const pixelesAntes = await centroMagenta(navegador, await page.screenshot());
+        await acercarA(page, '#objetivo', { escala: 1.5 });
+        const cerca = await medir();
+        assert.ok(cerca.contenedor > 20, `el contenedor no se movió para centrar (${cerca.contenedor}): la prueba no ejercita el caso`);
+        await alejar(page);
+        const despues = await medir();
+        assert.equal(despues.escala, 1);
+        assert.equal(despues.contenedor, antes.contenedor, 'el contenedor con scroll propio quedó corrido tras alejar');
+        assert.equal(despues.cabeza, antes.cabeza, `el encabezado de la tarjeta quedó corrido ${antes.cabeza - despues.cabeza} px`);
+        const pixelesDespues = await centroMagenta(navegador, await page.screenshot());
+        assert.ok(Math.abs(pixelesDespues.y - pixelesAntes.y) < 1, `por píxel, el encabezado pasó de y=${pixelesAntes.y} a y=${pixelesDespues.y}`);
+    });
+});

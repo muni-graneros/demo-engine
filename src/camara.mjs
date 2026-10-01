@@ -229,11 +229,12 @@ async function centrarVista(page, punto) {
 /** Recorre la escala del viewport visual en pasos pequeños para que el zoom se vea como un
  * acercamiento suave y no como un salto. Si se entrega `punto`, lo mantiene centrado en
  * cada paso (recentrar solo al final se vería como un tirón). */
-async function animarEscala(page, cdp, desde, hasta, punto) {
+async function animarEscala(page, cdp, desde, hasta, punto, alPaso = null) {
     for (let i = 1; i <= PASOS_ZOOM; i++) {
         const escala = desde + (hasta - desde) * (i / PASOS_ZOOM);
         await cdp.send('Emulation.setPageScaleFactor', { pageScaleFactor: escala });
         if (punto) await centrarVista(page, punto);
+        if (alPaso) await alPaso(i / PASOS_ZOOM);
         await page.waitForTimeout(MS_ZOOM / PASOS_ZOOM);
     }
 }
@@ -275,8 +276,8 @@ export function escalaQueCabe(escala, { ancho, alto, vistaAncho, vistaAlto }, ma
  * Antes de acercar, el elemento se centra dentro de cada contenedor con scroll propio que lo
  * contenga (la lista de un panel, la columna de una sala), moviendo SOLO esos contenedores:
  * es lo que haría una persona para mostrarlo, y sin eso el objetivo puede estar fuera de
- * cuadro aunque la cámara apunte bien. Esos contenedores no se restauran al `alejar`
- * (restaurarlos daría un salto en el video sin nada que contar); el documento sí.
+ * cuadro aunque la cámara apunte bien. `alejar` los devuelve a donde estaban, junto con el
+ * documento, mientras se aleja el zoom.
  */
 export async function acercarA(page, selector, { escala = 1.6, ajustar = true, margen = MARGEN_ENCUADRE } = {}) {
     // la hoja de estilos del cursor viaja con la cámara
@@ -286,17 +287,23 @@ export async function acercarA(page, selector, { escala = 1.6, ajustar = true, m
     const sesion = await sesionDe(page);
     // se guarda el desplazamiento original solo la primera vez: si ya estábamos con zoom
     // (dos acercarA seguidos sin alejar), no hay que perder el punto de partida real.
-    if (!sesion.origen) {
+    const primero = !sesion.origen;
+    if (primero) {
         sesion.origen = await page.evaluate(() => ({ x: window.scrollX, y: window.scrollY }));
     }
-    const punto = await localizadorDe(page, selector).evaluate((el) => {
+    const punto = await localizadorDe(page, selector).evaluate((el, primero) => {
         const desplaza = (v) => /(auto|scroll)/.test(v);
+        // Dónde estaba cada contenedor que se mueve, para que `alejar` lo devuelva. Solo en el
+        // primer acercamiento: dos acercarA seguidos no pierden el punto de partida real.
+        if (primero || !window.__demoContenedores) window.__demoContenedores = [];
+        const guardados = window.__demoContenedores;
         for (let padre = el.parentElement; padre && padre !== document.body && padre !== document.documentElement;
             padre = padre.parentElement) {
             const estilo = getComputedStyle(padre);
             const enY = desplaza(estilo.overflowY) && padre.scrollHeight > padre.clientHeight;
             const enX = desplaza(estilo.overflowX) && padre.scrollWidth > padre.clientWidth;
             if (!enY && !enX) continue;
+            if (!guardados.some((g) => g.el === padre)) guardados.push({ el: padre, top: padre.scrollTop, left: padre.scrollLeft });
             const caja = el.getBoundingClientRect();
             const marco = padre.getBoundingClientRect();
             padre.scrollTo({
@@ -329,17 +336,40 @@ export async function acercarA(page, selector, { escala = 1.6, ajustar = true, m
             vistaAncho: raizEl.clientWidth,
             vistaAlto: raizEl.clientHeight,
         };
-    });
+    }, primero);
     const destino = ajustar ? escalaQueCabe(escala, punto, margen) : escala;
     const escalaActual = await page.evaluate(() => window.visualViewport.scale);
     await animarEscala(page, sesion.cdp, escalaActual, destino, punto);
 }
 
-/** Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento. */
+/**
+ * Devuelve la escala a 1 y restaura el desplazamiento que había antes del acercamiento: el del
+ * documento y el de cada contenedor con scroll propio que `acercarA` movió para centrar el
+ * objetivo. Los contenedores vuelven junto con el zoom, en los mismos pasos (un salto al final
+ * se vería como un tirón). Sin esto, en el APK la lista quedaba corrida ~40 px y el encabezado
+ * de la tarjeta casi cortado durante el resto del paso.
+ */
 export async function alejar(page) {
     const sesion = await sesionDe(page);
-    const escalaActual = await page.evaluate(() => window.visualViewport.scale);
-    await animarEscala(page, sesion.cdp, escalaActual, 1, null);
+    const escalaActual = await page.evaluate(() => {
+        for (const g of window.__demoContenedores ?? []) {
+            g.desdeTop = g.el.scrollTop;
+            g.desdeLeft = g.el.scrollLeft;
+        }
+        return window.visualViewport.scale;
+    });
+    const devolver = (fraccion) => page.evaluate((f) => {
+        for (const g of window.__demoContenedores ?? []) {
+            if (!g.el.isConnected) continue;
+            g.el.scrollTo({
+                top: Math.round(g.desdeTop + (g.top - g.desdeTop) * f),
+                left: Math.round(g.desdeLeft + (g.left - g.desdeLeft) * f),
+                behavior: 'instant',
+            });
+        }
+        if (f >= 1) window.__demoContenedores = [];
+    }, fraccion);
+    await animarEscala(page, sesion.cdp, escalaActual, 1, null, devolver);
     if (sesion.origen) {
         await page.evaluate(({ x, y }) => window.scrollTo(x, y), sesion.origen);
         sesion.origen = null;
