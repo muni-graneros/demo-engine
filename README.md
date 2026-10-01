@@ -113,6 +113,9 @@ sintetiza voz y no usa ffmpeg: **narra el presentador**, leyendo el teleprompter
   `DEMO_ENTORNO=local` declarado.
 - Un escritorio con pantalla (el modo con ventanas necesita un display). Lo ideal, dos monitores:
   el proyector para las ventanas (`vivo.pantalla` en la config) y la laptop para la consola.
+  Sin pantalla (un servidor) se puede ensayar con ventanas bajo
+  `xvfb-run -a -s "-screen 0 1920x1080x24" npx demo vivo …`. Dentro del sandbox de Claude Code
+  Chromium con ventanas no arranca (niega sockets unix): correrlo fuera.
 - Para el modo seguro, los MP4 del curso ya grabados y `mpv` instalado (sin mpv se usa
   `xdg-open`; el Chromium de Playwright no reproduce H.264).
 
