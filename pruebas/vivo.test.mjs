@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -414,6 +414,79 @@ test('demo vivo se niega contra un host que no es local, y con banderas desconoc
         assert.notEqual(b.status, 0);
         assert.match(b.stdout, /Bandera desconocida: --rapido/);
     } finally {
+        rmSync(proyecto, { recursive: true, force: true });
+    }
+});
+
+// --- Con ventanas de verdad (headed) ------------------------------------------------------
+
+/**
+ * Cómo abrir ventanas en esta máquina: el escritorio si hay DISPLAY/WAYLAND_DISPLAY, o un
+ * Xvfb de 1920×1080 con `xvfb-run` (servidores, CI, el sandbox). Sin ninguno, la prueba se
+ * salta diciendo por qué: `demo vivo` sin --headless necesita una pantalla.
+ */
+function lanzadorConPantalla() {
+    if (process.env.DISPLAY || process.env.WAYLAND_DISPLAY) return { programa: process.execPath, prefijo: [] };
+    const xvfb = spawnSync('sh', ['-c', 'command -v xvfb-run'], { encoding: 'utf8' });
+    if (xvfb.status !== 0) return null;
+    return { programa: xvfb.stdout.trim(), prefijo: ['-a', '-s', '-screen 0 1920x1080x24', process.execPath] };
+}
+
+test('demo vivo con ventanas reales (headed): Chromium visible, ventanas ordenadas en la pantalla y el maestro de punta a punta', async (t) => {
+    const lanzador = lanzadorConPantalla();
+    if (!lanzador) {
+        t.skip('sin DISPLAY ni xvfb-run: no hay dónde abrir ventanas');
+        return;
+    }
+    // Sondeo: ¿arranca aquí un Chromium con ventanas? Un sandbox que niega sockets unix
+    // (bubblewrap) no deja levantar Xvfb ni el singleton de Chromium, y xvfb-run se queda
+    // esperando 2 minutos. No es un defecto del motor: se informa y se salta.
+    const sondeo = spawnSync(lanzador.programa, [...lanzador.prefijo, '--input-type=module', '-e',
+        "const { chromium } = await import('playwright'); const b = await chromium.launch({ headless: false }); await b.close();"],
+    { cwd: join(import.meta.dirname, '..'), timeout: 30000, encoding: 'utf8' });
+    if (sondeo.status !== 0) {
+        t.skip(`Chromium con ventanas no arranca en este entorno (${(sondeo.error?.code ?? sondeo.stderr.match(/socket\(\) failed[^\n]*|Missing X server[^\n]*/)?.[0] ?? 'sin motivo').toString().trim()}); correr fuera del sandbox`);
+        return;
+    }
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const proyecto = proyectoVivo(juguete);
+    // Cada paso anota desde la página dónde quedó SU ventana y si el navegador es headless.
+    const anotar = `async (page, nombre) => { const v = await page.evaluate(() => ({ x: screenX, y: screenY, ancho: outerWidth, alto: outerHeight, headless: /Headless/.test(navigator.userAgent) })); (await import('node:fs')).appendFileSync('ventanas.jsonl', JSON.stringify({ nombre, ...v }) + '\\n'); }`;
+    writeFileSync(join(proyecto, 'guiones', 'avisa.mjs'), `
+        const anotar = ${anotar};
+        export const escena = 'uno';
+        export default { id: 'avisa', titulo: 'Avisa', escenas: [{ id: 'e', titulo: 'Avisa', pasos: [
+            { actor: 'funcionario', narrar: 'La sala mira el panel.', variasPersonas: true,
+              hacer: async (page) => { await page.goto('/panel'); await page.waitForTimeout(300); await anotar(page, 'funcionario-solo'); } },
+            { actor: 'vecina', narrar: 'La vecina abre la app.', dividir: ['vecina', 'funcionario'], variasPersonas: true,
+              hacer: async (page) => { await page.goto('/'); await page.waitForTimeout(300); await anotar(page, 'vecina-dividida'); } },
+        ] }] };`);
+    writeFileSync(join(proyecto, 'guiones', 'recibe.mjs'), `export default { id: 'recibe', titulo: 'Recibe', escenas: [
+        { id: 'e', titulo: 'E', pasos: [{ actor: 'funcionario', narrar: 'Detalle.', hacer: async (page) => { await page.goto('/detalle/11111111-1'); } }] },
+    ] };`);
+    try {
+        const r = await new Promise((resolver) => {
+            const hijo = spawn(lanzador.programa, [...lanzador.prefijo, CLI, 'vivo', '--auto', '--puerto=0', '--sin-teclado'],
+                { cwd: proyecto, env: { ...process.env } });
+            let stdout = '';
+            let stderr = '';
+            hijo.stdout.on('data', (d) => { stdout += d; });
+            hijo.stderr.on('data', (d) => { stderr += d; });
+            hijo.on('close', (status) => resolver({ status, stdout, stderr }));
+        });
+        assert.equal(r.status, 0, r.stderr);
+        assert.doesNotMatch(r.stdout + r.stderr, /No pude ordenar/);
+        assert.equal(readFileSync(join(proyecto, 'sembrados.txt'), 'utf8'), 'uno\nsin-escena\n');
+        const ventanas = readFileSync(join(proyecto, 'ventanas.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+        assert.deepEqual(ventanas.map((v) => v.nombre), ['funcionario-solo', 'vecina-dividida']);
+        for (const v of ventanas) assert.equal(v.headless, false, `${v.nombre}: el navegador corrió headless`);
+        const [solo, dividida] = ventanas;
+        // Solo, el escritorio llena la pantalla (1920×1080 de vivo.pantalla por defecto).
+        assert.ok(solo.ancho >= 1800 && solo.alto >= 1000, `escritorio solo: ${JSON.stringify(solo)}`);
+        // En el tramo dividido la vecina (primera del par) va a la izquierda y no ocupa todo.
+        assert.ok(dividida.x < 960 && dividida.ancho < 1920, `vecina en dividida: ${JSON.stringify(dividida)}`);
+    } finally {
+        await juguete.cerrar();
         rmSync(proyecto, { recursive: true, force: true });
     }
 });

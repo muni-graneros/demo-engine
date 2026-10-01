@@ -26,3 +26,10 @@ test('CAPACIDADES declara sembrar como función (1.16) y exporta lo que la respa
     assert.ok(motor.CAPACIDADES.includes('sembrar-funcion'));
     assert.equal(typeof motor.sembrar, 'function');
 });
+
+test('CAPACIDADES declara vivo (1.16): tools/demo/vivo.sh de seguridad-graneros la exige', () => {
+    // Respaldada por vivo.test.mjs: headless de punta a punta por la API y por el CLI, y con
+    // ventanas reales (headed, en el escritorio o bajo xvfb-run).
+    assert.ok(motor.CAPACIDADES.includes('vivo'));
+    assert.equal(typeof motor.vivo, 'function');
+});

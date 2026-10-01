@@ -37,4 +37,5 @@ export const CAPACIDADES = Object.freeze([
     'anotar-al-lado',            // globo de anotar medido, al lado del objetivo (lado)
     'sin-destellos',             // ningún tramo arranca con un cuadro negro
     'sembrar-funcion',           // sembrar: string o función (async) ({ escena, guion }) => comando | nada
+    'vivo',                      // `demo vivo`: el guion en ventanas reales, paso a paso, sin grabar
 ]);
