@@ -17,3 +17,4 @@ pruebas/tmp-*
 # direnv (tokens por frente; NUNCA versionar)
 .envrc
 .direnv/
+:memory:.ses

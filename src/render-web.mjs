@@ -7,7 +7,7 @@ import { chromium } from 'playwright';
 const require = createRequire(import.meta.url);
 
 const TIPOS = {
-    '.mp4': 'video/mp4', '.png': 'image/png', '.jpg': 'image/jpeg',
+    '.mp4': 'video/mp4', '.webm': 'video/webm', '.png': 'image/png', '.jpg': 'image/jpeg',
     '.js': 'text/javascript', '.mjs': 'text/javascript', '.html': 'text/html',
 };
 

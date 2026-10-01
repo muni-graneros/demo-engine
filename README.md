@@ -81,7 +81,7 @@ npx demo todo              # aislar PII → pack de contexto → curso → manua
 `demo init` deja también un `demo/.gitignore` que **ignora todo lo generado** (`contexto/`,
 `salida/`, `*.mp4`): no versiones videos ni el pack — son binarios grandes y datos sensibles.
 
-## Los nueve comandos
+## Los comandos
 
 | Comando | Qué hace |
 |---|---|
@@ -94,11 +94,101 @@ npx demo todo              # aislar PII → pack de contexto → curso → manua
 | `demo todo [maestro]` | Pipeline completo: aislar PII → pack → curso → manual → restaurar |
 | `demo auditar <guion\|video>` | Revisa por OCR si quedó PII en el MP4 y en las capturas |
 | `demo formatos <video> [--vertical] [--cuadrado]` | Variantes 1080×1920 y 1080×1080 al lado del video (sin banderas, las dos) |
+| `demo vivo [maestro\|guion]` | Presenta los guiones **en vivo**, paso a paso, sin grabar (ver [Demo en vivo](#demo-en-vivo)) |
 
 `grabar`, `curso` y `todo` ejecutan `config.sembrar` en **cada** corrida: tiene que ser
 idempotente. Sin siembra por corrida la segunda toma graba sobre lo que dejó la primera —
 casos ya resueltos que no muestran sus botones, filas acumuladas— y cada síntoma parece un
 selector roto cuando en realidad es el estado.
+
+## Demo en vivo
+
+`demo vivo` ejecuta **los mismos guiones** que se graban, frente a un público: ventanas reales
+de Chromium (una por actor), y cada paso actúa cuando el presentador lo manda. No graba, no
+sintetiza voz y no usa ffmpeg: **narra el presentador**, leyendo el teleprompter.
+
+### Requisitos
+
+- El sistema **local** levantado y sembrable (el mismo stack con que se graba) y
+  `DEMO_ENTORNO=local` declarado.
+- Un escritorio con pantalla (el modo con ventanas necesita un display). Lo ideal, dos monitores:
+  el proyector para las ventanas (`vivo.pantalla` en la config) y la laptop para la consola.
+  Sin pantalla (un servidor) se puede ensayar con ventanas bajo
+  `xvfb-run -a -s "-screen 0 1920x1080x24" npx demo vivo …`. Dentro del sandbox de Claude Code
+  Chromium con ventanas no arranca (niega sockets unix): correrlo fuera.
+- Para el modo seguro, los MP4 del curso ya grabados y `mpv` instalado (sin mpv se usa
+  `xdg-open`; el Chromium de Playwright no reproduce H.264).
+
+### Comandos
+
+```bash
+DEMO_ENTORNO=local npx demo vivo                       # el maestro `curso`, desde el primer capítulo
+DEMO_ENTORNO=local npx demo vivo curso --desde=07      # desde el capítulo con id 07
+DEMO_ENTORNO=local npx demo vivo curso --capitulos=00,04,08,15   # solo esos (un curso por rol)
+DEMO_ENTORNO=local npx demo vivo c06-asignar           # un guion suelto es un capítulo
+DEMO_ENTORNO=local npx demo vivo --auto                # avanza solo (tótem, sala de espera)
+DEMO_ENTORNO=local npx demo vivo --headless --auto     # sin ventanas: ensayo o CI
+```
+
+Otras banderas: `--puerto=N` (consola; defecto `vivo.puerto`, 8190), `--velocidad=0.8` (cursor
+más lento), `--permitir-host=HOST` (ver Riesgos), `--sin-teclado` (no toma la terminal).
+
+Al arrancar imprime la dirección de la **consola del presentador**
+(`http://127.0.0.1:8190/`): teleprompter con la narración del paso actual (grande) y la del
+siguiente, capítulo, actor y superficie, y los controles. La terminal acepta las mismas teclas
+(`q` o Ctrl+C para salir) e imprime la narración de cada paso como respaldo.
+
+Por capítulo: siembra con su escena (`sembrar` como función, ver
+[docs/CONFIGURACION.md](docs/CONFIGURACION.md); la escena sale del maestro o de
+`export const escena` del guion), prepara las sesiones que falten, espera la orden antes de cada
+paso y al salir —termine, falle o se salte— llama al `export function limpiar()` del guion si
+lo exporta. En un tramo con `dividir`, las dos ventanas se ponen lado a lado; si no, la del actor
+ocupa la pantalla (un teléfono, centrado a su tamaño) y las demás se minimizan.
+
+### Teclas (las de un presentador inalámbrico)
+
+| Tecla | Orden |
+|---|---|
+| `→` · `PageDown` · `Espacio` | Siguiente paso (ejecuta su acción) o siguiente capítulo |
+| `←` · `PageUp` · `R` | Reintentar el paso que falló (retroceder no deshace: el paso ya cambió la base) |
+| `S` | Saltar el paso |
+| `P` | Pausa / reanudar (en `--auto`, detiene el avance) |
+| `B` · `.` | Pantalla negra en las ventanas de los actores (avanzar la levanta) |
+| `I` · `Inicio` | Reiniciar el capítulo: vuelve a sembrar y empieza de cero |
+| `C` | Modo seguro: abre el video grabado del capítulo |
+| `1`…`9` | Ir a ese capítulo (el menú de la consola llega a todos) |
+
+Una orden que llega mientras un paso actúa no lo corta a la mitad: se aplica al terminar el paso.
+El foco del teclado lo tiene la ventana activa: con el clicker, deja la consola en foco (idealmente
+en el otro monitor); un `PageDown` sobre la ventana del sistema bajaría la página.
+
+### Modo seguro
+
+Si un paso falla, su ventana queda **tapada** y el error se ve solo en la consola. Se puede
+reintentar, saltar, reiniciar el capítulo o pasar al clip grabado (`C`): el motor busca
+`<salida>/final/<guion>/<guion>.mp4` y después `<salida>/<guion>.mp4` (configurable con
+`vivo.clips`) y lo abre con `mpv --fs`. Con «siguiente» se cierra el clip y sigue el capítulo
+siguiente, en vivo. Un capítulo `fuente: 'video'` del maestro va siempre por este camino.
+
+### Riesgos
+
+- **Nunca contra producción.** Además de `exigirEntornoDeDesarrollo`, el modo en vivo solo acepta
+  loopback, `localhost` y `*.test` (una IP privada puede ser producción en la red municipal);
+  un servidor de demo aislado se declara host por host con `--permitir-host` o
+  `vivo.permitirHosts`. `DEMO_FORZAR=1` no se acepta en vivo.
+- **Solo datos ficticios.** El seeder del sistema tiene que dejar personas, RUT y correos
+  inventados: es la única protección real.
+- **El portero de privacidad no previene en vivo.** Al grabar, un paso con varias personas a la
+  vista aborta la toma y el video no sale. En vivo el chequeo corre al final del paso, cuando el
+  público **ya vio** la pantalla: solo alcanza a taparla y avisar en la consola.
+- **Sesiones.** Se verifican una vez por actor y los contextos siguen abiertos entre capítulos;
+  el motor nunca fuerza un relogueo (los sistemas suelen limitar los ingresos diarios por cuenta).
+- **La hora.** Lo que se ve en pantalla es la hora real del equipo: si el sistema la narra (un
+  turno de la mañana), presenta en ese horario. El motor no lo controla; el script del sistema
+  que lanza la demo es quien puede negarse fuera de horario (así lo hace `grabar.sh` de
+  seguridad-graneros).
+- Sin verificar en un escritorio real: la posición exacta de las ventanas con cada gestor de
+  ventanas, el minimizado y el comportamiento del foco con el clicker.
 
 ## La parte que hace la IA
 
@@ -160,8 +250,10 @@ Detalle completo en [docs/PRIVACIDAD.md](docs/PRIVACIDAD.md) y
 ## Cómo se prueba
 
 ```bash
-npm test      # node --test pruebas/ — única fuente de verdad
+npm test      # node pruebas/correr.mjs — única fuente de verdad
 ```
+
+Compatible con Node 20 y Node 22+. El script `pruebas/correr.mjs` descubre y ejecuta los tests automáticamente, evitando la incompatibilidad en Node 21+ cuando se pasa un directorio a `node --test`.
 
 ## Invariantes
 

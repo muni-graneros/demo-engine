@@ -80,6 +80,12 @@ export default {
   // Solo banderas `--…`; `--host-resolver-rules` solo puede mapear a 127.x/localhost/[::1]
   // (mapear a otra máquina saltaría el guardián de entorno, que decide por el host de baseURL).
   // Caso típico: que el APK y los enlaces muestren el dominio público grabando en local.
+  // LIMITACIÓN con proxy: si el entorno trae HTTP_PROXY/HTTPS_PROXY/ALL_PROXY (sandbox, red
+  // corporativa), Chromium manda el pedido al proxy con el NOMBRE, y es el proxy quien lo
+  // resuelve: `--host-resolver-rules` no se aplica y el dominio público no llega a la app
+  // local (en el sandbox de Claude Code sale un 407). `--no-proxy-server` solo no alcanza
+  // mientras esas variables sigan en el entorno: grabar con ellas vacías (o con el dominio en
+  // NO_PROXY) y, si hace falta, sumar '--no-proxy-server' a estos args.
   navegador: {
     args: [],  // p. ej. ['--host-resolver-rules=MAP seguridad.ejemplo.cl 127.0.0.1:8071']
   },
@@ -112,7 +118,24 @@ export default {
                                 // sobre lo que dejó la primera —casos ya resueltos que no
                                 // muestran sus botones, filas acumuladas— y cada síntoma parece
                                 // un selector roto cuando en realidad es el estado.
+                                // También puede ser una función (puede ser async)
+                                // `({ escena, guion }) => string | null`: `demo vivo` la llama
+                                // con la escena de cada capítulo; grabar, curso y preparar la
+                                // llaman sin escena (decide el defecto). Si devuelve un string,
+                                // el motor lo ejecuta; si devuelve nada, se entiende que sembró
+                                // por su cuenta y sólo se la espera. Capacidad 'sembrar-funcion'.
   limpiar: 'npm run clean',     // Después de todo
+
+  // Demo en vivo (`demo vivo`, ver README «Demo en vivo»). Opcional; no afecta la grabación.
+  vivo: {
+    pantalla: { x: 0, y: 0, ancho: 1920, alto: 1080 },  // zona del proyector para las ventanas
+    puerto: 8190,               // consola del presentador, siempre en 127.0.0.1
+    timeoutPaso: null,          // setDefaultTimeout de cada página (ms), si se declara
+    velocidad: 1,               // ritmo del cursor falso (0.8 = más lento)
+    clips: null,                // modo seguro: (guion) => ruta, o plantillas con {guion}
+    reproductor: null,          // comando para el clip (defecto: `mpv --fs`, si no `xdg-open`)
+    permitirHosts: [],          // hosts extra además de loopback, localhost y *.test
+  },
 
   // Pack de contexto (`demo contexto` y `demo todo`): un screenshot por pantalla declarada.
   // `aislar`/`mostrar` son comandos DEL SISTEMA GRABADO (no del CLI de este repo) que
