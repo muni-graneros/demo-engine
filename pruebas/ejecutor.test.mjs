@@ -184,3 +184,43 @@ test('pasosEnOrden aplana escenas y pasos con su posición', () => {
     assert.deepEqual(pasosEnOrden(guion).map((p) => [p.escena.id, p.indiceEscena, p.indice, p.paso.narrar]),
         [['a', 0, 0, '1'], ['a', 0, 1, '2'], ['b', 1, 0, '3']]);
 });
+
+// 1.16: el aviso «no tiene nada abierto todavía» miraba la URL. Un guion que dibuja con
+// `setContent` (portadas, tarjetas, maquetas) queda en about:blank aunque su panel se vea bien,
+// y el aviso salía igual. Ahora mira si la página tiene contenido.
+async function avisosDe(fn) {
+    const avisos = [];
+    const original = console.warn;
+    console.warn = (...a) => avisos.push(a.join(' '));
+    try {
+        await fn();
+    } finally {
+        console.warn = original;
+    }
+    return avisos.filter((a) => a.includes('no tiene nada abierto'));
+}
+
+test('dividir no avisa «nada abierto» si el otro actor dibujó con setContent (about:blank con contenido)', async () => {
+    await conNavegador(async (url, navegador) => {
+        const config = configDe(url, { a: { sesion: false }, b: { sesion: false } });
+        const guion = { id: 'g', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'b', narrar: 'sala', hacer: async (page) => { await page.setContent('<h1>Sala de monitoreo</h1>'); } },
+            { actor: 'a', narrar: 'panel', dividir: ['a', 'b'], hacer: async (page) => { await page.goto(`${url}/`); } },
+        ] }] };
+        const avisos = await avisosDe(() => ejecutarGuion(guion, { config, navegador }));
+        assert.deepEqual(avisos, []);
+    });
+});
+
+test('dividir sigue avisando cuando el otro actor de verdad no tiene nada (página vacía)', async () => {
+    await conNavegador(async (url, navegador) => {
+        const config = configDe(url, { a: { sesion: false }, b: { sesion: false } });
+        const guion = { id: 'g', escenas: [{ id: 'e', titulo: 'E', pasos: [
+            { actor: 'a', narrar: 'panel', dividir: ['a', 'b'], hacer: async (page) => { await page.goto(`${url}/`); } },
+            { actor: 'a', narrar: 'otra vez', hacer: async () => {} },
+        ] }] };
+        const avisos = await avisosDe(() => ejecutarGuion(guion, { config, navegador }));
+        assert.equal(avisos.length, 1, JSON.stringify(avisos));
+        assert.match(avisos[0], /"b"/);
+    });
+});

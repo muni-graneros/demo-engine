@@ -120,10 +120,11 @@ export async function ejecutarGuion(guion, {
             // qué poner en su mitad de la pantalla.
             for (const otro of dividir) {
                 const { page: suPagina } = await actorDe(otro);
-                // El actor del paso navega en su propio `hacer`; el otro, si nunca navegó,
-                // queda en about:blank y su panel sale en blanco. No es un error (puede ser a
-                // propósito), pero casi siempre es un olvido.
-                if (otro !== paso.actor && suPagina.url() === 'about:blank' && !avisadosEnBlanco.has(otro)) {
+                // El actor del paso navega en su propio `hacer`; el otro, si no abrió nada,
+                // queda vacío y su panel sale en blanco. No es un error (puede ser a propósito),
+                // pero casi siempre es un olvido. Se mira el CONTENIDO, no la URL: un guion que
+                // dibuja con `setContent` sigue en about:blank y su panel se ve bien.
+                if (otro !== paso.actor && !avisadosEnBlanco.has(otro) && await paginaVacia(suPagina)) {
                     avisadosEnBlanco.add(otro);
                     console.warn(`[demo-engine] dividir: el actor "${otro}" no tiene nada abierto todavía; su panel saldrá en blanco`);
                 }
@@ -164,6 +165,22 @@ export async function ejecutarGuion(guion, {
 
         await ganchos.despuesDePaso?.(info);
     }
+}
+
+/**
+ * ¿La página no muestra nada? Sólo puede estarlo una about:blank (una URL navegada tiene lo que
+ * sirvió el sistema); en ella se ignora lo que inyecta el motor (cursor, halo, cubridor: ids
+ * `__…`). Si la página no responde, se la da por no vacía: el aviso es una ayuda, no un error.
+ */
+export async function paginaVacia(page) {
+    if (page.url() !== 'about:blank') return false;
+    return page.evaluate(() => {
+        const cuerpo = document.body;
+        if (!cuerpo) return true;
+        const propios = (el) => typeof el.id === 'string' && el.id.startsWith('__');
+        const visibles = [...cuerpo.children].filter((el) => !propios(el) && el.tagName !== 'SCRIPT' && el.tagName !== 'STYLE');
+        return visibles.length === 0 && !cuerpo.textContent.trim();
+    }).catch(() => false);
 }
 
 /**
