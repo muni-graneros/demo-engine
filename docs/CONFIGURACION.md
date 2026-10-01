@@ -80,6 +80,12 @@ export default {
   // Solo banderas `--…`; `--host-resolver-rules` solo puede mapear a 127.x/localhost/[::1]
   // (mapear a otra máquina saltaría el guardián de entorno, que decide por el host de baseURL).
   // Caso típico: que el APK y los enlaces muestren el dominio público grabando en local.
+  // LIMITACIÓN con proxy: si el entorno trae HTTP_PROXY/HTTPS_PROXY/ALL_PROXY (sandbox, red
+  // corporativa), Chromium manda el pedido al proxy con el NOMBRE, y es el proxy quien lo
+  // resuelve: `--host-resolver-rules` no se aplica y el dominio público no llega a la app
+  // local (en el sandbox de Claude Code sale un 407). `--no-proxy-server` solo no alcanza
+  // mientras esas variables sigan en el entorno: grabar con ellas vacías (o con el dominio en
+  // NO_PROXY) y, si hace falta, sumar '--no-proxy-server' a estos args.
   navegador: {
     args: [],  // p. ej. ['--host-resolver-rules=MAP seguridad.ejemplo.cl 127.0.0.1:8071']
   },

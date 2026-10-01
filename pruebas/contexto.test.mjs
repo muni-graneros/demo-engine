@@ -145,17 +145,29 @@ test('navegador.args llega al Chromium: un dominio mapeado con --host-resolver-r
     const puerto = new URL(juguete.url).port;
     const dominio = `http://seguridad.graneros.test:${puerto}/`;
     const pantallas = [{ id: 'dominio', hacer: async (page) => { await page.goto(dominio, { timeout: 8000 }); } }];
+    const proxies = {};
     try {
         const base = { baseURL: juguete.url, actores: {}, video: { ancho: 800, alto: 600 } };
+        // Sin proxy en este test: con HTTP(S)_PROXY en el entorno (un sandbox, una red
+        // corporativa) Chromium le pasa el nombre al proxy, que lo resuelve él y devuelve su
+        // propia página (407), así que el dominio «resolvía» sin la regla y con la regla nunca
+        // llegaba al juguete. Medido: `--no-proxy-server` solo NO alcanza mientras las variables
+        // sigan en el entorno que hereda Chromium; hay que sacarlas mientras corre el test. La
+        // limitación es real y está en docs/CONFIGURACION.md (navegador.args).
+        const sinProxy = '--no-proxy-server';
+        for (const k of Object.keys(process.env)) {
+            if (/^(https?|all|no)_proxy$/i.test(k)) { proxies[k] = process.env[k]; delete process.env[k]; }
+        }
         const sin = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
-        const r1 = await capturarContexto({ config: { ...base, contexto: { salida: sin, pantallas } }, sesiones: {}, salida: sin });
+        const r1 = await capturarContexto({ config: { ...base, navegador: { args: [sinProxy] }, contexto: { salida: sin, pantallas } }, sesiones: {}, salida: sin });
         assert.equal(r1.fail, 1, 'sin la regla, el dominio no debería resolver (si resuelve, el test no prueba nada)');
 
         const con = mkdtempSync(join(tmpdir(), 'demo-ctx-'));
-        const navegador = { args: [`--host-resolver-rules=MAP seguridad.graneros.test 127.0.0.1`] };
+        const navegador = { args: [sinProxy, `--host-resolver-rules=MAP seguridad.graneros.test 127.0.0.1`] };
         const r2 = await capturarContexto({ config: { ...base, navegador, contexto: { salida: con, pantallas } }, sesiones: {}, salida: con });
         assert.equal(r2.ok, 1, JSON.stringify(r2.manifest));
     } finally {
+        Object.assign(process.env, proxies);
         await juguete.cerrar();
     }
 });
