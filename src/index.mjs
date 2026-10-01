@@ -16,6 +16,9 @@ export { auditarVideo, auditarCapturas, muestrearFrames, contarIdentificadores, 
 export {
     instalarCursor, moverCursorA, pulsar, acercarA, alejar, configurarCamara, configurarCursor, conCursorOculto, escalaQueCabe,
 } from './camara.mjs';
+export { ejecutarGuion, Interrupcion, pasosEnOrden } from './ejecutor.mjs';
+export { vivo, capitulosDe, buscarClip, exigirEntornoEnVivo, disposicionVentanas } from './vivo/index.mjs';
+export { comandoDeSembrado, sembrar } from './sembrar.mjs';
 export { partirCue, partirCues, configurarSubtitulos } from './subtitulos.mjs';
 
 /**
@@ -33,4 +36,6 @@ export const CAPACIDADES = Object.freeze([
     'ficha-sin-tapar',           // presentar en auto/configurarPresentacion/superficies.<id>.presentar
     'anotar-al-lado',            // globo de anotar medido, al lado del objetivo (lado)
     'sin-destellos',             // ningún tramo arranca con un cuadro negro
+    'sembrar-funcion',           // sembrar: string o función (async) ({ escena, guion }) => comando | nada
+    'vivo',                      // `demo vivo`: el guion en ventanas reales, paso a paso, sin grabar
 ]);

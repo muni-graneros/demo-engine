@@ -47,7 +47,7 @@ es compartido). Detalle y motivo en `~/Dev/CLAUDE.md`.
 ## Comandos reales
 
 ```bash
-npm test                    # node --test pruebas/  (única fuente de verdad de tests)
+npm test                    # node pruebas/correr.mjs  (única fuente de verdad de tests)
 node cli.mjs init           # andamiaje en el proyecto que se graba
 node cli.mjs preparar       # sesiones de los actores
 node cli.mjs grabar <guion>
@@ -57,6 +57,7 @@ node cli.mjs contexto
 node cli.mjs todo [maestro] # pipeline completo: aislar → pack → curso → manual → restaurar
 node cli.mjs auditar <guion|video>
 node cli.mjs formatos <video.mp4> [--vertical] [--cuadrado]  # 9:16 y 1:1, sin config
+node cli.mjs vivo [maestro] [--desde=ID] [--auto] [--headless]  # demo en vivo (src/vivo/), sin grabar
 ```
 
 Voces: `bash node_modules/demo-engine/herramientas/instalar-voces.sh` (descarga ~670 MB a
@@ -66,10 +67,12 @@ síntesis de calentamiento: al grabar corren con `HF_HUB_OFFLINE=1` y nada sale 
 
 ## Cómo se prueba
 
-`npm test` (Node test runner nativo sobre `pruebas/*.test.mjs`). Hay pruebas de extremo a
-extremo (`extremo-a-extremo.test.mjs`, `juguete.test.mjs` contra un servidor de juguete en
-`pruebas/juguete/`) además de unitarias por módulo (`privacidad`, `auditoria`, `voz-*`,
-`ffmpeg`, `montaje`, etc.).
+`npm test` ejecuta `node pruebas/correr.mjs`, que descubre y ejecuta todos los tests en
+`pruebas/*.test.mjs`. El script es compatible con Node 20 y Node 22+, evitando la incompatibilidad
+en Node 21+ donde pasar un directorio a `node --test` lo trata como módulo en vez de glob.
+Hay pruebas de extremo a extremo (`extremo-a-extremo.test.mjs`, `juguete.test.mjs` contra un
+servidor de juguete en `pruebas/juguete/`) además de unitarias por módulo (`privacidad`,
+`auditoria`, `voz-*`, `ffmpeg`, `montaje`, etc.).
 
 ## Qué NO hacer
 

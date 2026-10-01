@@ -333,8 +333,8 @@ Todas estas funciones se reexportan desde `demo-engine`:
     el motor nunca sube una escala). `ajustar: false` vuelve a la escala exacta.
   — deja el elemento centrado en pantalla también en paneles con barras fijas y contenido que
     se desplaza dentro de un contenedor propio (Filament 5 SPA) y en layouts de alto fijo (una
-    sala React): primero lo centra dentro de sus contenedores con scroll (sin restaurarlos al
-    `alejar`) y después desplaza el viewport visual. Si la raíz tiene overflow hidden/clip, el
+    sala React): primero lo centra dentro de sus contenedores con scroll (desde 1.16, `alejar` los
+    devuelve a donde estaban junto con el zoom) y después desplaza el viewport visual. Si la raíz tiene overflow hidden/clip, el
     documento no se mueve (sin franja vacía); un elemento pegado al borde queda lo más cerca
     posible del centro sin mostrar nada fuera de la página. Desde v1.14.1 ya no hacen falta
     ayudantes propios tipo `enfocar`/`soltar` para esto.

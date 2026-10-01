@@ -369,6 +369,38 @@ test('demo grabar siembra antes de cada corrida, no solo demo preparar', async (
     }
 });
 
+test('demo grabar acepta sembrar como función y la llama sin escena (el defecto lo decide la config)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        // La forma función existe para la demo en vivo (una escena por capítulo); grabar no
+        // pasa escena, así que la función cae en su propio defecto, como hacía el string.
+        const proyecto = proyectoDeJuguete(juguete,
+            `sembrar: ({ escena = 'inicio' } = {}) => 'sh -c "echo ' + escena + ' >> sembrados.txt"',`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const r = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(r.status, 0, `demo grabar falló: ${r.stderr}`);
+        assert.equal(readFileSync(join(proyecto, 'sembrados.txt'), 'utf8').trim(), 'inicio');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
+test('demo grabar acepta sembrar como función async que siembra por su cuenta (sin devolver comando)', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    try {
+        // La función del sistema puede sembrar ella misma (p. ej. con su propio cliente) y no
+        // devolver nada: el motor la espera antes de grabar y no ejecuta ningún comando.
+        const proyecto = proyectoDeJuguete(juguete,
+            `sembrar: async ({ escena = 'inicio' } = {}) => { await new Promise((r) => setTimeout(r, 50)); (await import('node:fs')).writeFileSync('sembrados.txt', 'async-' + escena); },`);
+        escribirGuionPanel(proyecto, 'panel', juguete.url);
+        const r = await correrCli(proyecto, ['grabar', 'panel']);
+        assert.equal(r.status, 0, `demo grabar falló: ${r.stderr}`);
+        assert.equal(readFileSync(join(proyecto, 'sembrados.txt'), 'utf8').trim(), 'async-inicio');
+    } finally {
+        await juguete.cerrar();
+    }
+});
+
 test('demo grabar aplica la presentación declarada en la config', async () => {
     // Este test protege el CABLEADO, que es donde se pierden las opciones: montar() ya está
     // probado aparte, pero nada garantizaba que cli.mjs le pasara `presentacion`, `marca` y

@@ -5,6 +5,57 @@ qué cambia para quien graba y por qué; los ids (C1, G8-01…) remiten a la rev
 videotutorial de seguridad-graneros donde apareció el defecto. Las versiones anteriores a la
 1.15.0 están descritas en los commits `Versión x.y.z` de `git log`.
 
+## 1.16.1 — 2026-10-01
+
+Mismo contenido que la 1.16.0 descrita abajo. El tag `v1.16.0` quedó publicado por error sobre el
+commit de la 1.15.0 (el merge de la rama no había entrado): **no fijes `v1.16.0`**; usá `v1.16.1`.
+Además se quita del repo `:memory:.ses`, un archivo de sesión que crean las pruebas.
+
+## 1.16.0 — 2026-09-30
+
+Compatible con los guiones y configs de la 1.15. Trae las dos capacidades que seguridad-graneros
+ya consulta (`sembrar-funcion` y `vivo`) y tres correcciones de la revisión del tutorial.
+
+### Nuevo
+
+- **`demo vivo`** (capacidad `vivo`). Presenta los mismos guiones que se graban, en ventanas
+  reales de Chromium (una por actor), paso a paso desde la consola del presentador
+  (`http://127.0.0.1:<puerto>`, teclas de clicker, teleprompter), sin grabar, sin voz y sin
+  ffmpeg. Siembra cada capítulo con su escena, nunca reloguea por su cuenta, ordena las ventanas
+  (sola a pantalla completa, `dividir` lado a lado), tapa la pantalla si un paso falla y ofrece
+  reintentar, saltar, reiniciar el capítulo o pasar al clip grabado (modo seguro). Sólo corre
+  contra loopback, `localhost` y `*.test` (`--permitir-host` para un servidor de demo declarado
+  a mano) y rechaza `DEMO_FORZAR=1`. Usa `navegador.args` igual que la grabación.
+  `demo vivo [maestro|guion] [--desde=ID] [--capitulos=…] [--auto] [--headless]`; ver README
+  «Demo en vivo». El bucle de pasos sale de `grabar()` a `src/ejecutor.mjs`, compartido por los
+  dos modos (lo que se graba no cambia). Viene de la rama `feat/demo-en-vivo`, integrada sobre
+  la 1.15.
+- **`sembrar` como función** (capacidad `sembrar-funcion`): además del string de siempre,
+  `sembrar: async ({ escena, guion }) => comando | nada`. Si devuelve un comando, el motor lo
+  ejecuta; si no devuelve nada, entiende que sembró por su cuenta y sólo la espera. `grabar`,
+  `curso` y `preparar` la llaman sin escena; `demo vivo`, con la de cada capítulo. `sembrar` y
+  `comandoDeSembrado` quedan exportados.
+
+### Corregido
+
+- **La pantalla del teléfono quedaba corrida tras `acercarA` + `alejar`**: en el APK el
+  objetivo vive en un contenedor con scroll propio; `acercarA` lo centraba ahí y `alejar` sólo
+  devolvía el documento, así que la lista quedaba corrida (~40 px en el tutorial, el encabezado
+  de la tarjeta casi cortado) el resto del paso. Ahora `alejar` devuelve esos contenedores a
+  donde estaban, junto con el zoom y sin tirón.
+- **Falso aviso «dividir: el actor X no tiene nada abierto todavía»** cuando el otro actor
+  dibujaba con `setContent` (queda en `about:blank` aunque su panel se vea bien). El aviso mira
+  ahora si la página tiene contenido, no la URL.
+- **El test de `navegador.args` fallaba con un proxy HTTP en el entorno** (el proxy resuelve el
+  nombre, no Chromium). El test corre sin proxy; la limitación queda en
+  `docs/CONFIGURACION.md` (`navegador`) para quien grabe detrás de uno.
+
+### Pruebas
+
+- `npm test` corre con `node pruebas/correr.mjs` (Node 20 y 22+). Hay una prueba de `demo vivo`
+  con ventanas reales que usa el escritorio o `xvfb-run`; donde Chromium con ventanas no puede
+  arrancar (sandbox sin sockets unix) se salta diciendo por qué.
+
 ## 1.15.0 — 2026-09-30
 
 Todo lo nuevo es compatible con los guiones y configs de la 1.14: lo que cambia de aspecto por

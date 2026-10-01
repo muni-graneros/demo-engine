@@ -1,6 +1,6 @@
 {
   "name": "demo-engine",
-  "version": "1.15.0",
+  "version": "1.16.1",
   "type": "module",
   "description": "Motor genérico de videos-tutorial para sistemas web.",
   "bin": {
@@ -19,7 +19,7 @@
     "docs/*.md"
   ],
   "scripts": {
-    "test": "node --test pruebas/"
+    "test": "node pruebas/correr.mjs"
   },
   "engines": {
     "node": ">=20"

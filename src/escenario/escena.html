@@ -36,6 +36,35 @@ let plano = null;
 const RETROCESO = 0.3;
 let zFinal = 1;
 
+// Espera un evento del <video>, pero NUNCA sin tope. Antes se esperaba `loadedmetadata` o
+// `seeked` a secas: si el video no cargaba (MP4 corrupto, o un Chromium sin decodificador
+// H.264) el navegador emitía `error` —que nadie escuchaba— y la promesa quedaba pendiente
+// para siempre; `page.evaluate` no tiene timeout, así que el curso entero se colgaba sin
+// decir nada. Ahora `error` rechaza con el motivo del decodificador, y un tope cubre el
+// caso de que no llegue ningún evento.
+const TOPE_VIDEO_MS = 15000;
+function esperarVideo(evento, contexto) {
+    return new Promise((ok, falla) => {
+        const limpiar = () => {
+            clearTimeout(reloj);
+            video.removeEventListener(evento, alListo);
+            video.removeEventListener('error', alError);
+        };
+        const alListo = () => { limpiar(); ok(); };
+        const alError = () => {
+            limpiar();
+            const e = video.error;
+            falla(new Error(`${contexto}: código ${e?.code ?? '?'} ${e?.message ?? ''}`.trim()));
+        };
+        const reloj = setTimeout(() => {
+            limpiar();
+            falla(new Error(`${contexto}: sin evento «${evento}» en ${TOPE_VIDEO_MS} ms`));
+        }, TOPE_VIDEO_MS);
+        video.addEventListener(evento, alListo);
+        video.addEventListener('error', alError);
+    });
+}
+
 window.__preparar = async ({ ancho, alto, src, fondo }) => {
     render.setSize(ancho, alto, false);
     document.body.appendChild(render.domElement);
@@ -43,7 +72,7 @@ window.__preparar = async ({ ancho, alto, src, fondo }) => {
     camara.aspect = ancho / alto;
     camara.updateProjectionMatrix();
     video.src = src;
-    await new Promise((ok) => { video.onloadedmetadata = ok; });
+    await esperarVideo('loadedmetadata', `no pudo cargar el video ${src}`);
 
     // El plano se construye con el aspecto REAL del video, no con un 1.6 hardcodeado: con
     // cualquier otra resolución, ese 1.6 deformaba la imagen dentro de la transición.
@@ -69,8 +98,9 @@ window.__preparar = async ({ ancho, alto, src, fondo }) => {
 
 /** Coloca el video en `t` segundos y la cámara en el avance `p` (0 → 1) de la transición. */
 window.__frame = async ({ t, p, gradosMax }) => {
+    const listo = esperarVideo('seeked', `no pudo posicionar el video en ${t} s`);
     video.currentTime = t;
-    await new Promise((ok) => { video.onseeked = ok; });
+    await listo;
     // easing suave: entra inclinada y termina frontal, que es lo que protege la legibilidad
     const suave = 1 - Math.pow(1 - p, 3);
     const grados = gradosMax * (1 - suave);
