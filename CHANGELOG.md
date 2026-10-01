@@ -5,6 +5,12 @@ qué cambia para quien graba y por qué; los ids (C1, G8-01…) remiten a la rev
 videotutorial de seguridad-graneros donde apareció el defecto. Las versiones anteriores a la
 1.15.0 están descritas en los commits `Versión x.y.z` de `git log`.
 
+## 1.16.1 — 2026-10-01
+
+Mismo contenido que la 1.16.0 descrita abajo. El tag `v1.16.0` quedó publicado por error sobre el
+commit de la 1.15.0 (el merge de la rama no había entrado): **no fijes `v1.16.0`**; usá `v1.16.1`.
+Además se quita del repo `:memory:.ses`, un archivo de sesión que crean las pruebas.
+
 ## 1.16.0 — 2026-09-30
 
 Compatible con los guiones y configs de la 1.15. Trae las dos capacidades que seguridad-graneros
