@@ -439,7 +439,7 @@ test('subtitulos: por defecto parte en 2 líneas de 42; se puede apagar o cambia
 
 test('navegador.args: por defecto vacío; acepta banderas de Chromium y rechaza lo que no lo es', async () => {
     const cfg = await cargarConfig(proyecto(minima));
-    assert.deepEqual(cfg.navegador, { args: [] });
+    assert.deepEqual(cfg.navegador, { args: [], idioma: 'es-CL', canal: 'chromium' });
 
     const reglas = '--host-resolver-rules=MAP seguridad.municipalidadgraneros.cl 127.0.0.1';
     const con = await cargarConfig(proyecto({ ...minima, navegador: { args: [reglas] } }));

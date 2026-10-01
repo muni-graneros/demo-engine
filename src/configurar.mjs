@@ -108,7 +108,10 @@ const DEFECTOS = {
     // Banderas extra de Chromium para los lanzamientos que tocan el sistema grabado (grabar,
     // preparar sesiones, pack de contexto). Caso real: `--host-resolver-rules` para que la
     // barra y los enlaces muestren el dominio público y no 127.0.0.1/localhost.
-    navegador: { args: [] },
+    // `idioma` pone `--lang` y el `locale` de los contextos: sin eso los controles nativos
+    // («Choose Files», `dd/mm/yyyy`) salen en inglés en el video. `canal: 'chromium'` es el
+    // Chromium completo, el único que respeta `--lang`; `null` = headless-shell de antes.
+    navegador: { args: [], idioma: 'es-CL', canal: 'chromium' },
 };
 
 const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
@@ -392,6 +395,10 @@ export async function cargarConfig(rutaProyecto) {
     exigir(Array.isArray(navegador.args) && navegador.args.every((a) => typeof a === 'string' && /^--[a-z0-9]/i.test(a)),
         'navegador.args debe ser una lista de banderas de Chromium que empiecen con "--"');
     navegador.args = [...navegador.args];
+    exigir(typeof navegador.idioma === 'string' && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(navegador.idioma),
+        'navegador.idioma debe ser una etiqueta de idioma BCP 47, p. ej. "es-CL"');
+    exigir(navegador.canal === null || (typeof navegador.canal === 'string' && navegador.canal !== ''),
+        'navegador.canal debe ser un canal de Playwright ("chromium", "chrome"…) o null para el headless-shell de siempre');
     for (const arg of navegador.args) exigirReglasALoopback(arg);
 
     exigir(cruda.sembrar == null || ['string', 'function'].includes(typeof cruda.sembrar),

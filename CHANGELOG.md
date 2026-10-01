@@ -5,6 +5,25 @@ qué cambia para quien graba y por qué; los ids (C1, G8-01…) remiten a la rev
 videotutorial de seguridad-graneros donde apareció el defecto. Las versiones anteriores a la
 1.15.0 están descritas en los commits `Versión x.y.z` de `git log`.
 
+## [Sin publicar]
+
+Versión menor siguiente: 1.17.0.
+
+### Cambia
+
+- **Los controles nativos del navegador salen en español en los videos.** «Choose Files» y
+  `dd/mm/yyyy` (`<input type=file>` / `<input type=date>`) los dibuja Chromium en el idioma de su
+  interfaz, y con el headless-shell que Playwright usa por defecto `--lang` no alcanza. Ahora todos
+  los lanzamientos que tocan el sistema grabado (grabar, preparar, pack de contexto, `vivo`) usan el
+  canal `chromium` más `--lang=es-CL`, y cada contexto lleva `locale: 'es-CL'` (también el pack de
+  contexto y los actores con dispositivo). Verificado con el árbol de accesibilidad: «Seleccionar
+  archivo» / `aaaa` en lugar de «Choose File» / `yyyy`.
+- Configurable en `demo.config.mjs`: `navegador.idioma` (defecto `'es-CL'`) y `navegador.canal`
+  (defecto `'chromium'`; `null` vuelve al lanzamiento de antes). Un `--lang=` dentro de
+  `navegador.args` manda sobre `idioma`. Sin tocar la config de los consumidores cambia solo eso.
+- Aviso: el Chromium completo no arranca dentro del sandbox de Claude Code (falla `socket()` del
+  singleton de proceso); grabar fuera del sandbox o poner `canal: null`.
+
 ## 1.16.1 — 2026-10-01
 
 Mismo contenido que la 1.16.0 descrita abajo. El tag `v1.16.0` quedó publicado por error sobre el

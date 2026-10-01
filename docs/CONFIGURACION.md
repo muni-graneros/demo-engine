@@ -88,6 +88,11 @@ export default {
   // NO_PROXY) y, si hace falta, sumar '--no-proxy-server' a estos args.
   navegador: {
     args: [],  // p. ej. ['--host-resolver-rules=MAP seguridad.ejemplo.cl 127.0.0.1:8071']
+    idioma: 'es-CL',    // `--lang` + `locale` de cada contexto: los controles nativos («Seleccionar
+                        // archivo», `dd/mm/aaaa`) los dibuja Chromium en este idioma (defecto: es-CL).
+                        // Un `--lang=` en `args` manda sobre este campo.
+    canal: 'chromium',  // Canal de Playwright. `'chromium'` (defecto) es el Chromium completo, el único
+                        // que respeta `--lang`; `null` = headless-shell de antes (controles en inglés).
   },
 
   // Voz: síntesis de audio.
