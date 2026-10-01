@@ -112,9 +112,12 @@ export default {
                                 // sobre lo que dejó la primera —casos ya resueltos que no
                                 // muestran sus botones, filas acumuladas— y cada síntoma parece
                                 // un selector roto cuando en realidad es el estado.
-                                // También puede ser una función `({ escena, guion }) => string`:
-                                // `demo vivo` la llama con la escena de cada capítulo; grabar,
-                                // curso y preparar la llaman sin escena (decide el defecto).
+                                // También puede ser una función (puede ser async)
+                                // `({ escena, guion }) => string | null`: `demo vivo` la llama
+                                // con la escena de cada capítulo; grabar, curso y preparar la
+                                // llaman sin escena (decide el defecto). Si devuelve un string,
+                                // el motor lo ejecuta; si devuelve nada, se entiende que sembró
+                                // por su cuenta y sólo se la espera. Capacidad 'sembrar-funcion'.
   limpiar: 'npm run clean',     // Después de todo
 
   // Demo en vivo (`demo vivo`, ver README «Demo en vivo»). Opcional; no afecta la grabación.

@@ -70,8 +70,9 @@ const DEFECTOS = {
     // un test en pruebas/configurar.test.mjs que compara ambos literales para detectar que
     // se desincronicen.
     auditoria: { ocr: null, patron: '(?<![\\d-])\\d{7,8}-[\\dkK](?![\\dkK])', cada: 10, maximo: null, token: null, validar: null, chequeoEnVivo: true },
-    // `sembrar`: un string (el comando de siempre) o una función `({ escena, guion }) =>
-    // string`, para la demo en vivo que siembra cada capítulo con su escena (src/sembrar.mjs).
+    // `sembrar`: un string (el comando de siempre) o una función, también async,
+    // `({ escena, guion }) => string | null`, para la demo en vivo que siembra cada capítulo
+    // con su escena; si no devuelve comando, sembró por su cuenta (src/sembrar.mjs).
     sembrar: null,
     limpiar: null,
     // Demo en vivo (`demo vivo`, src/vivo/). Nada de esto cambia grabar/curso/manual.
@@ -394,7 +395,7 @@ export async function cargarConfig(rutaProyecto) {
     for (const arg of navegador.args) exigirReglasALoopback(arg);
 
     exigir(cruda.sembrar == null || ['string', 'function'].includes(typeof cruda.sembrar),
-        `sembrar debe ser un string o una función ({ escena }) => string (recibí ${typeof cruda.sembrar})`);
+        `sembrar debe ser un string o una función ({ escena, guion }) => comando (recibí ${typeof cruda.sembrar})`);
     const vivo = { ...DEFECTOS.vivo, ...cruda.vivo, pantalla: { ...DEFECTOS.vivo.pantalla, ...cruda.vivo?.pantalla } };
     exigir(['x', 'y', 'ancho', 'alto'].every((k) => Number.isFinite(vivo.pantalla[k])), 'vivo.pantalla debe traer x, y, ancho y alto numéricos');
     exigir(Number.isFinite(vivo.velocidad) && vivo.velocidad > 0, 'vivo.velocidad debe ser un número mayor que cero');

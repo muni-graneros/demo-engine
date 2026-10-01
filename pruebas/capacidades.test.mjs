@@ -20,9 +20,9 @@ test('CAPACIDADES declara lo que trae la 1.15 y cada una tiene su API', () => {
     assert.equal(typeof motor.configurarPresentacion, 'function');
 });
 
-test('CAPACIDADES no promete lo que el motor no hace (sembrar como función, demo vivo)', () => {
-    // seguridad-graneros pasa `sembrar` como FUNCIÓN si ve 'sembrar-funcion'; este motor hace
-    // execSync(config.sembrar) y reventaría. Y vivo.sh exige 'vivo', un comando que no existe.
-    assert.ok(!motor.CAPACIDADES.includes('sembrar-funcion'));
-    assert.ok(!motor.CAPACIDADES.includes('vivo'));
+test('CAPACIDADES declara sembrar como función (1.16) y exporta lo que la respalda', () => {
+    // seguridad-graneros pasa `sembrar` como FUNCIÓN si ve 'sembrar-funcion' (MOTOR_ACEPTA_FUNCION).
+    // Sólo se declara con su implementación y sus pruebas (sembrar.test.mjs).
+    assert.ok(motor.CAPACIDADES.includes('sembrar-funcion'));
+    assert.equal(typeof motor.sembrar, 'function');
 });
