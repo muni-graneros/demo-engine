@@ -144,3 +144,11 @@ test('generarMusica: estéreo del largo pedido, con fundidos y bajo nivel', () =
     const muestras = new Int16Array(crudo.buffer.slice(crudo.byteOffset, crudo.byteOffset + crudo.length));
     assert.ok(Math.max(...muestras.map(Math.abs)) < 500, 'empieza con fundido, sin golpe');
 });
+
+test('pantallaDeCarga: color de la marca (o el de siempre si no es hex) y el nombre escapado', async () => {
+    const { pantallaDeCarga } = await import('../src/grabador.mjs');
+    const html = pantallaDeCarga({ color: '#355a63', nombre: 'Seguridad <Pública>' });
+    assert.match(html, /background:#355a63/);
+    assert.match(html, /Seguridad &lt;Pública&gt;/);
+    assert.match(pantallaDeCarga({ color: 'red;}body{x' }), /background:#1e3a8a/);
+});

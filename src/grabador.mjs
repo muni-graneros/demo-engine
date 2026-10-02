@@ -9,6 +9,21 @@ import { iniciarGrabacion } from './pantalla.mjs';
 import { esPlano } from './rotulos.mjs';
 import { duracion } from './ffmpeg.mjs';
 
+const escaparHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+/**
+ * Lo que muestra una pestaña recién abierta mientras el sistema carga (sólo con acabado): el color
+ * y el nombre de la marca, como la pantalla de arranque de una app. Antes era about:blank, un
+ * rectángulo blanco de uno o dos segundos cada vez que entraba un actor nuevo.
+ */
+export function pantallaDeCarga(marca = {}) {
+    const color = /^#[0-9a-f]{3,8}$/i.test(marca?.color ?? '') ? marca.color : '#1e3a8a';
+    const nombre = escaparHtml(marca?.nombre ?? '');
+    return `<!doctype html><html style="background:${color}"><body style="margin:0;height:100vh;display:flex;align-items:center;`
+        + `justify-content:center;background:${color};color:#fff;font:600 22px/1.3 'Noto Sans',system-ui,sans-serif;text-align:center;`
+        + `padding:0 24px;box-sizing:border-box">${nombre}</body></html>`;
+}
+
 /**
  * Ejecuta un guion y devuelve las pistas grabadas más los pasos con doble reloj.
  *
@@ -105,7 +120,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
             // Con acabado, la pestaña recién abierta (about:blank, blanca) se pinta como pantalla
             // apagada: el primer tramo de un actor que todavía no navegó ya no destella en blanco.
             if (config.video?.acabado && datos.page.url() === 'about:blank') {
-                await datos.page.setContent('<!doctype html><html style="background:#0b1215"><body style="margin:0;background:#0b1215"></body></html>').catch(() => {});
+                await datos.page.setContent(pantallaDeCarga(config.marca)).catch(() => {});
             }
             const archivoPista = join(salida, `pista-${nombre}.mp4`);
             // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide
