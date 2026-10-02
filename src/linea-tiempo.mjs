@@ -36,5 +36,8 @@ export function construirLineaDeTiempo(pasos) {
             // Rótulo plano ('portada' | 'cierre' | null): el montaje lo saca a pantalla
             // completa, sin marco de navegador (ver `esPlano` en src/rotulos.mjs).
             plano: p.plano || null,
+            // Para el acabado: el título de la escena (rótulo animado) y si el paso no se recorta.
+            ...(p.titulo ? { titulo: p.titulo } : {}),
+            ...(p.sinRecorte ? { sinRecorte: true } : {}),
         }));
 }
