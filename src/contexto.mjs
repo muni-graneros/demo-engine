@@ -2,7 +2,7 @@ import { chromium } from 'playwright';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { exigirEntornoDeDesarrollo } from './privacidad.mjs';
-import { actorConSesion, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
+import { actorConSesion, idiomaDeNavegador, opcionesDeContexto, opcionesDeLanzamiento } from './contexto-actor.mjs';
 
 /**
  * Captura el "pack de contexto" de un sistema: un screenshot por pantalla declarada, para
@@ -54,7 +54,7 @@ export async function capturarContexto({ config, sesiones, salida }) {
     const paginaDe = async (actor) => {
         const clave = actor ?? '__publico__';
         if (paginas.has(clave)) return paginas.get(clave);
-        let opciones = { baseURL: config.baseURL, viewport: { width: ancho, height: alto } };
+        let opciones = { baseURL: config.baseURL, locale: idiomaDeNavegador(config), viewport: { width: ancho, height: alto } };
         // Con actor: el MISMO contexto que le arma el grabador (sesión, dispositivo, baseURL,
         // permisos), para que el pack muestre lo que después sale en el video. Público:
         // contexto nuevo, SIN storageState (no autenticado).
