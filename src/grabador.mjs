@@ -102,6 +102,11 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                 clics.push(t - t0Global);
                 if (punto) focos.push({ t: t - t0Global, actor: nombre, x: punto.x, y: punto.y, escala: punto.escala ?? 1 });
             });
+            // Con acabado, la pestaña recién abierta (about:blank, blanca) se pinta como pantalla
+            // apagada: el primer tramo de un actor que todavía no navegó ya no destella en blanco.
+            if (config.video?.acabado && datos.page.url() === 'about:blank') {
+                await datos.page.setContent('<!doctype html><html style="background:#0b1215"><body style="margin:0;background:#0b1215"></body></html>').catch(() => {});
+            }
             const archivoPista = join(salida, `pista-${nombre}.mp4`);
             // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide
             // su viewport CSS (ver `opcionesDeContexto`), que es lo que el screencast entrega de

@@ -50,7 +50,7 @@ export function encuadresDe(composiciones, segmentos) {
     segmentos.forEach((s, i) => {
         const c = composiciones[i] ?? { clave: `sin-${i}`, camara: false };
         if (c.clave !== clave || !encuadres.length) {
-            encuadres.push({ inicio: s.inicioSeg, fin: s.finSeg, camara: c.camara });
+            encuadres.push({ inicio: s.inicioSeg, fin: s.finSeg, camara: c.camara, ...(c.soloTelefono ? { soloTelefono: true } : {}) });
             clave = c.clave;
         } else {
             encuadres.at(-1).fin = s.finSeg;
@@ -244,6 +244,8 @@ export async function montar({
             componerEnLienzo(entradas, { png, huecos, lienzo, salida: trozo, duracion: hasta - seg.desdeSeg });
             composicion.clave = JSON.stringify([actoresDelTramo, disposicion]);
             composicion.camara = true;
+            // Un teléfono solo deja libres los costados del lienzo: los subtítulos van al lado.
+            composicion.soloTelefono = paneles.length === 1 && paneles[0].tipo === 'telefono';
             actoresDelTramo.forEach((a, k) => {
                 composicion.paneles[a] = { hueco: huecos[k], dim: dimensiones[a] ?? video, telefono: paneles[k].tipo === 'telefono' };
             });

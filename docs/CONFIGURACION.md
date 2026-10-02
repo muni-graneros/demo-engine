@@ -322,6 +322,47 @@ ese script, en vez de salir a internet a mitad de una grabación.
 - **Chatterbox** clona la voz del `.wav`. Clonar una voz exige el **consentimiento escrito**
   de la persona (Ley 21.719). Sin `voz`, el motor queda no disponible y lo dice.
 
+## Acabado moderno (1.18, opt-in)
+
+`video.acabado` le da al video el acabado de un tutorial de producto actual, en el montaje y sin
+tocar la grabación (spec `docs/superpowers/specs/2026-10-02-video-moderno-design.md`). Sin el
+bloque, nada cambia.
+
+```js
+video: {
+  acabado: {
+    fps: 60,                                   // cadencia de salida (24–60); la captura sigue a la suya
+    crf: 18,                                   // calidad x264 de la salida
+    silencios: { maxSeg: 2, margenSeg: 0.5 },  // recorta lo que pase de 2 s sin voz; null = no recortar
+    camara: { zoom: 1.5, zoomTelefono: 1.3 },  // acerca y sigue cada pulsar(); null = sin cámara
+    subtitulos: { tamano: 34 },                // subtítulos quemados en píldora; null = sólo .vtt
+    rotulos: { segundos: 3.2 },                // rótulo animado con el título de cada escena; null = sin rótulos
+  },
+},
+audio: {
+  musica: { generada: true, volumen: 0.7 },    // cama armónica del propio motor: sin licencia de terceros
+},
+```
+
+- **Cámara automática.** Cada `pulsar()` deja su punto; el montaje lo lleva al lienzo y la cámara
+  entra ~0,8 s antes del clic, pasea de clic en clic (clics a ≤ 3,2 s forman una toma), sostiene
+  1,6 s y sale. Nunca cruza un corte de composición (otro actor, otra disposición, una portada)
+  acercada, y no se dispara si la página ya estaba acercada con `acercarA`. Funciona con lienzo
+  (`superficies` o `dividir`) y sin presentación; con `presentacion` y sin superficies no hay
+  geometría del marco y la cámara se queda quieta (declarar una superficie la activa).
+- **Silencios.** El hueco entre locuciones que pase de `maxSeg` pierde su centro y conserva
+  `margenSeg` a cada lado. Nunca se corta 1 s antes ni 1,2 s después de un clic, ni un paso con
+  `sinRecorte: true` (una espera que ES lo que se muestra), ni una portada o un cierre.
+- **Subtítulos.** Los mismos cues del `.vtt` (42×2), pero en el tramo de la VOZ y no del paso
+  entero; un hueco < 0,35 s entre dos cues se rellena (sin parpadeo). Píldora `rgba(15,23,42,.88)`
+  con texto blanco: contraste > 15:1. El `.vtt` sale con los mismos tiempos.
+- **Rótulos.** Al entrar en cada escena con `titulo`, arriba a la derecha: el título de la escena
+  con el del guion como antetítulo, la barra con `marca.color`; entra deslizando y sale con fundido.
+- **`pegarCapitulos(..., { fps, crf })`**: pasar los del acabado para que el curso no vuelva a
+  25 fps (el CLI lo hace solo).
+- **Rendimiento.** `perspective` rehace su malla en cada cuadro: el acabado parte el video en piezas
+  de ≤ 8 s y las codifica en paralelo (hasta 6 a la vez según los núcleos).
+
 ## Ritmo: por qué el video sale fluido
 
 Un tutorial se siente lento por cosas que no son la velocidad de la voz. El motor

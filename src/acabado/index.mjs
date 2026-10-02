@@ -112,7 +112,8 @@ export async function acabar({
     let capaSub = null;
     let capaRot = null;
     if (o.subtitulos && cues.length) {
-        capaSub = await renderizarEstados(estadosDeSubtitulos(cues), { lienzo, marca, tamano: o.subtitulos.tamano, dir: join(dir, 'sub') });
+        const lateralEn = (t) => Boolean(encuadresNuevos.find((e) => t >= e.inicio && t < e.fin)?.soloTelefono);
+        capaSub = await renderizarEstados(estadosDeSubtitulos(cues, { lateralEn }), { lienzo, marca, tamano: o.subtitulos.tamano, dir: join(dir, 'sub') });
     }
     const rotulos = o.rotulos ? rotulosDeEscenas(segs, { segundos: o.rotulos.segundos, antetitulo }) : [];
     if (rotulos.length) {

@@ -74,8 +74,13 @@ const PASOS_POR_SEG = 30;
  * no cubren es transparente. Los subtítulos tienen un estado por cue; los rótulos, además, un
  * estado por cuadro de su entrada (deslizan y aparecen) y de su salida (se desvanecen).
  */
-export function estadosDeSubtitulos(cues) {
-    return cues.map((c, i) => ({ inicio: c.inicioSeg, fin: c.finSeg, clave: `sub-${i}`, datos: { tipo: 'subtitulo', texto: c.narrar } }));
+export function estadosDeSubtitulos(cues, { lateralEn = () => false } = {}) {
+    return cues.map((c, i) => {
+        // Con un teléfono solo en pantalla, abajo al centro la píldora tapaba lo de más abajo del
+        // teléfono (el botón de pánico): ahí va al costado derecho, en el espacio libre.
+        const lateral = lateralEn((c.inicioSeg + c.finSeg) / 2);
+        return { inicio: c.inicioSeg, fin: c.finSeg, clave: `sub-${i}${lateral ? '-l' : ''}`, datos: { tipo: 'subtitulo', texto: c.narrar, lateral } };
+    });
 }
 
 export function estadosDeRotulos(rotulos) {
@@ -108,6 +113,14 @@ const escapar = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<':
 /** El HTML de un estado. Exportado para probar el contraste y los textos sin abrir Chromium. */
 export function htmlDeEstado(datos, { lienzo, marca = null, tamano = 34 }) {
     const fuente = "'Noto Sans','Inter','DejaVu Sans',system-ui,sans-serif";
+    if (datos.tipo === 'subtitulo' && datos.lateral) {
+        const ancho = Math.round(lienzo.ancho * 0.27);
+        return `<div style="position:absolute;top:0;bottom:0;right:${Math.round(lienzo.ancho * 0.045)}px;display:flex;align-items:center">`
+            + `<div style="width:${ancho}px;padding:${Math.round(tamano * 0.6)}px ${Math.round(tamano * 0.75)}px;`
+            + `border-radius:${Math.round(tamano * 0.55)}px;background:rgba(15,23,42,.88);color:#fff;`
+            + `font:600 ${Math.round(tamano * 1.06)}px/1.4 ${fuente};text-align:left;white-space:normal;`
+            + `box-shadow:0 6px 24px rgba(0,0,0,.35)">${escapar(datos.texto.replace(/\n/g, ' '))}</div></div>`;
+    }
     if (datos.tipo === 'subtitulo') {
         return `<div style="position:absolute;left:0;right:0;bottom:${Math.round(lienzo.alto * 0.045)}px;display:flex;justify-content:center">`
             + `<div style="max-width:${Math.round(lienzo.ancho * 0.74)}px;padding:${Math.round(tamano * 0.32)}px ${Math.round(tamano * 0.8)}px;`

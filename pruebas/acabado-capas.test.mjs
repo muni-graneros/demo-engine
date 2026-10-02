@@ -93,3 +93,16 @@ test('renderizarEstados dibuja la píldora abajo al centro y deja transparente l
     const esquina = pixel(estados[0].png, 5, 5);
     assert.equal(esquina[3], 0, 'fuera de la píldora es transparente');
 });
+
+test('con un teléfono solo en pantalla, el subtítulo va al costado y en una sola caja', () => {
+    const estados = estadosDeSubtitulos([
+        { inicioSeg: 0, finSeg: 2, narrar: 'En la sala.' },
+        { inicioSeg: 2, finSeg: 4, narrar: 'En el\nteléfono.' },
+    ], { lateralEn: (t) => t >= 2 });
+    assert.equal(estados[0].datos.lateral, false);
+    assert.equal(estados[1].datos.lateral, true);
+    assert.notEqual(estados[0].clave, estados[1].clave.replace(/-l$/, '') + 'x');
+    const html = htmlDeEstado(estados[1].datos, { lienzo: { ancho: 1920, alto: 1080 } });
+    assert.match(html, /align-items:center/);
+    assert.match(html, /En el teléfono\./, 'las líneas se juntan: la caja lateral envuelve sola');
+});
