@@ -166,6 +166,10 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
          * del pipeline en una máquina sin GPU.
          */
         async despuesDePaso({ escena, paso, actor, dividir }) {
+            // Paso de preparación (`oculto: true`): se ejecuta, pero no entra al video ni a la
+            // línea de tiempo. Sirve para cargar la primera pantalla de un actor FUERA de cuadro:
+            // sin esto, cada capítulo abría con la pantalla de arranque y la carga a medias.
+            if (paso.oculto) return;
             // ¿El paso terminó en una portada o un cierre? El montaje saca ese tramo a
             // pantalla completa, sin marco de navegador. `paso.marco` lo fuerza:
             // `false` = plano aunque no haya portada, `true` = con marco aunque la haya.

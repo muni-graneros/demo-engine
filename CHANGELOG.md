@@ -24,7 +24,19 @@ Versión menor siguiente: 1.17.0.
 - Aviso: el Chromium completo no arranca dentro del sandbox de Claude Code (falla `socket()` del
   singleton de proceso); grabar fuera del sandbox o poner `canal: null`.
 
-## 1.18.0 — 2026-10-02
+## 1.18.1 — 2026-10-03
+
+Parche: dos retoques opt-in surgidos de revisar fotograma a fotograma el tutorial de
+seguridad-graneros. Nada cambia para quien no los use.
+
+### Nuevo
+
+- **Paso `oculto: true`.** El paso se ejecuta pero no entra al video ni a la línea de tiempo.
+  Sirve para cargar la primera pantalla de un actor fuera de cuadro: sin él, cada capítulo abría
+  con la pantalla de arranque y la carga a medias (la sala tapada ~1 s antes de verse).
+- **`pulsar(page, selector, { sinCamara: true })`.** El clic suena y deja su halo, pero no genera
+  un foco para la cámara automática del acabado. Para botones al borde que abren un modal o un
+  panel: la cámara acercada al botón recortaba justo lo que la voz estaba explicando.
 
 Compatible con los guiones y configs de la 1.16/1.17: todo lo nuevo es opt-in.
 

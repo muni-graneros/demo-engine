@@ -760,3 +760,38 @@ test('superficies.<id>.presentar fija la ficha de presentar para los actores de 
         assert.deepEqual(posiciones, { tel: 'arriba-derecha', pc: 'abajo-izquierda' });
     } finally { await cerrar(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('un paso `oculto` se ejecuta pero no entra a los pasos grabados', async () => {
+    const juguete = await iniciarJuguete({ puerto: 0 });
+    const salida = mkdtempSync(join(tmpdir(), 'demo-oculto-'));
+    const dirSesiones = mkdtempSync(join(tmpdir(), 'demo-ses-'));
+    try {
+        const config = {
+            baseURL: juguete.url,
+            login: { url: '/', usuario: 'input[name=usuario]', clave: 'input[name=clave]', enviar: '#entrar' },
+            actores: { funcionario: { email: 'f@x.cl', password: 'password' } },
+            video: { ancho: 800, alto: 600, pausaMinima: 300 },
+        };
+        const { prepararSesiones } = await import('../src/sesiones.mjs');
+        const sesiones = await prepararSesiones(config, { dirSesiones });
+        let preparado = false;
+        const guion = {
+            id: 'oculto',
+            escenas: [{ id: 'panel', titulo: 'El panel', pasos: [
+                { actor: 'funcionario', oculto: true,
+                  hacer: async (page) => { await page.goto(`${juguete.url}/panel`); preparado = true; } },
+                { actor: 'funcionario', narrar: 'Mira el panel.', hacer: async () => {} },
+            ] }],
+        };
+
+        const { pasos } = await grabar(guion, { config, sesiones, salida, voz: vozDe(1, salida) });
+
+        assert.equal(preparado, true, 'el paso oculto no se ejecutó');
+        assert.equal(pasos.length, 1, 'el paso oculto no debe entrar a la línea de tiempo');
+        assert.equal(pasos[0].narrar, 'Mira el panel.');
+    } finally {
+        await juguete.cerrar();
+        rmSync(salida, { recursive: true, force: true });
+        rmSync(dirSesiones, { recursive: true, force: true });
+    }
+});

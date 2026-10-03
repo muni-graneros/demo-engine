@@ -144,7 +144,7 @@ export function alClicar(page, fn) { AVISOS_CLIC.set(page, fn); }
 // Solo se registra la página que el grabador abre por actor. Una ventana emergente (popup,
 // `target=_blank`) es otra página: sus clics no avisan, y tampoco se graba como pista.
 
-export async function pulsar(page, selector, { alPintar, dentro } = {}) {
+export async function pulsar(page, selector, { alPintar, dentro, sinCamara = false } = {}) {
     await moverCursorA(page, selector, dentro);
     const { x, y } = await centroDe(page, selector, dentro);
     await page.evaluate(({ x, y }) => {
@@ -165,7 +165,9 @@ export async function pulsar(page, selector, { alPintar, dentro } = {}) {
     const aviso = AVISOS_CLIC.get(page);
     if (aviso) {
         const escala = await page.evaluate(() => window.visualViewport?.scale ?? 1).catch(() => 1);
-        aviso(Date.now(), { x, y, escala });
+        // `sinCamara`: el clic suena y deja su halo, pero no mueve la cámara del acabado (p. ej. un
+        // botón al borde que abre un modal: la cámara acercada al botón recortaba el modal).
+        aviso(Date.now(), sinCamara ? undefined : { x, y, escala });
     }
     await localizadorDe(page, selector, dentro).click();
     // si el clic navegó, el cursor desapareció; reponerlo es idempotente

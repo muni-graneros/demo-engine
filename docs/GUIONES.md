@@ -136,6 +136,14 @@ grabación no tiene el aspecto del lienzo) se rellena con el propio color de la 
 - Si el paso navega a otra página después de la portada, deja de contar como plano (la marca
   vive en el DOM y se va con la navegación).
 
+## Pasos de preparación y clics sin cámara (1.18.1)
+
+- `oculto: true` en un paso: se ejecuta pero no entra al video ni a la línea de tiempo. Úsalo
+  para dejar la primera pantalla de un actor cargada antes de que empiece lo que se ve (sin
+  `narrar`; si la pantalla tiene varias personas, declara también `variasPersonas: true`).
+- `pulsar(page, selector, { sinCamara: true })`: el clic suena y deja halo, pero no mueve la
+  cámara automática del acabado. Para un botón al borde que abre un modal o un panel.
+
 ## Capítulos de un curso multi-superficie
 
 Con `superficies` en la config ([CONFIGURACION.md](CONFIGURACION.md#tutorial-multi-superficie)),
