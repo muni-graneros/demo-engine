@@ -52,6 +52,11 @@ export default {
   reporte agregado, una cola) y salta el chequeo en vivo. Sin esa declaración, un paso que
   deje dos identificadores a la vista aborta la grabación — ver
   [PRIVACIDAD.md](PRIVACIDAD.md).
+- `sinRecorte: true` (1.18, con `video.acabado.silencios`): el acabado no recorta los silencios de
+  ESE paso. Para una espera que es justamente lo que se muestra (un recorrido que se reproduce,
+  un contador que baja). Sin la marca, lo que pase de 2 s sin voz pierde su centro.
+- Con `video.acabado.rotulos`, el `titulo` de cada escena sale como rótulo animado al entrar en
+  ella, con el `titulo` del guion encima: conviene que sean cortos (≤ 40 caracteres).
 
 ## Guion maestro: `curso.mjs`
 

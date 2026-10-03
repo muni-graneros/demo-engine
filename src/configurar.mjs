@@ -5,6 +5,7 @@ import { devices } from 'playwright';
 import { validarDividida } from './lienzo.mjs';
 import { configurarSubtitulos } from './subtitulos.mjs';
 import { POSICIONES_FICHA } from './explainer.mjs';
+import { DEFECTOS_ACABADO } from './acabado/defectos.mjs';
 
 export class ErrorConfig extends Error {}
 
@@ -108,7 +109,10 @@ const DEFECTOS = {
     // Banderas extra de Chromium para los lanzamientos que tocan el sistema grabado (grabar,
     // preparar sesiones, pack de contexto). Caso real: `--host-resolver-rules` para que la
     // barra y los enlaces muestren el dominio público y no 127.0.0.1/localhost.
-    navegador: { args: [] },
+    // `idioma` pone `--lang` y el `locale` de los contextos: sin eso los controles nativos
+    // («Choose Files», `dd/mm/yyyy`) salen en inglés en el video. `canal: 'chromium'` es el
+    // Chromium completo, el único que respeta `--lang`; `null` = headless-shell de antes.
+    navegador: { args: [], idioma: 'es-CL', canal: 'chromium' },
 };
 
 const TIPOS_SUPERFICIE = ['escritorio', 'telefono'];
@@ -194,6 +198,7 @@ function exigirReglasALoopback(arg) {
  *  opt-in: ausentes se quedan en null, presentes reciben sus defectos. */
 function fusionarVideo(defectos, cruda = {}) {
     const video = { ...defectos, ...cruda, dividida: { ...defectos.dividida, ...cruda.dividida } };
+    video.acabado = fusionarAcabado(cruda.acabado);
     exigir(ROTULOS.includes(video.rotulos), `video.rotulos debe ser ${ROTULOS.join(' o ')}, llegó "${video.rotulos}"`);
     try {
         validarDividida(video.dividida);
@@ -214,6 +219,51 @@ function fusionarVideo(defectos, cruda = {}) {
     exigir(textoAqui === null || (typeof textoAqui === 'string' && textoAqui.trim() !== ''),
         'video.presentacion.textoAqui debe ser un texto no vacío (o null para «Estás aquí»)');
     return video;
+}
+
+/**
+ * `video.acabado` (spec 2026-10-02-video-moderno): opt-in. Ausente o `null`, el montaje no cambia.
+ * Cada sub-bloque (`silencios`, `camara`, `subtitulos`, `rotulos`) recibe sus defectos si viene
+ * como objeto o `true`, y se apaga con `null`/`false`; si no se nombra, queda encendido.
+ */
+export function fusionarAcabado(cruda) {
+    if (cruda == null || cruda === false) return null;
+    exigir(typeof cruda === 'object' || cruda === true, 'video.acabado debe ser un objeto (o null)');
+    const c = cruda === true ? {} : cruda;
+    const bloque = (clave) => {
+        const v = c[clave];
+        if (v === null || v === false) return null;
+        exigir(v === undefined || v === true || typeof v === 'object', `video.acabado.${clave} debe ser un objeto, true o null`);
+        return { ...DEFECTOS_ACABADO[clave], ...(typeof v === 'object' ? v : {}) };
+    };
+    const acabado = {
+        fps: c.fps ?? DEFECTOS_ACABADO.fps,
+        crf: c.crf ?? DEFECTOS_ACABADO.crf,
+        silencios: bloque('silencios'),
+        camara: bloque('camara'),
+        subtitulos: bloque('subtitulos'),
+        rotulos: bloque('rotulos'),
+    };
+    exigir(Number.isInteger(acabado.fps) && acabado.fps >= 24 && acabado.fps <= 60, 'video.acabado.fps debe ser un entero entre 24 y 60');
+    exigir(Number.isInteger(acabado.crf) && acabado.crf >= 0 && acabado.crf <= 35, 'video.acabado.crf debe ser un entero entre 0 y 35');
+    if (acabado.silencios) {
+        const { maxSeg, margenSeg } = acabado.silencios;
+        exigir(maxSeg > 0 && margenSeg >= 0 && maxSeg > 2 * margenSeg, 'video.acabado.silencios: maxSeg tiene que ser mayor que dos veces margenSeg');
+    }
+    if (acabado.camara) {
+        for (const clave of ['zoom', 'zoomTelefono']) {
+            const z = acabado.camara[clave];
+            exigir(typeof z === 'number' && z >= 1 && z <= 2.5, `video.acabado.camara.${clave} debe estar entre 1 y 2,5`);
+        }
+    }
+    if (acabado.subtitulos) {
+        const t = acabado.subtitulos.tamano;
+        exigir(Number.isInteger(t) && t >= 20 && t <= 72, 'video.acabado.subtitulos.tamano debe ser un entero entre 20 y 72 (px)');
+    }
+    if (acabado.rotulos) {
+        exigir(acabado.rotulos.segundos >= 1.5, 'video.acabado.rotulos.segundos debe ser al menos 1,5');
+    }
+    return acabado;
 }
 
 /**
@@ -368,10 +418,17 @@ export async function cargarConfig(rutaProyecto) {
     if (audio.musica) {
         // Se exige `archivo` ANTES de resolverlo: `absoluta('')` da la raíz del proyecto, que
         // existe, y un `musica: {}` o un `musica: './x.mp3'` (string, typo frecuente) pasaban.
-        exigir(typeof audio.musica === 'object' && audio.musica.archivo, 'audio.musica.archivo es obligatorio cuando se declara música');
-        audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo) };
-        const { archivo } = audio.musica;
-        exigir(existsSync(archivo) && statSync(archivo).isFile(), `audio.musica.archivo no existe o no es un archivo: ${archivo}`);
+        // `generada: true`: la cama armónica que sintetiza el propio motor (src/acabado/musica.mjs),
+        // sin archivo ni licencia de terceros que verificar.
+        if (typeof audio.musica === 'object' && audio.musica.generada === true) {
+            audio.musica = { volumen: 0.7, atenuar: true, ...audio.musica, archivo: null };
+            exigir(audio.musica.volumen > 0 && audio.musica.volumen <= 2, 'audio.musica.volumen debe estar entre 0 y 2');
+        } else {
+            exigir(typeof audio.musica === 'object' && audio.musica.archivo, 'audio.musica.archivo es obligatorio cuando se declara música');
+            audio.musica = { volumen: 0.12, atenuar: true, ...audio.musica, archivo: absoluta(audio.musica.archivo) };
+            const { archivo } = audio.musica;
+            exigir(existsSync(archivo) && statSync(archivo).isFile(), `audio.musica.archivo no existe o no es un archivo: ${archivo}`);
+        }
     }
 
     const video = fusionarVideo(DEFECTOS.video, cruda.video);
@@ -392,6 +449,10 @@ export async function cargarConfig(rutaProyecto) {
     exigir(Array.isArray(navegador.args) && navegador.args.every((a) => typeof a === 'string' && /^--[a-z0-9]/i.test(a)),
         'navegador.args debe ser una lista de banderas de Chromium que empiecen con "--"');
     navegador.args = [...navegador.args];
+    exigir(typeof navegador.idioma === 'string' && /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(navegador.idioma),
+        'navegador.idioma debe ser una etiqueta de idioma BCP 47, p. ej. "es-CL"');
+    exigir(navegador.canal === null || (typeof navegador.canal === 'string' && navegador.canal !== ''),
+        'navegador.canal debe ser un canal de Playwright ("chromium", "chrome"…) o null para el headless-shell de siempre');
     for (const arg of navegador.args) exigirReglasALoopback(arg);
 
     exigir(cruda.sembrar == null || ['string', 'function'].includes(typeof cruda.sembrar),

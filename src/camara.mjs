@@ -159,7 +159,14 @@ export async function pulsar(page, selector, { alPintar, dentro } = {}) {
     await page.waitForTimeout(180);
     // Justo antes del clic y no después: si el clic navega, `click()` vuelve recién cuando la
     // página nueva cargó, y el sonido quedaría corrido cientos de ms respecto del halo.
-    AVISOS_CLIC.get(page)?.(Date.now());
+    // El punto viaja con el aviso para la cámara automática del acabado (src/acabado/camara.mjs);
+    // la escala de la página dice si el guion ya acercó con `acercarA` (ahí no hay que acercar
+    // dos veces). Un aviso viejo de un solo argumento sigue funcionando.
+    const aviso = AVISOS_CLIC.get(page);
+    if (aviso) {
+        const escala = await page.evaluate(() => window.visualViewport?.scale ?? 1).catch(() => 1);
+        aviso(Date.now(), { x, y, escala });
+    }
     await localizadorDe(page, selector, dentro).click();
     // si el clic navegó, el cursor desapareció; reponerlo es idempotente
     await instalarCursor(page);

@@ -5,6 +5,54 @@ qué cambia para quien graba y por qué; los ids (C1, G8-01…) remiten a la rev
 videotutorial de seguridad-graneros donde apareció el defecto. Las versiones anteriores a la
 1.15.0 están descritas en los commits `Versión x.y.z` de `git log`.
 
+## [Sin publicar]
+
+Versión menor siguiente: 1.17.0.
+
+### Cambia
+
+- **Los controles nativos del navegador salen en español en los videos.** «Choose Files» y
+  `dd/mm/yyyy` (`<input type=file>` / `<input type=date>`) los dibuja Chromium en el idioma de su
+  interfaz, y con el headless-shell que Playwright usa por defecto `--lang` no alcanza. Ahora todos
+  los lanzamientos que tocan el sistema grabado (grabar, preparar, pack de contexto, `vivo`) usan el
+  canal `chromium` más `--lang=es-CL`, y cada contexto lleva `locale: 'es-CL'` (también el pack de
+  contexto y los actores con dispositivo). Verificado con el árbol de accesibilidad: «Seleccionar
+  archivo» / `aaaa` en lugar de «Choose File» / `yyyy`.
+- Configurable en `demo.config.mjs`: `navegador.idioma` (defecto `'es-CL'`) y `navegador.canal`
+  (defecto `'chromium'`; `null` vuelve al lanzamiento de antes). Un `--lang=` dentro de
+  `navegador.args` manda sobre `idioma`. Sin tocar la config de los consumidores cambia solo eso.
+- Aviso: el Chromium completo no arranca dentro del sandbox de Claude Code (falla `socket()` del
+  singleton de proceso); grabar fuera del sandbox o poner `canal: null`.
+
+## 1.18.0 — 2026-10-02
+
+Compatible con los guiones y configs de la 1.16/1.17: todo lo nuevo es opt-in.
+
+### Nuevo
+
+- **`video.acabado`** (capacidad `acabado`; ver CONFIGURACION.md «Acabado moderno»): cámara que
+  acerca y sigue cada `pulsar()` sobre el lienzo (zoom y paseo suaves con `perspective`, sin cruzar
+  cortes de plano), subtítulos quemados en píldora sincronizados con la voz, rótulo animado con el
+  título de cada escena, salida a 60 fps y recorte de los silencios de más de 2 s (sin tocar los
+  clics). El `.vtt` sale con los mismos cues que se queman. Las piezas se codifican en paralelo.
+- **`audio.musica: { generada: true }`** (capacidad `musica-generada`): cama armónica sintetizada
+  por el propio motor, sin archivo ni licencia de terceros; se atenúa bajo la voz como siempre.
+- `grabar()` devuelve `focos` (punto de cada clic) y `montar()` los acepta junto con `titulo`
+  (antetítulo de los rótulos). `pegarCapitulos()` acepta `fps` y `crf`. Paso con `sinRecorte: true`.
+- Exporta `acabar`, `DEFECTOS_ACABADO`, `generarMusica` y `musicaParaMezcla`.
+
+### Corregido
+
+- **Controles nativos en inglés** (`<input type="date">` «dd/mm/yyyy», «Choose Files»): Chromium se
+  lanza con el canal `chromium`, `--lang` y el `locale` del contexto en español. Estaba en la rama
+  `fix/idioma-campos-nativos` y **no** entró en el tag `v1.17.0`.
+
+### Sobre `v1.17.0`
+
+El tag `v1.17.0` quedó sobre el mismo commit que `v1.16.1` (`8aaf8fb`): no trae el arreglo de idioma
+ni nada nuevo. **No fijes `v1.17.0`**; usá `v1.18.0`. No se movió el tag para no romper a quien ya
+lo haya bajado.
+
 ## 1.16.1 — 2026-10-01
 
 Mismo contenido que la 1.16.0 descrita abajo. El tag `v1.16.0` quedó publicado por error sobre el

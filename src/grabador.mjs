@@ -9,6 +9,21 @@ import { iniciarGrabacion } from './pantalla.mjs';
 import { esPlano } from './rotulos.mjs';
 import { duracion } from './ffmpeg.mjs';
 
+const escaparHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
+
+/**
+ * Lo que muestra una pestaña recién abierta mientras el sistema carga (sólo con acabado): el color
+ * y el nombre de la marca, como la pantalla de arranque de una app. Antes era about:blank, un
+ * rectángulo blanco de uno o dos segundos cada vez que entraba un actor nuevo.
+ */
+export function pantallaDeCarga(marca = {}) {
+    const color = /^#[0-9a-f]{3,8}$/i.test(marca?.color ?? '') ? marca.color : '#1e3a8a';
+    const nombre = escaparHtml(marca?.nombre ?? '');
+    return `<!doctype html><html style="background:${color}"><body style="margin:0;height:100vh;display:flex;align-items:center;`
+        + `justify-content:center;background:${color};color:#fff;font:600 22px/1.3 'Noto Sans',system-ui,sans-serif;text-align:center;`
+        + `padding:0 24px;box-sizing:border-box">${nombre}</body></html>`;
+}
+
 /**
  * Ejecuta un guion y devuelve las pistas grabadas más los pasos con doble reloj.
  *
@@ -21,6 +36,8 @@ import { duracion } from './ffmpeg.mjs';
  *   lo necesita para la pantalla dividida: el panel del OTRO actor no tiene paso propio en
  *   ese tramo, así que su corte se calcula como `tGlobal - origen`.
  * - `clics`: ms globales de cada `pulsar()`, para el clic sonoro de la mezcla.
+ * - `focos`: lo mismo con el actor y el punto de la página (`{ t, actor, x, y, escala }`), para
+ *   la cámara automática del acabado.
  * - `dimensiones[actor]`: el tamaño real de su pista (un teléfono no mide lo que la config).
  * - cada paso lleva `dividir: [actor, actor] | null`, vigente desde el paso que lo declara
  *   hasta uno con `dividir: null`, y nunca más allá de su escena.
@@ -38,6 +55,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
     const contextos = new Map();   // actor → { ctx, page, pista, t0, grabacion, dim }
     const pasos = [];
     const clics = [];
+    const focos = [];
 
     /*
      * Todas las locuciones se sintetizan ANTES de que empiece a grabarse nada.
@@ -94,7 +112,16 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
         async alAbrirActor(nombre, datos) {
             // El reloj de los clics es el GLOBAL, no el de la pista: el clic sonoro se mezcla
             // sobre el audio del video final, que corre en tiempo de relato.
-            alClicar(datos.page, (t) => clics.push(t - t0Global));
+            // El punto del clic (px de la página) alimenta la cámara automática del acabado.
+            alClicar(datos.page, (t, punto) => {
+                clics.push(t - t0Global);
+                if (punto) focos.push({ t: t - t0Global, actor: nombre, x: punto.x, y: punto.y, escala: punto.escala ?? 1 });
+            });
+            // Con acabado, la pestaña recién abierta (about:blank, blanca) se pinta como pantalla
+            // apagada: el primer tramo de un actor que todavía no navegó ya no destella en blanco.
+            if (config.video?.acabado && datos.page.url() === 'about:blank') {
+                await datos.page.setContent(pantallaDeCarga(config.marca)).catch(() => {});
+            }
             const archivoPista = join(salida, `pista-${nombre}.mp4`);
             // La pista se graba al tamaño del actor, no al de `config.video`: un teléfono mide
             // su viewport CSS (ver `opcionesDeContexto`), que es lo que el screencast entrega de
@@ -162,6 +189,8 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
                 captura: `capturas/${nombreCaptura}`,
                 dividir,
                 plano,
+                // El acabado no recorta silencios dentro de este paso (una espera que ES la acción).
+                ...(paso.sinRecorte ? { sinRecorte: true } : {}),
             });
         },
     };
@@ -180,7 +209,7 @@ export async function grabar(guion, { config, sesiones, salida, voz }) {
             pistas[nombre] = await grabacion.detener();
             await ctx.close();
         }
-        return { pistas, pasos, origenes, clics, dimensiones };
+        return { pistas, pasos, origenes, clics, focos, dimensiones };
     } catch (error) {
         // Si se llegó hasta acá con un error, algún paso reventó antes de cerrar los
         // contextos en el camino feliz de arriba: hay que cerrarlos ACÁ para que la pista de
