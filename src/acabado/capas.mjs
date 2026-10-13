@@ -11,6 +11,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { conPagina } from '../render-web.mjs';
 import { partirCues } from '../subtitulos.mjs';
+import { STACK_TIPOGRAFIA } from '../tipografia.mjs';
 
 /** Cola de voz que se le deja al cue después de la última sílaba: que no desaparezca en seco. */
 const COLA_VOZ_S = 0.25;
@@ -100,9 +101,9 @@ export function estadosDeRotulos(rotulos) {
         }
         estados.push({ inicio: r.inicio + entrada, fin: r.fin - salida, clave: `rot-${i}`, datos: datos({ opacidad: 1, desplazamiento: 0 }) });
         for (let k = 0; k < nSalida; k++) {
-            const u = 1 - (k + 1) / (nSalida + 1);
+            const u = (k + 1) / (nSalida + 1);
             estados.push({ inicio: r.fin - salida + (k * salida) / nSalida, fin: r.fin - salida + ((k + 1) * salida) / nSalida,
-                clave: `rot-${i}-s${k}`, datos: datos({ opacidad: u, desplazamiento: 0 }) });
+                clave: `rot-${i}-s${k}`, datos: datos({ opacidad: 1 - Math.pow(u, 3), desplazamiento: 0 }) });
         }
     });
     return estados.filter((e) => e.fin > e.inicio);
@@ -112,7 +113,7 @@ const escapar = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<':
 
 /** El HTML de un estado. Exportado para probar el contraste y los textos sin abrir Chromium. */
 export function htmlDeEstado(datos, { lienzo, marca = null, tamano = 34 }) {
-    const fuente = "'Noto Sans','Inter','DejaVu Sans',system-ui,sans-serif";
+    const fuente = STACK_TIPOGRAFIA;
     if (datos.tipo === 'subtitulo' && datos.lateral) {
         const ancho = Math.round(lienzo.ancho * 0.27);
         return `<div style="position:absolute;top:0;bottom:0;right:${Math.round(lienzo.ancho * 0.045)}px;display:flex;align-items:center">`

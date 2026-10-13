@@ -4,6 +4,7 @@
  */
 
 import { imagenComoDataUri } from './assets.mjs';
+import { STACK_TIPOGRAFIA } from './tipografia.mjs';
 
 // El escudo se incrusta como `data:` URI (la portada se dibuja sobre `about:blank`, donde una
 // ruta de archivo no carga) y CONFINADO al proyecto (ver `assets.mjs`). Un escudo ausente, mal
@@ -32,7 +33,7 @@ export async function esPlano(page) {
 export async function portada(page, { titulo, subtitulo = '', capitulo = '', marca = {}, esperaMs = 2600 }) {
     await page.goto('about:blank');
     const escudo = escudoComoDataUri(marca.escudo);
-    await page.evaluate(({ titulo, subtitulo, capitulo, marca, escudo, atributo }) => {
+    await page.evaluate(({ titulo, subtitulo, capitulo, marca, escudo, atributo, fuente }) => {
         const escape = (t) => {
             const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
             return String(t).replace(/[&<>"']/g, (c) => m[c]);
@@ -41,14 +42,14 @@ export async function portada(page, { titulo, subtitulo = '', capitulo = '', mar
         document.documentElement.setAttribute(atributo, 'portada');
         document.body.innerHTML = `
         <div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:system-ui;text-align:center;gap:14px">
+                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:${fuente};text-align:center;gap:14px">
           ${escudo ? `<img src="${escudo}" alt="" style="height:96px;max-width:260px;object-fit:contain" />` : ''}
           ${capitulo ? `<div style="font-size:20px;letter-spacing:.28em;opacity:.75">CAPÍTULO ${escape(capitulo)}</div>` : ''}
           <h1 style="font-size:64px;margin:0;font-weight:700">${escape(titulo)}</h1>
           ${subtitulo ? `<p style="font-size:30px;margin:0;opacity:.9">${escape(subtitulo)}</p>` : ''}
           <div style="margin-top:26px;font-size:17px;opacity:.6">${escape(marca.nombre ?? '')}</div>
         </div>`;
-    }, { titulo, subtitulo, capitulo, marca, escudo, atributo: ATRIBUTO_PLANO });
+    }, { titulo, subtitulo, capitulo, marca, escudo, atributo: ATRIBUTO_PLANO, fuente: STACK_TIPOGRAFIA });
     await page.waitForTimeout(esperaMs);
 }
 
@@ -59,7 +60,7 @@ export async function portada(page, { titulo, subtitulo = '', capitulo = '', mar
 export async function cierre(page, { mensaje, marca = {}, esperaMs = 2200 }) {
     await page.goto('about:blank');
     const escudo = escudoComoDataUri(marca.escudo);
-    await page.evaluate(({ mensaje, marca, escudo, atributo }) => {
+    await page.evaluate(({ mensaje, marca, escudo, atributo, fuente }) => {
         const escape = (t) => {
             const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
             return String(t).replace(/[&<>"']/g, (c) => m[c]);
@@ -68,11 +69,11 @@ export async function cierre(page, { mensaje, marca = {}, esperaMs = 2200 }) {
         document.documentElement.setAttribute(atributo, 'cierre');
         document.body.innerHTML = `
         <div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:system-ui;text-align:center;gap:14px">
+                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:${fuente};text-align:center;gap:14px">
           ${escudo ? `<img src="${escudo}" alt="" style="height:72px;max-width:220px;object-fit:contain" />` : ''}
           <h1 style="font-size:48px;margin:0;font-weight:700">${escape(mensaje)}</h1>
           <div style="margin-top:26px;font-size:17px;opacity:.6">${escape(marca.nombre ?? '')}</div>
         </div>`;
-    }, { mensaje, marca, escudo, atributo: ATRIBUTO_PLANO });
+    }, { mensaje, marca, escudo, atributo: ATRIBUTO_PLANO, fuente: STACK_TIPOGRAFIA });
     await page.waitForTimeout(esperaMs);
 }

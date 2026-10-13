@@ -8,6 +8,7 @@ import { ejecutarGuion } from './ejecutor.mjs';
 import { iniciarGrabacion } from './pantalla.mjs';
 import { esPlano } from './rotulos.mjs';
 import { duracion } from './ffmpeg.mjs';
+import { STACK_TIPOGRAFIA } from './tipografia.mjs';
 
 const escaparHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
@@ -20,7 +21,7 @@ export function pantallaDeCarga(marca = {}) {
     const color = /^#[0-9a-f]{3,8}$/i.test(marca?.color ?? '') ? marca.color : '#1e3a8a';
     const nombre = escaparHtml(marca?.nombre ?? '');
     return `<!doctype html><html style="background:${color}"><body style="margin:0;height:100vh;display:flex;align-items:center;`
-        + `justify-content:center;background:${color};color:#fff;font:600 22px/1.3 'Noto Sans',system-ui,sans-serif;text-align:center;`
+        + `justify-content:center;background:${color};color:#fff;font:600 22px/1.3 ${STACK_TIPOGRAFIA};text-align:center;`
         + `padding:0 24px;box-sizing:border-box">${nombre}</body></html>`;
 }
 

@@ -106,3 +106,16 @@ test('con un teléfono solo en pantalla, el subtítulo va al costado y en una so
     assert.match(html, /align-items:center/);
     assert.match(html, /En el teléfono\./, 'las líneas se juntan: la caja lateral envuelve sola');
 });
+
+test('htmlDeEstado usa STACK_TIPOGRAFIA en subtítulos', () => {
+    const estados = estadosDeSubtitulos([{ inicioSeg: 0, finSeg: 1, narrar: 'Hola mundo' }]);
+    const html = htmlDeEstado(estados[0].datos, { lienzo: { ancho: 1920, alto: 1080 } });
+    assert.match(html, /Noto Sans/, 'el subtítulo debe traer el stack tipográfico unificado, no system-ui solo');
+});
+
+test('la salida del rótulo usa cubic-out, no lineal', () => {
+    const estados = estadosDeRotulos([{ inicio: 0, fin: 5, titulo: 'B', antetitulo: 'A' }]);
+    const salida = estados.slice(-10);
+    const mitad = salida[Math.floor(salida.length / 2)];
+    assert.ok(mitad.datos.opacidad > 0.7, `cubic-out en u=0.5 debe ser > 0.7, dio ${mitad.datos.opacidad}`);
+});

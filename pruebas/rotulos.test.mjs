@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import { portada, cierre } from '../src/rotulos.mjs';
+import { portada, cierre, esPlano } from '../src/rotulos.mjs';
+import { STACK_TIPOGRAFIA } from '../src/tipografia.mjs';
 
 // PNG 1x1 real (no un archivo vacío): así el test ejercita la ruta de lectura+codificación
 // tal como pasaría con un escudo institucional de verdad.
@@ -113,6 +114,53 @@ test('el cierre también dibuja el escudo cuando marca.escudo existe, simétrico
         await cierre(page, { mensaje: 'Gracias', marca: { nombre: 'Sistema', escudo: escudoDePrueba() }, esperaMs: 10 });
         const src = await page.getAttribute('img', 'src');
         assert.match(src, /^data:image\/png;base64,/);
+    } finally {
+        await navegador.close();
+    }
+});
+
+test('esPlano devuelve "portada" después de portada()', async () => {
+    const navegador = await chromium.launch();
+    const page = await navegador.newPage();
+    try {
+        await portada(page, { titulo: 'Hola', marca: { color: '#1e3a8a' }, esperaMs: 10 });
+        assert.equal(await esPlano(page), 'portada');
+    } finally {
+        await navegador.close();
+    }
+});
+
+test('esPlano devuelve "cierre" después de cierre()', async () => {
+    const navegador = await chromium.launch();
+    const page = await navegador.newPage();
+    try {
+        await cierre(page, { mensaje: 'Fin', marca: { color: '#1e3a8a' }, esperaMs: 10 });
+        assert.equal(await esPlano(page), 'cierre');
+    } finally {
+        await navegador.close();
+    }
+});
+
+test('esPlano devuelve null después de navegar a about:blank sin portada/cierre', async () => {
+    const navegador = await chromium.launch();
+    const page = await navegador.newPage();
+    try {
+        await page.goto('about:blank');
+        assert.equal(await esPlano(page), null);
+    } finally {
+        await navegador.close();
+    }
+});
+
+test('portada usa STACK_TIPOGRAFIA (no system-ui solo)', async () => {
+    const navegador = await chromium.launch();
+    const page = await navegador.newPage();
+    try {
+        await portada(page, { titulo: 'Hola', marca: { color: '#1e3a8a' }, esperaMs: 10 });
+        const html = await page.content();
+        assert.ok(html.includes(STACK_TIPOGRAFIA), 'la portada debe incrustar STACK_TIPOGRAFIA completo, no solo "system-ui"');
+        assert.ok(!/\bfont-family:system-ui(?![-a-z])/.test(html.replace(STACK_TIPOGRAFIA, '')),
+            'no debe quedar un literal font-family:system-ui solo, fuera del stack importado');
     } finally {
         await navegador.close();
     }
