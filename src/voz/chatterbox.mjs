@@ -20,6 +20,18 @@ ta.save(sys.argv[2], wav, m.sr)
 // Venv propio (venv-chatterbox) por la misma razón que pocket: su pila de torch no se mezcla
 // con la de kokoro/piper ni con la de pocket, que fijan versiones distintas.
 export function crear({ voz, venv, voces, velocidad = 1, ejecutarProceso } = {}) {
+    // Voz es la ruta a un .wav de una persona con consentimiento escrito (Ley 21.719: la voz
+    // es un dato personal). Se valida temprano: si viene string vacío o si el archivo no
+    // existe, mejor fallar acá con un mensaje accionable que caer en silencio pidiendo un
+    // archivo perdido en pleno arranque.
+    if (typeof voz === 'string') {
+        if (voz.length === 0) {
+            return { disponible: () => false, error: () => `chatterbox necesita una voz de referencia .wav con consentimiento escrito de la persona; recibido: ${JSON.stringify(voz)}` };
+        }
+        if (!existsSync(voz)) {
+            return { disponible: () => false, error: () => `no se encontró la voz de referencia .wav; el archivo debe existir: ${voz}` };
+        }
+    }
     const { venv: VENV } = resolverVenvYVoces({ venv: venv ?? join(RUTA_CACHE(), 'venv-chatterbox'), voces });
     const PY = join(VENV, 'bin', 'python');
     const REF = voz ? resolve(voz) : null;

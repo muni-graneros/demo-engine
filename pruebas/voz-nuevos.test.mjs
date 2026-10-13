@@ -182,3 +182,17 @@ test('chatterbox sin los pesos en caché: la sonda falla y apunta a instalar-voc
     assert.equal(m.disponible(), false);
     assert.match(m.error(), /instalar-voces\.sh --chatterbox/);
 });
+
+test('pocket con voz sin ":" devuelve error de formato', () => {
+    const m = crearPocket({ voz: 'sin-dos-puntos', venv: '/nope', voces: '/nope', ejecutarProceso: () => ({ status: 0, stdout: Buffer.alloc(0) }) });
+    assert.equal(m.disponible(), false);
+    assert.match(m.error(), /formato/);
+    assert.match(m.error(), /idioma:voz/);
+});
+
+test('chatterbox con .wav de referencia inexistente devuelve error accionable', () => {
+    const m = crearChatterbox({ voz: '/ruta/que/no/existe.wav', venv: '/nope', voces: '/nope', ejecutarProceso: () => ({ status: 0, stdout: Buffer.alloc(0) }) });
+    assert.equal(m.disponible(), false);
+    assert.match(m.error(), /wav/);
+    assert.match(m.error(), /existe/);
+});
