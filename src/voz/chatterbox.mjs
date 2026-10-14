@@ -19,6 +19,13 @@ ta.save(sys.argv[2], wav, m.sr)
 // confirmarlo en la primera instalación real antes de fijar un valor, no adivinarlo.
 // Venv propio (venv-chatterbox) por la misma razón que pocket: su pila de torch no se mezcla
 // con la de kokoro/piper ni con la de pocket, que fijan versiones distintas.
+/**
+ * Por diseño, `voz` es la ruta a un `.wav` con consentimiento escrito en
+ * `demo.config.mjs` del proyecto que se graba; NO se confina al `process.cwd()` a
+ * diferencia de los assets. Se asume que el config es de fuente confiable (operador
+ * local o CI controlado). Aplicar el confine real queda como bounded de hardening aparte,
+ * fuera del alcance de este cambio.
+ */
 export function crear({ voz, venv, voces, velocidad = 1, ejecutarProceso } = {}) {
     // Voz es la ruta a un .wav de una persona con consentimiento escrito (Ley 21.719: la voz
     // es un dato personal). Se valida temprano: si viene string vacío o si el archivo no

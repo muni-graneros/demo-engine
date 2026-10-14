@@ -61,9 +61,9 @@ cuatro lugares que dibujan "cromo" del motor. Sin tocar el `subtitulos.font:600
 `'Noto Sans','Inter','DejaVu Sans',system-ui,sans-serif`
 
 **Archivos a tocar**:
-- `src/tipografia.mjs` (nuevo): exporta `STACK_TIPOGRAFIA` y `textoSegunContraste(color)`
-  para reusar la lógica de "elige blanco o negro según el mayor contraste" que ya
-  existe en `src/lienzo.mjs:313-321`.
+- `src/tipografia.mjs` (nuevo): exporta `STACK_TIPOGRAFIA`. El reuso de la lógica
+  de "elige blanco o negro según el mayor contraste" que ya existe en
+  `src/lienzo.mjs:313-321` queda fuera del alcance de este bounded.
 - `src/rotulos.mjs:44`, `:71`: reemplazar `system-ui` por `STACK_TIPOGRAFIA` (vía
   import).
 - `src/explainer.mjs:48` (y las otras dos apariciones detectadas por el subagente:

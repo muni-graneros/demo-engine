@@ -103,7 +103,7 @@ export function estadosDeRotulos(rotulos) {
         for (let k = 0; k < nSalida; k++) {
             const u = (k + 1) / (nSalida + 1);
             estados.push({ inicio: r.fin - salida + (k * salida) / nSalida, fin: r.fin - salida + ((k + 1) * salida) / nSalida,
-                clave: `rot-${i}-s${k}`, datos: datos({ opacidad: 1 - Math.pow(u, 3), desplazamiento: 0 }) });
+                clave: `rot-${i}-s${k}`, datos: datos({ opacidad: easeOut(1 - u), desplazamiento: 0 }) });
         }
     });
     return estados.filter((e) => e.fin > e.inicio);
