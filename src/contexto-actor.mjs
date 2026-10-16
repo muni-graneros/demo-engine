@@ -34,20 +34,31 @@ export function idiomaDeNavegador(config) {
 /**
  * Opciones de `chromium.launch()` desde la config (`navegador`).
  *
- * - `idioma` (defecto `es-CL`) → `--lang=<idioma>`. Los controles nativos que dibuja el propio
- *   Chromium («Elegir archivos», el `dd/mm/aaaa` de `<input type=date>`) salen en el idioma de
- *   la interfaz del navegador, no en el `locale` del contexto. Un `--lang` ya declarado en
- *   `navegador.args` manda y no se duplica.
- * - `canal` (defecto `chromium`) → `channel`. El headless-shell que Playwright usa sin canal
- *   ignora `--lang` y deja esos controles en inglés; el canal `chromium` (el Chromium completo
- *   en modo headless nuevo) sí lo respeta. `canal: null` vuelve al lanzamiento de antes.
+ * - `idioma` (defecto `es-CL`) → `--lang=<idioma>` y `LANGUAGE=<idioma>` en el entorno del
+ *   navegador. Los controles nativos que dibuja el propio Chromium («Elegir archivos», el
+ *   `dd/mm/aaaa` de `<input type=date>`) salen en el idioma de la interfaz del navegador, no en
+ *   el `locale` del contexto. En Linux esa interfaz sale del entorno (LANGUAGE, LC_ALL,
+ *   LC_MESSAGES, LANG) y `--lang` se ignora: sin LANGUAGE, un equipo o runner con LANG=C.UTF-8
+ *   graba «Choose File» aunque la config pida español. Un `--lang` ya declarado en
+ *   `navegador.args` manda (también sobre LANGUAGE) y no se duplica.
+ * - `canal` (defecto `chromium`) → `channel`. El headless-shell que Playwright usa sin canal deja
+ *   esos controles siempre en inglés; el canal `chromium` (el Chromium completo en modo headless
+ *   nuevo) respeta el idioma. `canal: null` vuelve al lanzamiento de antes.
  * - `args`: banderas extra tal cual.
+ * - `env`: el entorno del proceso más LANGUAGE. Playwright reemplaza el entorno entero cuando
+ *   recibe `env`, así que tiene que llevar el resto (PATH, HOME, DISPLAY, proxies…).
  */
 export function opcionesDeLanzamiento(config) {
     const args = [...(config?.navegador?.args ?? [])];
     if (!args.some((a) => a.startsWith('--lang='))) args.unshift(`--lang=${idiomaDeNavegador(config)}`);
+    const idioma = args.find((a) => a.startsWith('--lang=')).slice('--lang='.length);
     const canal = config?.navegador?.canal === undefined ? CANAL_POR_DEFECTO : config.navegador.canal;
-    return { ...(canal ? { channel: canal } : {}), args };
+    return {
+        ...(canal ? { channel: canal } : {}),
+        args,
+        // LANGUAGE va en formato gettext (es_CL): es el que documenta la variable.
+        env: { ...process.env, LANGUAGE: idioma.replaceAll('-', '_') },
+    };
 }
 
 /**
