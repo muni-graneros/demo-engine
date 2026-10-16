@@ -13,22 +13,36 @@ import { declararEntornoDePruebas } from './entorno.mjs';
 declararEntornoDePruebas();
 
 // Los controles que dibuja el propio Chromium («Choose Files», `dd/mm/yyyy`) salen en el idioma
-// de interfaz del navegador, no en el `locale` del contexto. Con el headless-shell de Playwright
-// `--lang` no alcanza: hace falta el canal `chromium` MÁS `--lang` MÁS `locale`.
+// de interfaz del navegador, no en el `locale` del contexto. El headless-shell de Playwright los
+// deja siempre en inglés: hace falta el canal `chromium`. Y en Linux ese idioma de interfaz sale
+// del entorno (LANGUAGE, LC_ALL, LC_MESSAGES, LANG), no de `--lang`: medido, con LANG=C.UTF-8
+// `--lang=es-CL` dibuja «Choose File» y con LANG=es_ES.UTF-8 `--lang=en-US` sigue en español.
+
+// `env` es el entorno completo de la máquina: no entra en las comparaciones de forma.
+const sinEntorno = ({ env, ...resto }) => resto;
 
 test('lanzamiento: por defecto canal chromium y --lang=es-CL, sin romper configs viejas', () => {
-    assert.deepEqual(opcionesDeLanzamiento({}), { channel: 'chromium', args: ['--lang=es-CL'] });
-    assert.deepEqual(opcionesDeLanzamiento(undefined), { channel: 'chromium', args: ['--lang=es-CL'] });
+    assert.deepEqual(sinEntorno(opcionesDeLanzamiento({})), { channel: 'chromium', args: ['--lang=es-CL'] });
+    assert.deepEqual(sinEntorno(opcionesDeLanzamiento(undefined)), { channel: 'chromium', args: ['--lang=es-CL'] });
     // Los args del consumidor (p. ej. --host-resolver-rules) siguen llegando, detrás del --lang.
     const reglas = '--host-resolver-rules=MAP a.test 127.0.0.1';
     assert.deepEqual(opcionesDeLanzamiento({ navegador: { args: [reglas] } }).args, ['--lang=es-CL', reglas]);
 });
 
 test('lanzamiento: idioma y canal se sobreescriben; un --lang explícito en args manda', () => {
-    assert.deepEqual(opcionesDeLanzamiento({ navegador: { idioma: 'en-US' } }), { channel: 'chromium', args: ['--lang=en-US'] });
+    assert.deepEqual(sinEntorno(opcionesDeLanzamiento({ navegador: { idioma: 'en-US' } })), { channel: 'chromium', args: ['--lang=en-US'] });
     assert.deepEqual(opcionesDeLanzamiento({ navegador: { canal: 'chrome' } }).channel, 'chrome');
     assert.equal('channel' in opcionesDeLanzamiento({ navegador: { canal: null } }), false);
     assert.deepEqual(opcionesDeLanzamiento({ navegador: { idioma: 'es-CL', args: ['--lang=pt-BR'] } }).args, ['--lang=pt-BR']);
+});
+
+test('lanzamiento: el idioma también va en LANGUAGE, que es lo que Chromium mira en Linux', () => {
+    assert.equal(opcionesDeLanzamiento({}).env?.LANGUAGE, 'es_CL');
+    assert.equal(opcionesDeLanzamiento({ navegador: { idioma: 'en-US' } }).env?.LANGUAGE, 'en_US');
+    // El --lang explícito de args sigue mandando: el idioma efectivo es uno solo.
+    assert.equal(opcionesDeLanzamiento({ navegador: { idioma: 'es-CL', args: ['--lang=pt-BR'] } }).env?.LANGUAGE, 'pt_BR');
+    // Playwright REEMPLAZA el entorno del navegador cuando recibe `env`: el resto tiene que seguir llegando.
+    assert.equal(opcionesDeLanzamiento({}).env?.PATH, process.env.PATH);
 });
 
 test('contexto: el locale sale del idioma de la config, también con dispositivo móvil', () => {
@@ -97,6 +111,15 @@ test('capturarContexto lanza Chromium con channel/--lang y abre el contexto con 
 });
 
 test('real: <input type=file> y <input type=date> se dibujan en español, no en inglés', async (t) => {
+    // La máquina se pone en inglés a propósito, como el runner de CI (LANG=C.UTF-8): en un equipo
+    // con el sistema en español esta prueba pasaba aunque el lanzamiento no fijara el idioma, y en
+    // CI fallaba con «Choose File».
+    const guardado = {};
+    for (const k of ['LANGUAGE', 'LC_ALL', 'LC_MESSAGES', 'LANG']) { guardado[k] = process.env[k]; delete process.env[k]; }
+    process.env.LANG = 'C.UTF-8';
+    t.after(() => {
+        for (const [k, v] of Object.entries(guardado)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    });
     const html = '<input type=file id=f><input type=date id=d>';
     const textos = async (lanzamiento, locale) => {
         const navegador = await chromium.launch(lanzamiento);

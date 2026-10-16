@@ -109,9 +109,10 @@ const DEFECTOS = {
     // Banderas extra de Chromium para los lanzamientos que tocan el sistema grabado (grabar,
     // preparar sesiones, pack de contexto). Caso real: `--host-resolver-rules` para que la
     // barra y los enlaces muestren el dominio público y no 127.0.0.1/localhost.
-    // `idioma` pone `--lang` y el `locale` de los contextos: sin eso los controles nativos
-    // («Choose Files», `dd/mm/yyyy`) salen en inglés en el video. `canal: 'chromium'` es el
-    // Chromium completo, el único que respeta `--lang`; `null` = headless-shell de antes.
+    // `idioma` pone `--lang`, LANGUAGE (lo que Chromium mira en Linux) y el `locale` de los
+    // contextos: sin eso los controles nativos («Choose Files», `dd/mm/yyyy`) salen en inglés en
+    // el video. `canal: 'chromium'` es el Chromium completo, el único que respeta el idioma;
+    // `null` = headless-shell de antes.
     navegador: { args: [], idioma: 'es-CL', canal: 'chromium' },
 };
 

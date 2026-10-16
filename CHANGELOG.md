@@ -7,7 +7,18 @@ videotutorial de seguridad-graneros donde apareció el defecto. Las versiones an
 
 ## [Sin publicar]
 
-Versión menor siguiente: 1.17.0.
+Parche siguiente: 1.18.2. (Lo de «Cambia» más abajo ya salió en la 1.18.0.)
+
+### Corregido
+
+- **Controles nativos en inglés en equipos que no tienen el sistema en español.** En Linux Chromium
+  toma el idioma de su interfaz del entorno (LANGUAGE, LC_ALL, LC_MESSAGES, LANG) e ignora
+  `--lang`: el arreglo de la 1.18.0 solo funcionaba donde el sistema ya estaba en español. Con
+  LANG=C.UTF-8 (el runner de CI, un contenedor) se grababa «Choose File» / `yyyy`, y
+  `navegador.idioma: 'en-US'` en un equipo en español no cambiaba nada. Ahora cada lanzamiento que
+  toca el sistema grabado lleva además `LANGUAGE=<idioma>` en el entorno del navegador (el resto del
+  entorno se conserva). La prueba real fuerza LANG=C.UTF-8 para decir lo mismo en cualquier
+  máquina: antes pasaba en local y fallaba en CI.
 
 ### Cambia
 
