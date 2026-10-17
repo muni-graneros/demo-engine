@@ -23,10 +23,42 @@ export function actorTactil(config, nombre) {
     return Boolean(actor.dispositivo && devices[actor.dispositivo]?.hasTouch);
 }
 
-/** Opciones de `chromium.launch()` desde la config: hoy, solo `navegador.args`. */
+export const IDIOMA_POR_DEFECTO = 'es-CL';
+export const CANAL_POR_DEFECTO = 'chromium';
+
+/** Idioma de los controles nativos y del `locale` de cada contexto (`navegador.idioma`). */
+export function idiomaDeNavegador(config) {
+    return config?.navegador?.idioma || IDIOMA_POR_DEFECTO;
+}
+
+/**
+ * Opciones de `chromium.launch()` desde la config (`navegador`).
+ *
+ * - `idioma` (defecto `es-CL`) → `--lang=<idioma>` y `LANGUAGE=<idioma>` en el entorno del
+ *   navegador. Los controles nativos que dibuja el propio Chromium («Elegir archivos», el
+ *   `dd/mm/aaaa` de `<input type=date>`) salen en el idioma de la interfaz del navegador, no en
+ *   el `locale` del contexto. En Linux esa interfaz sale del entorno (LANGUAGE, LC_ALL,
+ *   LC_MESSAGES, LANG) y `--lang` se ignora: sin LANGUAGE, un equipo o runner con LANG=C.UTF-8
+ *   graba «Choose File» aunque la config pida español. Un `--lang` ya declarado en
+ *   `navegador.args` manda (también sobre LANGUAGE) y no se duplica.
+ * - `canal` (defecto `chromium`) → `channel`. El headless-shell que Playwright usa sin canal deja
+ *   esos controles siempre en inglés; el canal `chromium` (el Chromium completo en modo headless
+ *   nuevo) respeta el idioma. `canal: null` vuelve al lanzamiento de antes.
+ * - `args`: banderas extra tal cual.
+ * - `env`: el entorno del proceso más LANGUAGE. Playwright reemplaza el entorno entero cuando
+ *   recibe `env`, así que tiene que llevar el resto (PATH, HOME, DISPLAY, proxies…).
+ */
 export function opcionesDeLanzamiento(config) {
-    const args = config?.navegador?.args ?? [];
-    return args.length ? { args: [...args] } : {};
+    const args = [...(config?.navegador?.args ?? [])];
+    if (!args.some((a) => a.startsWith('--lang='))) args.unshift(`--lang=${idiomaDeNavegador(config)}`);
+    const idioma = args.find((a) => a.startsWith('--lang=')).slice('--lang='.length);
+    const canal = config?.navegador?.canal === undefined ? CANAL_POR_DEFECTO : config.navegador.canal;
+    return {
+        ...(canal ? { channel: canal } : {}),
+        args,
+        // LANGUAGE va en formato gettext (es_CL): es el que documenta la variable.
+        env: { ...process.env, LANGUAGE: idioma.replaceAll('-', '_') },
+    };
 }
 
 /**
@@ -66,6 +98,7 @@ export function opcionesDeContexto(config, nombre, sesiones, { ancho, alto }) {
 
     const opciones = {
         baseURL,
+        locale: idiomaDeNavegador(config),
         ...(actorConSesion(config, nombre) && sesiones?.[nombre] ? { storageState: sesiones[nombre] } : {}),
         ...(disp ?? { viewport: { width: ancho, height: alto } }),
         ...(datosActor.permisos ? { permissions: datosActor.permisos } : {}),

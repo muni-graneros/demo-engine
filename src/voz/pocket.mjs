@@ -25,7 +25,10 @@ export function crear({ voz = 'spanish:alba', venv, voces, velocidad = 1, ejecut
     const PY = join(VENV, 'bin', 'python');
     // `voz: null` llega desde la config cuando no se declaró: se trata igual que undefined.
     const v = voz ?? 'spanish:alba';
-    const [idioma, nombreVoz] = v.includes(':') ? v.split(/:(.*)/s) : ['spanish', v];
+    if (typeof v !== 'string' || !v.includes(':')) {
+        return { disponible: () => false, error: () => `voz debe tener formato 'idioma:voz', recibido: ${JSON.stringify(voz)}` };
+    }
+    const [idioma, nombreVoz] = v.split(/:(.*)/s);
     return crearMotorProceso({
         motor: 'pocket',
         archivosListos: () => (existsSync(PY) ? null : `no se encontró el intérprete de Python de Pocket TTS en ${PY} (instalar-voces.sh --pocket)`),

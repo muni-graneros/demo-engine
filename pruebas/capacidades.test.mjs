@@ -33,3 +33,12 @@ test('CAPACIDADES declara vivo (1.16): tools/demo/vivo.sh de seguridad-graneros 
     assert.ok(motor.CAPACIDADES.includes('vivo'));
     assert.equal(typeof motor.vivo, 'function');
 });
+
+test('CAPACIDADES declara acabado y musica-generada (1.18) con su API', () => {
+    // Respaldadas por acabado-*.test.mjs (plan de recorte, cámara, capas y el acabado con ffmpeg real).
+    assert.ok(motor.CAPACIDADES.includes('acabado'));
+    assert.ok(motor.CAPACIDADES.includes('musica-generada'));
+    assert.equal(typeof motor.acabar, 'function');
+    assert.equal(typeof motor.generarMusica, 'function');
+    assert.equal(motor.DEFECTOS_ACABADO.fps, 60);
+});

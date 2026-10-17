@@ -9,6 +9,9 @@ import { renderizarLienzo } from './lienzo.mjs';
 import { cadenaDeMezcla } from './mezcla.mjs';
 import { superficieDe } from './configurar.mjs';
 import { componerEnLienzo, componerPlano, lienzoDe } from './composicion.mjs';
+import { acabar } from './acabado/index.mjs';
+import { puntoEnLienzo } from './acabado/camara.mjs';
+import { musicaParaMezcla } from './acabado/musica.mjs';
 
 /** Disposición de la pantalla dividida si quien llama a montar() no la declara (ver configurar.mjs). */
 const DIVIDIDA_POR_DEFECTO = { modo: 'foco', foco: 0.72 };
@@ -31,6 +34,47 @@ export function clicsEnVideo(segmentos, clics) {
     for (const c of clics) {
         const seg = segmentos.find((s) => c >= s.tGlobal && c < s.tGlobal + (s.finSeg - s.inicioSeg) * 1000);
         if (seg) fuera.push(seg.inicioSeg + (c - seg.tGlobal) / 1000);
+    }
+    return fuera;
+}
+
+/**
+ * Encuadres para la cámara del acabado: tramos CONTINUOS del video (pasos seguidos con la misma
+ * composición: mismos actores, misma disposición, no plano). La cámara puede seguir acercada de
+ * un paso al siguiente dentro de un encuadre, pero nunca a través de un corte de composición.
+ */
+export function encuadresDe(composiciones, segmentos) {
+    const encuadres = [];
+    const indicePorSegmento = [];
+    let clave = null;
+    segmentos.forEach((s, i) => {
+        const c = composiciones[i] ?? { clave: `sin-${i}`, camara: false };
+        if (c.clave !== clave || !encuadres.length) {
+            encuadres.push({ inicio: s.inicioSeg, fin: s.finSeg, camara: c.camara, ...(c.soloTelefono ? { soloTelefono: true } : {}) });
+            clave = c.clave;
+        } else {
+            encuadres.at(-1).fin = s.finSeg;
+        }
+        indicePorSegmento.push(encuadres.length - 1);
+    });
+    return { encuadres, indicePorSegmento };
+}
+
+/**
+ * Los clics (`focos` del grabador: ms globales, actor, punto de la página) llevados al reloj del
+ * video y a px del lienzo. Se descarta lo que no se puede ubicar o no se debe acercar: un clic
+ * fuera de todo tramo, de un actor que no está en el lienzo de ese tramo, o con la página ya
+ * acercada por el guion (`escala > 1`: dos zoom encima se ven como un salto).
+ */
+export function focosEnLienzo({ focos, segmentos, composiciones, indicePorSegmento }) {
+    const fuera = [];
+    for (const f of focos) {
+        const i = segmentos.findIndex((s) => f.t >= s.tGlobal && f.t < s.tGlobal + (s.finSeg - s.inicioSeg) * 1000);
+        if (i < 0) continue;
+        const panel = composiciones[i]?.paneles?.[f.actor];
+        if (!composiciones[i]?.camara || !panel || (f.escala ?? 1) > 1.01) continue;
+        const p = puntoEnLienzo(f, panel);
+        fuera.push({ t: segmentos[i].inicioSeg + (f.t - segmentos[i].tGlobal) / 1000, x: p.x, y: p.y, encuadre: indicePorSegmento[i], telefono: panel.telefono });
     }
     return fuera;
 }
@@ -82,11 +126,13 @@ export function panelDeActor({ actor, config, dimensiones = {}, video, presentac
 export async function montar({
     pistas, pasos, voz, video, presentacion = null, marca = null, baseURL = null,
     superficies = null, actores = {}, origenes = {}, clics = [], dimensiones = {}, audio = null,
+    focos = [], titulo = '',
 }, { salida, nombre = 'demo.mp4' }) {
     mkdirSync(salida, { recursive: true });
     const linea = construirLineaDeTiempo(pasos);
     const temporal = join(salida, '.tmp');
     mkdirSync(temporal, { recursive: true });
+    const composiciones = [];
 
     // Modo lienzo: cada tramo se compone en el marco de la superficie de su actor. Solo se
     // entra si el proyecto declara superficies o algún paso divide la pantalla; si no, se
@@ -177,6 +223,9 @@ export async function montar({
         recortados.push({ ...seg, hastaSeg: hasta });
 
         const trozo = join(temporal, `trozo-${String(i).padStart(3, '0')}.mp4`);
+        // Para la cámara del acabado: dónde quedó cada actor en el lienzo de este tramo.
+        const composicion = { clave: `plano-${i}`, camara: false, paneles: {} };
+        composiciones.push(composicion);
         if (rotulosPlanos && seg.plano) {
             // Portada o cierre: una tarjeta del video, a pantalla completa. Si el paso seguía
             // dentro de un `dividir`, la tarjeta gana: es del actor del paso, sola.
@@ -190,8 +239,16 @@ export async function montar({
             const dividido = actoresDelTramo.length === 2;
             // La mitad grande es la del actor que actúa en ESTE paso (ver geometriaConFoco).
             const disposicion = dividido ? { ...dividida, activo: actoresDelTramo.indexOf(seg.actor) } : null;
-            const { png, huecos } = await lienzoPara(actoresDelTramo.map((a) => panelDe(a, dividido)), disposicion);
+            const paneles = actoresDelTramo.map((a) => panelDe(a, dividido));
+            const { png, huecos } = await lienzoPara(paneles, disposicion);
             componerEnLienzo(entradas, { png, huecos, lienzo, salida: trozo, duracion: hasta - seg.desdeSeg });
+            composicion.clave = JSON.stringify([actoresDelTramo, disposicion]);
+            composicion.camara = true;
+            // Un teléfono solo deja libres los costados del lienzo: los subtítulos van al lado.
+            composicion.soloTelefono = paneles.length === 1 && paneles[0].tipo === 'telefono';
+            actoresDelTramo.forEach((a, k) => {
+                composicion.paneles[a] = { hueco: huecos[k], dim: dimensiones[a] ?? video, telefono: paneles[k].tipo === 'telefono' };
+            });
         } else if (enmarcarPorTramo) {
             // Mismo corte de siempre, a 25 fps fijos (el concat copia sin reencodear y exige
             // la misma cadencia que los tramos planos), y el marco sobre este tramo solo.
@@ -204,6 +261,17 @@ export async function montar({
             ff(['-y', '-i', pista, '-ss', String(seg.desdeSeg), '-to', String(hasta),
                 '-vf', `scale=${video.ancho}:${video.alto},setsar=1`,
                 '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p', '-an', trozo]);
+            if (!presentacion) {
+                composicion.clave = `plano-actor-${seg.actor}`;
+                composicion.camara = true;
+                const dim = dimensiones[seg.actor] ?? video;
+                // El corte estira la pista a video.ancho×video.alto: el hueco es el cuadro entero
+                // y la dimensión efectiva, la del video (así puntoEnLienzo escala igual que ffmpeg).
+                composicion.paneles[seg.actor] = {
+                    hueco: { x: 0, y: 0, ancho: video.ancho, alto: video.alto }, dim: { ancho: dim.ancho, alto: dim.alto },
+                    telefono: Boolean(actores[seg.actor]?.dispositivo), estirar: true,
+                };
+            }
         }
         trozos.push(trozo);
     }
@@ -228,26 +296,19 @@ export async function montar({
 
     // 3. Recalcular los tiempos: ahora cada segmento vive en el reloj del video final.
     let reloj = 0;
-    const segmentos = recortados.map((seg) => {
+    let segmentos = recortados.map((seg) => {
         const dura = seg.hastaSeg - seg.desdeSeg;
-        const s = { inicioSeg: reloj, finSeg: reloj + dura, narrar: seg.narrar, escena: seg.escena, wav: seg.wav, tGlobal: seg.tGlobal };
+        const s = {
+            inicioSeg: reloj, finSeg: reloj + dura, narrar: seg.narrar, escena: seg.escena, wav: seg.wav, tGlobal: seg.tGlobal,
+            titulo: seg.titulo, plano: seg.plano, sinRecorte: seg.sinRecorte,
+        };
         reloj += dura;
         return s;
     });
 
-    // 4. Subtítulos: archivo al lado (para la web) y pista blanda dentro del MP4.
-    const vtt = join(salida, `${nombre.replace(/\.mp4$/, '')}.vtt`);
-    const srt = join(temporal, 'subtitulos.srt');
-    const textoVtt = generarVtt(segmentos);
-    const textoSrt = generarSrt(segmentos);
-    writeFileSync(vtt, textoVtt);
-    writeFileSync(srt, textoSrt);
-    const haySubtitulos = segmentos.some((s) => s.narrar?.trim());
-
-    // 5. Voz: una locución por segmento, retrasada hasta su marca, sobre una base de
-    //    silencio del largo exacto del video (fija la duración y cubre los huecos).
+    // 3b. Voz: una locución por segmento. Se resuelve ANTES de los subtítulos porque el acabado
+    //     necesita saber cuánto dura cada una (recorte de silencios, cues sincronizados).
     const mp4 = resolve(salida, nombre);
-    const total = duracion(baseVideo);
     const locuciones = [];
     if (voz.disponible()) {
         for (const seg of segmentos) {
@@ -262,9 +323,43 @@ export async function montar({
             // por la MISMA pérdida, sin decir que es la misma.
             const wav = seg.wav !== undefined ? seg.wav : voz.sintetizar(seg.narrar);
             if (!wav) continue;
-            locuciones.push({ wav, inicioSeg: seg.inicioSeg });
+            locuciones.push({ wav, inicioSeg: seg.inicioSeg, segmento: seg });
         }
     }
+
+    // 3c. Acabado moderno (opt-in, `video.acabado`): recorte de silencios, cámara automática,
+    //     subtítulos y rótulos quemados, 60 fps. Devuelve el video nuevo y su reloj.
+    let clicsFinales = clicsEnVideo(segmentos, clics);
+    let cuesQuemados = null;
+    if (video?.acabado) {
+        for (const l of locuciones) l.segmento.vozSeg = duracion(l.wav);
+        const { encuadres, indicePorSegmento } = encuadresDe(composiciones, segmentos);
+        const focosLienzo = focosEnLienzo({ focos, segmentos, composiciones, indicePorSegmento });
+        const r = await acabar({
+            mudo: baseVideo, lienzo,
+            total: duracion(baseVideo), opciones: video.acabado, segmentos, clics: clicsFinales, focos: focosLienzo,
+            encuadres, marca, antetitulo: titulo, temporal,
+        });
+        for (const l of locuciones) l.inicioSeg = r.mapear(l.inicioSeg);
+        segmentos = r.segmentos;
+        clicsFinales = r.clics;
+        cuesQuemados = r.cues;
+        baseVideo = r.video;
+    }
+
+    // 4. Subtítulos: archivo al lado (para la web) y pista blanda dentro del MP4. Con acabado,
+    //    los mismos cues que se quemaron (tramo de la voz), para que el .vtt diga lo mismo.
+    const vtt = join(salida, `${nombre.replace(/\.mp4$/, '')}.vtt`);
+    const srt = join(temporal, 'subtitulos.srt');
+    const fuenteSubtitulos = cuesQuemados ?? segmentos;
+    writeFileSync(vtt, generarVtt(fuenteSubtitulos));
+    writeFileSync(srt, generarSrt(fuenteSubtitulos));
+    const haySubtitulos = fuenteSubtitulos.some((s) => s.narrar?.trim());
+
+    // 5. Mezcla: cada locución retrasada hasta su marca, sobre una base de silencio del largo
+    //    exacto del video (fija la duración y cubre los huecos).
+    const total = duracion(baseVideo);
+    if (audio?.musica?.generada) audio = { ...audio, musica: musicaParaMezcla(audio.musica, { segundos: total, dir: temporal }) };
 
     // Con música o clic pedidos, la mezcla nueva (estéreo 48 kHz); si no, la cadena mono de
     // siempre, tal cual: un proyecto que no pidió audio nuevo no cambia ni un byte de su
@@ -276,7 +371,7 @@ export async function montar({
     if (audioActivo) {
         const mezcla = cadenaDeMezcla({
             total, locuciones, musica: audioActivo.musica ?? null,
-            clics: clicsEnVideo(segmentos, clics), clic: audioActivo.clic ?? { activo: false },
+            clics: clicsFinales, clic: audioActivo.clic ?? { activo: false },
         });
         entradas = ['-y', '-i', baseVideo, ...mezcla.entradas];
         cadena = mezcla.filtro;

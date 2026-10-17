@@ -20,6 +20,8 @@ import { componerEnLienzo, lienzoDe } from './src/composicion.mjs';
 import { cadenaDeMezcla } from './src/mezcla.mjs';
 import { generarVtt } from './src/subtitulos.mjs';
 import { variante } from './src/formatos.mjs';
+import { acabar } from './src/acabado/index.mjs';
+import { musicaParaMezcla } from './src/acabado/musica.mjs';
 import { sembrar } from './src/sembrar.mjs';
 import { capitulosDe, vivo } from './src/vivo/index.mjs';
 
@@ -75,13 +77,13 @@ async function pasosParaManual(config, guion, sesionesDe, voz) {
 
 /** Lo que `grabar()` devuelve y `montar()` necesita, más lo que la config aporta. */
 async function grabarYMontar(config, voz, sesionesDe, guion, nombre) {
-    const { pistas, pasos, origenes, clics, dimensiones } = await grabar(guion,
+    const { pistas, pasos, origenes, clics, focos, dimensiones } = await grabar(guion,
         { config, sesiones: await sesionesDe(guion), salida: config.salida, voz });
     const { mp4 } = await montar({
         pistas, pasos, voz, video: config.video,
         presentacion: config.video.presentacion, marca: config.marca, baseURL: config.baseURL,
         superficies: config.superficies, actores: config.actores,
-        origenes, clics, dimensiones, audio: config.audio,
+        origenes, clics, focos, dimensiones, audio: config.audio, titulo: guion.titulo ?? '',
     }, { salida: config.salida, nombre });
     return { mp4, pasos };
 }
@@ -136,20 +138,34 @@ async function capituloMapa(config, voz, cap, { lienzo, temporal }) {
         ...opcionesDelMapa(config), activa: null, anterior: null,
         lienzo, ms: Math.round(segundos * 1000), salida: temporal, nombre: `mapa-${cap.id}.mp4`,
     });
-    const total = duracion(mudo);
+    let mudoFinal = mudo;
+    let cuesQuemados = null;
+    if (config.video.acabado && wav) {
+        // Con acabado, el mapa lleva los mismos subtítulos quemados y la misma cadencia que los
+        // capítulos; sin cámara ni recorte (es una tarjeta) ni rótulo (ya es un título).
+        const r = await acabar({
+            mudo, lienzo, total: duracion(mudo), temporal,
+            opciones: { ...config.video.acabado, camara: null, silencios: null, rotulos: null },
+            segmentos: [{ inicioSeg: 0, finSeg: duracion(mudo), narrar: cap.narrar, escena: cap.id, vozSeg: duracion(wav) }],
+            marca: config.marca,
+        });
+        mudoFinal = r.video;
+        cuesQuemados = r.cues;
+    }
+    const total = duracion(mudoFinal);
     const mezcla = cadenaDeMezcla({
         total, locuciones: wav ? [{ wav, inicioSeg: 0 }] : [],
-        musica: config.audio?.musica ?? null, clics: [], clic: { activo: false },
+        musica: musicaParaMezcla(config.audio?.musica, { segundos: total, dir: temporal }), clics: [], clic: { activo: false },
     });
     mkdirSync(config.salida, { recursive: true });
     const mp4 = join(config.salida, `${cap.id}.mp4`);
-    ff(['-y', '-i', mudo, ...mezcla.entradas, '-filter_complex', mezcla.filtro,
+    ff(['-y', '-i', mudoFinal, ...mezcla.entradas, '-filter_complex', mezcla.filtro,
         '-map', '0:v', '-map', mezcla.salida, '-c:v', 'copy', '-c:a', 'aac', mp4]);
     const vtt = mp4.replace(/\.mp4$/, '.vtt');
     // Sin narración no hay .vtt: un archivo viejo de otra corrida pondría subtítulos que ya
     // no se dicen.
     rmSync(vtt, { force: true });
-    if (cap.narrar) writeFileSync(vtt, generarVtt([{ inicioSeg: 0, finSeg: total, narrar: cap.narrar }]));
+    if (cap.narrar) writeFileSync(vtt, generarVtt(cuesQuemados ?? [{ inicioSeg: 0, finSeg: total, narrar: cap.narrar }]));
     return mp4;
 }
 
@@ -248,7 +264,7 @@ async function grabarCurso(config, voz, sesionesDe, idCurso) {
         }
         const { mp4, md } = await pegarCapitulos(partes,
             { salida: config.salida, nombre: `${idCurso}.mp4`, titulo: maestro.titulo, video: config.video,
-                presentacion, marca: config.marca });
+                presentacion, marca: config.marca, fps: config.video.acabado?.fps ?? 25 });
         return { mp4, md, maestro, pasos };
     } finally {
         rmSync(temporal, { recursive: true, force: true });
