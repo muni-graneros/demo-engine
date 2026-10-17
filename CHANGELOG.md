@@ -7,7 +7,9 @@ videotutorial de seguridad-graneros donde apareció el defecto. Las versiones an
 
 ## [Sin publicar]
 
-Parche siguiente: 1.18.2. (Lo de «Cambia» más abajo ya salió en la 1.18.0.)
+## 1.18.2 — 2026-10-17
+
+El bloque «Cambia (ya publicado en la 1.18.0)» de más abajo se conserva como referencia: salió en la 1.18.0.
 
 ### Corregido
 
@@ -19,8 +21,20 @@ Parche siguiente: 1.18.2. (Lo de «Cambia» más abajo ya salió en la 1.18.0.)
   toca el sistema grabado lleva además `LANGUAGE=<idioma>` en el entorno del navegador (el resto del
   entorno se conserva). La prueba real fuerza LANG=C.UTF-8 para decir lo mismo en cualquier
   máquina: antes pasaba en local y fallaba en CI.
+- **Pocket con una voz mal escrita fallaba sin decir por qué.** Ahora una voz sin `idioma:voz`
+  deja el motor no disponible con un error que muestra el formato esperado; Chatterbox avisa si el
+  `.wav` de referencia no existe.
 
 ### Cambia
+
+- **La misma tipografía en todo el cromo del video.** Portada, cierre, ficha del elenco,
+  anotaciones, pantalla de carga y rótulos del acabado usan un solo stack
+  (`'Noto Sans','Inter','DejaVu Sans',system-ui,sans-serif`): el video ya no salta de fuente entre
+  la portada y el primer rótulo. Sin Noto ni Inter instaladas se ve igual que antes.
+- **El rótulo de escena sale con la misma suavidad con que entra.** La salida usaba un desvanecido
+  lineal; ahora usa la misma curva que la entrada.
+
+### Cambia (ya publicado en la 1.18.0)
 
 - **Los controles nativos del navegador salen en español en los videos.** «Choose Files» y
   `dd/mm/yyyy` (`<input type=file>` / `<input type=date>`) los dibuja Chromium en el idioma de su
