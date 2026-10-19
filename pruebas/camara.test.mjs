@@ -209,6 +209,22 @@ test('alClicar avisa de cada pulsar con la hora justo antes del clic, sin que el
     });
 });
 
+test('pulsar con sinCamara avisa del clic pero sin el punto que mueve la cámara del acabado', async () => {
+    await conPagina(async (page) => {
+        const avisos = [];
+        alClicar(page, (t, punto) => avisos.push({ t, punto }));
+        await pulsar(page, '#entrar', { sinCamara: true });
+        assert.equal(avisos.length, 1, 'el clic sigue sonando: un aviso');
+        assert.equal(avisos[0].punto, undefined, 'sin punto no hay foco para la cámara');
+    });
+    await conPagina(async (page) => {
+        const avisos = [];
+        alClicar(page, (t, punto) => avisos.push({ t, punto }));
+        await pulsar(page, '#entrar');
+        assert.ok(avisos[0].punto && Number.isFinite(avisos[0].punto.x), 'por defecto el punto viaja');
+    });
+});
+
 test('pulsar sin nadie registrado con alClicar funciona igual que siempre', async () => {
     await conPagina(async (page) => {
         await pulsar(page, '#entrar');

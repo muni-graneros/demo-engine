@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import rutaFfmpeg from 'ffmpeg-static';
 
 export const RUTA_FFMPEG = rutaFfmpeg;
@@ -16,6 +16,29 @@ export function ff(args) {
             .filter((l) => l.trim() && !/Non-monotonous DTS|This may result in|deprecated/.test(l));
         throw new Error('ffmpeg falló: ' + relevantes.slice(-4).join(' | '));
     }
+}
+
+/**
+ * Igual que `ff`, pero sin bloquear: el acabado codifica varias piezas a la vez.
+ * @param {string[]} args
+ * @returns {Promise<void>}
+ */
+export function ffAsync(args) {
+    return new Promise((resolver, rechazar) => {
+        const proceso = spawn(RUTA_FFMPEG, args, { stdio: ['ignore', 'ignore', 'pipe'] });
+        let stderr = '';
+        proceso.stderr.on('data', (d) => {
+            stderr += d;
+            if (stderr.length > 256 * 1024) stderr = stderr.slice(-128 * 1024);
+        });
+        proceso.on('error', rechazar);
+        proceso.on('close', (codigo) => {
+            if (codigo === 0) return resolver();
+            const relevantes = stderr.split('\n')
+                .filter((l) => l.trim() && !/Non-monotonous DTS|This may result in|deprecated/.test(l));
+            rechazar(new Error('ffmpeg falló: ' + relevantes.slice(-4).join(' | ')));
+        });
+    });
 }
 
 /**

@@ -10,9 +10,9 @@ import { renderizarTransicion } from './escenario3d.mjs';
  * normalización de cada transición: ambas tienen que terminar con la misma resolución, mismo
  * fondo de letterbox y mismo fps, o el concat final los pega con un salto visible.
  */
-function filtroNormalizar(lienzo) {
+function filtroNormalizar(lienzo, fps = 25) {
     return `scale=${lienzo.ancho}:${lienzo.alto}:force_original_aspect_ratio=decrease,` +
-           `pad=${lienzo.ancho}:${lienzo.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=25`;
+           `pad=${lienzo.ancho}:${lienzo.alto}:(ow-iw)/2:(oh-ih)/2:color=#0f172a,setsar=1,fps=${fps}`;
 }
 
 /**
@@ -28,13 +28,13 @@ function filtroNormalizar(lienzo) {
  * congelado, y corría el marcador y las cues de todos los capítulos siguientes. Era la causa
  * de que «los marcadores de capítulo incluyen su transición» fallara (a veces sí, a veces no).
  */
-function normalizarMudo(entrada, destino, lienzo) {
+function normalizarMudo(entrada, destino, lienzo, fps = 25, crf = null) {
     const dura = duracion(entrada);
     ff(['-y', '-i', entrada,
         '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
         '-map', '0:v', '-map', '1:a', '-t', String(dura),
-        '-vf', filtroNormalizar(lienzo),
-        '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+        '-vf', filtroNormalizar(lienzo, fps),
+        '-c:v', 'libx264', '-preset', 'veryfast', ...(crf != null ? ['-crf', String(crf)] : []), '-pix_fmt', 'yuv420p',
         '-c:a', 'aac', '-ar', '48000', '-ac', '2', destino]);
     return destino;
 }
@@ -48,7 +48,7 @@ function normalizarMudo(entrada, destino, lienzo) {
  *
  * @param {Array<{id:string,titulo:string,archivo:string,tarjeta?:string}>} partes
  */
-export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null, marca = null }) {
+export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', titulo, video, presentacion = null, marca = null, fps = 25, crf = null }) {
     mkdirSync(salida, { recursive: true });
     // El lienzo del curso es el de la PRESENTACIÓN cuando está activa. Con presentación,
     // `montar()` ya devolvió cada capítulo compuesto en `presentacion.salida` (1920x1080 por
@@ -69,8 +69,8 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     const normalizados = partes.map((parte, i) => {
         const destino = join(temporal, `cap-${String(i).padStart(2, '0')}.mp4`);
         ff(['-y', '-i', parte.archivo,
-            '-vf', filtroNormalizar(lienzo),
-            '-c:v', 'libx264', '-preset', 'veryfast', '-pix_fmt', 'yuv420p',
+            '-vf', filtroNormalizar(lienzo, fps),
+            '-c:v', 'libx264', '-preset', 'veryfast', ...(crf != null ? ['-crf', String(crf)] : []), '-pix_fmt', 'yuv420p',
             '-c:a', 'aac', '-ar', '48000', '-ac', '2', destino]);
         return destino;
     });
@@ -99,14 +99,14 @@ export async function pegarCapitulos(partes, { salida, nombre = 'curso.mp4', tit
     const antesDelClip = [];
     for (const [i, archivo] of normalizados.entries()) {
         const tarjeta = partes[i].tarjeta
-            ? normalizarMudo(partes[i].tarjeta, join(temporal, `tarjeta-${String(i).padStart(2, '0')}.mp4`), lienzo)
+            ? normalizarMudo(partes[i].tarjeta, join(temporal, `tarjeta-${String(i).padStart(2, '0')}.mp4`), lienzo, fps, crf)
             : null;
         const piezas = [];
         if (i > 0 && presentacion?.transicion3d?.activa) {
             const transicion = await renderizarTransicion({
-                mp4: tarjeta ?? archivo, desdeSeg: 0, salida: temporal, presentacion, marca, fps: 25,
+                mp4: tarjeta ?? archivo, desdeSeg: 0, salida: temporal, presentacion, marca, fps,
             });
-            piezas.push(normalizarMudo(transicion, join(temporal, `trans-${String(i).padStart(2, '0')}.mp4`), lienzo));
+            piezas.push(normalizarMudo(transicion, join(temporal, `trans-${String(i).padStart(2, '0')}.mp4`), lienzo, fps, crf));
         }
         if (tarjeta) piezas.push(tarjeta);
         const previo = piezas.reduce((s, p) => s + duracion(p), 0);

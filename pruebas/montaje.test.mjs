@@ -427,3 +427,30 @@ test('el marco del panel lo decide el tipo de la superficie; el dispositivo solo
     assert.equal(tipoDePanel(null, {}), 'ventana');
     assert.equal(tipoDePanel(null, undefined), 'ventana');
 });
+
+test('montar con video.acabado: 60 fps, silencio recortado, .vtt con el tramo de la voz y clic acercado', async () => {
+    const { fusionarAcabado } = await import('../src/configurar.mjs');
+    const dir = mkdtempSync(join(tmpdir(), 'demo-mon-acabado-'));
+    const tono = join(dir, 'tono.wav');
+    ff(['-y', '-f', 'lavfi', '-i', 'sine=f=440:d=1', '-ar', '22050', tono]);
+    const voz = { motor: 'falso', disponible: () => true, sintetizar: () => tono };
+    const pistas = { ana: pista(dir, 'ana.mp4', 14, 'blue') };
+    const pasos = [
+        { escena: 'uno', titulo: 'Primera escena', actor: 'ana', tLocal: 0, tGlobal: 0, duracionMs: 4000, narrar: 'Hola.', wav: tono },
+        // Paso largo y mudo tras su voz: 1 s de voz y 9 de espera.
+        { escena: 'dos', titulo: 'Segunda escena', actor: 'ana', tLocal: 4000, tGlobal: 4000, duracionMs: 10000, narrar: 'Espera.', wav: tono },
+    ];
+    const { mp4, segmentos } = await montar({
+        pistas, pasos, voz, titulo: 'Guion de prueba',
+        video: { ancho: 640, alto: 400, acabado: fusionarAcabado({ subtitulos: { tamano: 24 } }) },
+        focos: [{ t: 2000, actor: 'ana', x: 320, y: 200, escala: 1 }], clics: [2000],
+    }, { salida: dir, nombre: 'final.mp4' });
+    const info = spawnSync(RUTA_FFMPEG, ['-i', mp4], { encoding: 'utf8' }).stderr;
+    assert.match(info, /60 fps/);
+    // Hueco 5–14 (la voz del paso dos dura 1 s): se recorta 5,5–13,5.
+    const total = duracion(mp4);
+    assert.ok(Math.abs(total - 6) < 0.1, `debía quedar en ~6 s, midió ${total}`);
+    assert.equal(segmentos.length, 2);
+    const vtt = readFileSync(join(dir, 'final.vtt'), 'utf8');
+    assert.match(vtt, /00:00:04\.000 --> 00:00:05\.250\nEspera\./, vtt);
+});

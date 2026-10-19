@@ -52,6 +52,11 @@ export default {
   reporte agregado, una cola) y salta el chequeo en vivo. Sin esa declaración, un paso que
   deje dos identificadores a la vista aborta la grabación — ver
   [PRIVACIDAD.md](PRIVACIDAD.md).
+- `sinRecorte: true` (1.18, con `video.acabado.silencios`): el acabado no recorta los silencios de
+  ESE paso. Para una espera que es justamente lo que se muestra (un recorrido que se reproduce,
+  un contador que baja). Sin la marca, lo que pase de 2 s sin voz pierde su centro.
+- Con `video.acabado.rotulos`, el `titulo` de cada escena sale como rótulo animado al entrar en
+  ella, con el `titulo` del guion encima: conviene que sean cortos (≤ 40 caracteres).
 
 ## Guion maestro: `curso.mjs`
 
@@ -130,6 +135,14 @@ grabación no tiene el aspecto del lienzo) se rellena con el propio color de la 
 - En toda la config: `video.rotulos: 'marco'` vuelve al aspecto de la 1.14.
 - Si el paso navega a otra página después de la portada, deja de contar como plano (la marca
   vive en el DOM y se va con la navegación).
+
+## Pasos de preparación y clics sin cámara (1.18.1)
+
+- `oculto: true` en un paso: se ejecuta pero no entra al video ni a la línea de tiempo. Úsalo
+  para dejar la primera pantalla de un actor cargada antes de que empiece lo que se ve (sin
+  `narrar`; si la pantalla tiene varias personas, declara también `variasPersonas: true`).
+- `pulsar(page, selector, { sinCamara: true })`: el clic suena y deja halo, pero no mueve la
+  cámara automática del acabado. Para un botón al borde que abre un modal o un panel.
 
 ## Capítulos de un curso multi-superficie
 

@@ -1,6 +1,6 @@
 import { exigirUnaSolaPersona } from './privacidad.mjs';
 import { configurarCursor, instalarCursor } from './camara.mjs';
-import { actorConSesion, actorTactil, opcionesDeContexto } from './contexto-actor.mjs';
+import { actorConSesion, actorTactil, idiomaDeNavegador, opcionesDeContexto } from './contexto-actor.mjs';
 import { configurarPresentacion } from './explainer.mjs';
 import { superficieDe } from './configurar.mjs';
 
@@ -64,7 +64,7 @@ export async function ejecutarGuion(guion, {
         }
         const { opciones, pista } = opcionesDeContexto(config, nombre, sesiones, { ancho, alto });
         const finales = ganchos.opcionesDeActor ? await ganchos.opcionesDeActor(nombre, opciones) : opciones;
-        const ctx = await navegador.newContext({ ...finales, locale: 'es-CL' });
+        const ctx = await navegador.newContext({ locale: idiomaDeNavegador(config), ...finales });
         const page = await ctx.newPage();
         // Flecha o indicador de toque según el actor (superficie/dispositivo táctil).
         configurarCursor(page, { tactil: actorTactil(config, nombre) });

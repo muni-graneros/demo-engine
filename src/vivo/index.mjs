@@ -146,11 +146,10 @@ export async function vivo({
     try {
         navegador = await chromium.launch({
             headless,
-            // `--lang`: los <input type="date"> los dibuja Chromium con su idioma de interfaz,
-            // que no sale del `locale` del contexto (ver tools/demo/grabar.sh del sistema).
-            // `navegador.args` (p. ej. `--host-resolver-rules` a loopback) llega igual que al
-            // grabar: lo que se ve en vivo tiene que ser lo mismo que en el video.
-            args: ['--lang=es-CL', ...(opcionesDeLanzamiento(config).args ?? [])],
+            // Mismo lanzamiento que al grabar (`--lang`, canal y `navegador.args`, p. ej.
+            // `--host-resolver-rules` a loopback): lo que se ve en vivo tiene que ser lo
+            // mismo que en el video.
+            ...opcionesDeLanzamiento(config),
         });
         await alListo?.({ url: consola.url, control, actores });
 

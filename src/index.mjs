@@ -20,6 +20,8 @@ export { ejecutarGuion, Interrupcion, pasosEnOrden } from './ejecutor.mjs';
 export { vivo, capitulosDe, buscarClip, exigirEntornoEnVivo, disposicionVentanas } from './vivo/index.mjs';
 export { comandoDeSembrado, sembrar } from './sembrar.mjs';
 export { partirCue, partirCues, configurarSubtitulos } from './subtitulos.mjs';
+export { acabar, DEFECTOS_ACABADO } from './acabado/index.mjs';
+export { generarMusica, musicaParaMezcla } from './acabado/musica.mjs';
 
 /**
  * Lo que sabe hacer este motor, para que un consumidor decida su camino sin comparar
@@ -38,4 +40,6 @@ export const CAPACIDADES = Object.freeze([
     'sin-destellos',             // ningún tramo arranca con un cuadro negro
     'sembrar-funcion',           // sembrar: string o función (async) ({ escena, guion }) => comando | nada
     'vivo',                      // `demo vivo`: el guion en ventanas reales, paso a paso, sin grabar
+    'acabado',                   // video.acabado: cámara automática, subtítulos y rótulos quemados, 60 fps, recorte de silencios
+    'musica-generada',           // audio.musica: { generada: true }, cama armónica sintetizada por el motor (sin licencia de terceros)
 ]);

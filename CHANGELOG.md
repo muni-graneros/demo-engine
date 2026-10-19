@@ -5,6 +5,91 @@ qué cambia para quien graba y por qué; los ids (C1, G8-01…) remiten a la rev
 videotutorial de seguridad-graneros donde apareció el defecto. Las versiones anteriores a la
 1.15.0 están descritas en los commits `Versión x.y.z` de `git log`.
 
+## [Sin publicar]
+
+## 1.18.2 — 2026-10-17
+
+El bloque «Cambia (ya publicado en la 1.18.0)» de más abajo se conserva como referencia: salió en la 1.18.0.
+
+### Corregido
+
+- **Controles nativos en inglés en equipos que no tienen el sistema en español.** En Linux Chromium
+  toma el idioma de su interfaz del entorno (LANGUAGE, LC_ALL, LC_MESSAGES, LANG) e ignora
+  `--lang`: el arreglo de la 1.18.0 solo funcionaba donde el sistema ya estaba en español. Con
+  LANG=C.UTF-8 (el runner de CI, un contenedor) se grababa «Choose File» / `yyyy`, y
+  `navegador.idioma: 'en-US'` en un equipo en español no cambiaba nada. Ahora cada lanzamiento que
+  toca el sistema grabado lleva además `LANGUAGE=<idioma>` en el entorno del navegador (el resto del
+  entorno se conserva). La prueba real fuerza LANG=C.UTF-8 para decir lo mismo en cualquier
+  máquina: antes pasaba en local y fallaba en CI.
+- **Pocket con una voz mal escrita fallaba sin decir por qué.** Ahora una voz sin `idioma:voz`
+  deja el motor no disponible con un error que muestra el formato esperado; Chatterbox avisa si el
+  `.wav` de referencia no existe.
+
+### Cambia
+
+- **La misma tipografía en todo el cromo del video.** Portada, cierre, ficha del elenco,
+  anotaciones, pantalla de carga y rótulos del acabado usan un solo stack
+  (`'Noto Sans','Inter','DejaVu Sans',system-ui,sans-serif`): el video ya no salta de fuente entre
+  la portada y el primer rótulo. Sin Noto ni Inter instaladas se ve igual que antes.
+- **El rótulo de escena sale con la misma suavidad con que entra.** La salida usaba un desvanecido
+  lineal; ahora usa la misma curva que la entrada.
+
+### Cambia (ya publicado en la 1.18.0)
+
+- **Los controles nativos del navegador salen en español en los videos.** «Choose Files» y
+  `dd/mm/yyyy` (`<input type=file>` / `<input type=date>`) los dibuja Chromium en el idioma de su
+  interfaz, y con el headless-shell que Playwright usa por defecto `--lang` no alcanza. Ahora todos
+  los lanzamientos que tocan el sistema grabado (grabar, preparar, pack de contexto, `vivo`) usan el
+  canal `chromium` más `--lang=es-CL`, y cada contexto lleva `locale: 'es-CL'` (también el pack de
+  contexto y los actores con dispositivo). Verificado con el árbol de accesibilidad: «Seleccionar
+  archivo» / `aaaa` en lugar de «Choose File» / `yyyy`.
+- Configurable en `demo.config.mjs`: `navegador.idioma` (defecto `'es-CL'`) y `navegador.canal`
+  (defecto `'chromium'`; `null` vuelve al lanzamiento de antes). Un `--lang=` dentro de
+  `navegador.args` manda sobre `idioma`. Sin tocar la config de los consumidores cambia solo eso.
+- Aviso: el Chromium completo no arranca dentro del sandbox de Claude Code (falla `socket()` del
+  singleton de proceso); grabar fuera del sandbox o poner `canal: null`.
+
+## 1.18.1 — 2026-10-03
+
+Parche: dos retoques opt-in surgidos de revisar fotograma a fotograma el tutorial de
+seguridad-graneros. Nada cambia para quien no los use.
+
+### Nuevo
+
+- **Paso `oculto: true`.** El paso se ejecuta pero no entra al video ni a la línea de tiempo.
+  Sirve para cargar la primera pantalla de un actor fuera de cuadro: sin él, cada capítulo abría
+  con la pantalla de arranque y la carga a medias (la sala tapada ~1 s antes de verse).
+- **`pulsar(page, selector, { sinCamara: true })`.** El clic suena y deja su halo, pero no genera
+  un foco para la cámara automática del acabado. Para botones al borde que abren un modal o un
+  panel: la cámara acercada al botón recortaba justo lo que la voz estaba explicando.
+
+Compatible con los guiones y configs de la 1.16/1.17: todo lo nuevo es opt-in.
+
+### Nuevo
+
+- **`video.acabado`** (capacidad `acabado`; ver CONFIGURACION.md «Acabado moderno»): cámara que
+  acerca y sigue cada `pulsar()` sobre el lienzo (zoom y paseo suaves con `perspective`, sin cruzar
+  cortes de plano), subtítulos quemados en píldora sincronizados con la voz, rótulo animado con el
+  título de cada escena, salida a 60 fps y recorte de los silencios de más de 2 s (sin tocar los
+  clics). El `.vtt` sale con los mismos cues que se queman. Las piezas se codifican en paralelo.
+- **`audio.musica: { generada: true }`** (capacidad `musica-generada`): cama armónica sintetizada
+  por el propio motor, sin archivo ni licencia de terceros; se atenúa bajo la voz como siempre.
+- `grabar()` devuelve `focos` (punto de cada clic) y `montar()` los acepta junto con `titulo`
+  (antetítulo de los rótulos). `pegarCapitulos()` acepta `fps` y `crf`. Paso con `sinRecorte: true`.
+- Exporta `acabar`, `DEFECTOS_ACABADO`, `generarMusica` y `musicaParaMezcla`.
+
+### Corregido
+
+- **Controles nativos en inglés** (`<input type="date">` «dd/mm/yyyy», «Choose Files»): Chromium se
+  lanza con el canal `chromium`, `--lang` y el `locale` del contexto en español. Estaba en la rama
+  `fix/idioma-campos-nativos` y **no** entró en el tag `v1.17.0`.
+
+### Sobre `v1.17.0`
+
+El tag `v1.17.0` quedó sobre el mismo commit que `v1.16.1` (`8aaf8fb`): no trae el arreglo de idioma
+ni nada nuevo. **No fijes `v1.17.0`**; usá `v1.18.0`. No se movió el tag para no romper a quien ya
+lo haya bajado.
+
 ## 1.16.1 — 2026-10-01
 
 Mismo contenido que la 1.16.0 descrita abajo. El tag `v1.16.0` quedó publicado por error sobre el

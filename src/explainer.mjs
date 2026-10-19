@@ -10,6 +10,7 @@
  */
 
 import { imagenComoDataUri } from './assets.mjs';
+import { STACK_TIPOGRAFIA } from './tipografia.mjs';
 
 /**
  * Carta de presentación del elenco: cada personaje con su foto, nombre y rol, sobre
@@ -23,7 +24,7 @@ export async function elenco(page, { cast = [], titulo = 'Quiénes lo usan', mar
         foto: imagenComoDataUri(p.foto),
     }));
     await page.goto('about:blank');
-    await page.evaluate(({ cast, titulo, marca }) => {
+    await page.evaluate(({ cast, titulo, marca, fuente }) => {
         const escape = (t) => {
             const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
             return String(t).replace(/[&<>"']/g, (c) => m[c]);
@@ -45,12 +46,12 @@ export async function elenco(page, { cast = [], titulo = 'Quiénes lo usan', mar
         document.body.style.margin = '0';
         document.body.innerHTML = `
         <div style="height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;
-                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:system-ui;text-align:center;gap:40px">
+                    background:${marca.color ?? '#1e3a8a'};color:#fff;font-family:${fuente};text-align:center;gap:40px">
           <h1 style="font-size:46px;margin:0;font-weight:700">${escape(titulo)}</h1>
           <div style="display:flex;flex-wrap:wrap;gap:44px;justify-content:center;max-width:1200px">${tarjetas}</div>
           <div style="font-size:16px;opacity:.6">${escape(marca.nombre ?? '')}</div>
         </div>`;
-    }, { cast: conFoto, titulo, marca });
+    }, { cast: conFoto, titulo, marca, fuente: STACK_TIPOGRAFIA });
     await page.waitForTimeout(esperaMs);
 }
 
@@ -193,7 +194,7 @@ export async function presentar(page, { nombre, rol = '', foto, esperaMs = 0, po
     };
     const dataUri = imagenComoDataUri(foto);
     await instalarMedidor(page);
-    await page.evaluate(({ nombre, rol, dataUri, opciones }) => {
+    await page.evaluate(({ nombre, rol, dataUri, opciones, fuente }) => {
         const escape = (t) => {
             const m = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
             return String(t).replace(/[&<>"']/g, (c) => m[c]);
@@ -205,7 +206,7 @@ export async function presentar(page, { nombre, rol = '', foto, esperaMs = 0, po
         el.id = 'demo-lower-third';
         el.style.cssText = `position:fixed;left:0;top:0;z-index:2147483000;display:flex;align-items:center;
             gap:14px;padding:12px 20px 12px 12px;border-radius:16px;background:rgba(15,23,42,.92);color:#fff;
-            font-family:system-ui;box-shadow:0 12px 40px -12px rgba(0,0,0,.6);opacity:0;visibility:hidden;
+            font-family:${fuente};box-shadow:0 12px 40px -12px rgba(0,0,0,.6);opacity:0;visibility:hidden;
             pointer-events:none`;
         el.innerHTML = `
           <div style="width:56px;height:56px;border-radius:50%;overflow:hidden;background:#334155;flex:0 0 auto;
@@ -287,7 +288,7 @@ export async function presentar(page, { nombre, rol = '', foto, esperaMs = 0, po
             delete window.__demoFichaVigilante;
             delete window.__demoFichaLimpiar;
         };
-    }, { nombre: String(nombre ?? ''), rol, dataUri, opciones });
+    }, { nombre: String(nombre ?? ''), rol, dataUri, opciones, fuente: STACK_TIPOGRAFIA });
     if (esperaMs > 0) await page.waitForTimeout(esperaMs);
 }
 
@@ -317,7 +318,7 @@ export async function anotar(page, selector, texto, { esperaMs = 2200, permanece
     if (!hay) return;
     await instalarMedidor(page);
 
-    await page.evaluate(({ sel, texto, lado }) => {
+    await page.evaluate(({ sel, texto, lado, fuente }) => {
         const objetivo = document.querySelector(sel);
         const r = objetivo.getBoundingClientRect();
         const caja = { x: r.left, y: r.top, w: r.width, h: r.height };
@@ -343,7 +344,7 @@ export async function anotar(page, selector, texto, { esperaMs = 2200, permanece
         label.dataset.demoGlobo = '';
         label.style.cssText = `position:absolute;left:0;top:0;visibility:hidden;
             box-sizing:border-box;max-width:${Math.min(420, vw - borde * 2)}px;width:max-content;background:#f59e0b;color:#1f2937;
-            font-family:system-ui;font-size:16px;font-weight:600;line-height:1.3;padding:8px 14px;border-radius:10px;
+            font-family:${fuente};font-size:16px;font-weight:600;line-height:1.3;padding:8px 14px;border-radius:10px;
             box-shadow:0 8px 24px -10px rgba(0,0,0,.5)`;
         label.textContent = texto;  // textContent = a prueba de XSS, no necesita escape
         cont.appendChild(label);
@@ -406,7 +407,7 @@ export async function anotar(page, selector, texto, { esperaMs = 2200, permanece
         textoEl.textContent = texto;
         label.lastChild.remove();  // el nodo de texto original
         label.appendChild(textoEl);
-    }, { sel: selector, texto: String(texto ?? ''), lado });
+    }, { sel: selector, texto: String(texto ?? ''), lado, fuente: STACK_TIPOGRAFIA });
 
     if (!permanecer) {
         await page.waitForTimeout(esperaMs);
