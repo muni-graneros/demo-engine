@@ -28,9 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          # El historial completo trae los tags: sin ellos `git describe` falla
-          # con «No names found» y la prueba que compara la versión de
-          # package.json contra el último tag publicado no puede correr.
+          # El historial completo trae los tags: la prueba de versión necesita
+          # leer package.json dentro del tag publicado, aunque esté en develop
+          # y main haya recibido su contenido mediante squash.
           fetch-depth: 0
 
       - name: Setup Node.js

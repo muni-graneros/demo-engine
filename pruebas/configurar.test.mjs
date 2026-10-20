@@ -1,8 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cargarConfig, ErrorConfig, superficieDe } from '../src/configurar.mjs';
 import { PATRON_POR_DEFECTO } from '../src/auditoria.mjs';
 
@@ -265,21 +267,80 @@ test('un tutorial que quiera ir pausado puede pedirlo, y se respeta', async () =
     assert.equal(cfg.voz.velocidad, 0.95);
 });
 
-test('la version declarada en package.json coincide con el ultimo tag publicado', async () => {
+function gitEn(raiz, args) {
+    return execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'commit.gpgsign=false', ...args], {
+        cwd: raiz, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    }).trim();
+}
+
+function comprobarVersionPublicada(raiz) {
+    const declarada = JSON.parse(readFileSync(join(raiz, 'package.json'), 'utf8')).version;
+    const esperada = `v${declarada}`;
+    const tagsEnHead = gitEn(raiz, ['tag', '--points-at', 'HEAD']).split('\n')
+        .filter((tag) => /^v\d+\.\d+\.\d+(?:-[\w.-]+)?(?:\+[\w.-]+)?$/.test(tag));
+
+    for (const tag of tagsEnHead) {
+        assert.equal(esperada, tag,
+            `package.json dice ${declarada} y HEAD está publicado como ${tag}`);
+    }
+
+    // Un squash copia el contenido de develop, pero no sus ancestros ni sus tags.
+    // Se valida el paquete del tag de ESTA versión, no el ancestro más cercano.
+    const publicada = JSON.parse(gitEn(raiz, ['show', `refs/tags/${esperada}:package.json`])).version;
+    assert.equal(publicada, declarada,
+        `${esperada} publica package.json ${publicada}, pero debe declarar ${declarada}`);
+}
+
+function repositorioDeVersiones(version = '1.17.0') {
+    const raiz = mkdtempSync(join(tmpdir(), 'demo-version-'));
+    gitEn(raiz, ['init', '--quiet', '--initial-branch=main']);
+    gitEn(raiz, ['config', 'user.name', 'Pruebas']);
+    gitEn(raiz, ['config', 'user.email', 'pruebas@example.invalid']);
+    guardarVersion(raiz, version);
+    gitEn(raiz, ['tag', `v${version}`]);
+    return raiz;
+}
+
+function guardarVersion(raiz, version) {
+    writeFileSync(join(raiz, 'package.json'), JSON.stringify({ version }));
+    gitEn(raiz, ['add', 'package.json']);
+    gitEn(raiz, ['commit', '--quiet', '-m', `Version ${version}`]);
+}
+
+test('la version declarada en package.json coincide con su tag publicado', () => {
     // Se publicaron cinco versiones seguidas sin tocar este campo: el tarball de
     // v1.6.0 traía adentro `"version": "1.1.2"`, y quien lo instalaba y verificaba
     // creía tener una versión vieja. Un tag no actualiza el package.json solo.
-    const { execFileSync } = await import('node:child_process');
-    const { readFileSync } = await import('node:fs');
-    const { fileURLToPath } = await import('node:url');
-    const { dirname, join } = await import('node:path');
-
     const raiz = join(dirname(fileURLToPath(import.meta.url)), '..');
-    const declarada = JSON.parse(readFileSync(join(raiz, 'package.json'), 'utf8')).version;
-    const ultimoTag = execFileSync('git', ['describe', '--tags', '--abbrev=0'], { cwd: raiz, encoding: 'utf8' }).trim();
+    comprobarVersionPublicada(raiz);
+});
 
-    assert.equal(`v${declarada}`, ultimoTag,
-        `package.json dice ${declarada} y el último tag es ${ultimoTag}: uno de los dos quedó atrás`);
+test('la version publicada sigue siendo válida después de integrar develop con squash', () => {
+    const raiz = repositorioDeVersiones();
+    gitEn(raiz, ['checkout', '--quiet', '-b', 'develop']);
+    guardarVersion(raiz, '1.18.2');
+    gitEn(raiz, ['tag', '-a', 'v1.18.2', '-m', 'Version 1.18.2']);
+    gitEn(raiz, ['checkout', '--quiet', 'main']);
+    gitEn(raiz, ['merge', '--squash', 'develop']);
+    gitEn(raiz, ['commit', '--quiet', '-m', 'Release con squash']);
+
+    assert.equal(gitEn(raiz, ['describe', '--tags', '--abbrev=0']), 'v1.17.0');
+    comprobarVersionPublicada(raiz);
+});
+
+test('la version rechaza un tag sobre HEAD cuyo package.json quedó atrasado', () => {
+    const raiz = repositorioDeVersiones('1.1.2');
+    gitEn(raiz, ['tag', 'v1.6.0']);
+
+    assert.throws(() => comprobarVersionPublicada(raiz), /package\.json dice 1\.1\.2/);
+});
+
+test('la version rechaza un tag publicado cuyo contenido no coincide con su nombre', () => {
+    const raiz = repositorioDeVersiones();
+    gitEn(raiz, ['tag', 'v1.18.2']);
+    guardarVersion(raiz, '1.18.2');
+
+    assert.throws(() => comprobarVersionPublicada(raiz), /v1\.18\.2.*1\.17\.0/);
 });
 
 test('presentacion queda en null si el proyecto no la declara', async () => {
