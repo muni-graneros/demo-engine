@@ -1,0 +1,27 @@
+# Las actualizaciones entran por `develop`, no por `main`: el flujo de este
+# ecosistema es develop → main y una PR de dependabot contra main se lo salta,
+# llegando a producción sin pasar por la rama de integración.
+version: 2
+updates:
+  - package-ecosystem: npm
+    target-branch: develop
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    # Menores y parches en un solo PR; las mayores quedan sueltas para revisarlas una por una.
+    groups:
+      menores:
+        patterns: ["*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    target-branch: develop
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    # Todas las actions (mayores incluidas) en un solo PR: cada PR suelta corria el CI completo.
+    groups:
+      acciones:
+        patterns: ["*"]
